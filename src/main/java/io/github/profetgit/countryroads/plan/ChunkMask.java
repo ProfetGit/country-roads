@@ -42,9 +42,21 @@ public final class ChunkMask {
         return in[idx(lx, lz)];
     }
 
-    /** Planned surface Y rounded to half blocks. */
+    /** Whether the column carries a half step (a slab): only the row just below a one-block rise. */
+    public final boolean[] half = new boolean[256];
+
+    /** Planned surface: whole blocks, plus a half step on the single row below each rise. */
     public double surface(int i) {
-        return Math.round(y[i] * 2) / 2.0;
+        return Math.round(y[i]) + (half[i] ? 0.5 : 0);
+    }
+
+    private static float yAt(EdgePlan p, float s) {
+        int n = p.length();
+        if (s <= 0) return p.y[0];
+        if (s >= n - 1) return p.y[n - 1];
+        int i = (int) s;
+        float t = s - i;
+        return p.y[i] + t * (p.y[i + 1] - p.y[i]);
     }
 
     /**
@@ -99,6 +111,8 @@ public final class ChunkMask {
                         if (v > m.in[c]) {
                             m.in[c] = v;
                             m.y[c] = p.y[i] + t * (p.y[i + 1] - p.y[i]);
+                            int here = Math.round(m.y[c]);
+                            m.half[c] = Math.max(Math.round(yAt(p, i + t + 1)), Math.round(yAt(p, i + t - 1))) > here;
                             int k = t < 0.5f ? i : i + 1;
                             m.kind[c] = p.kind[k];
                             m.runLen[c] = p.runLen[k];

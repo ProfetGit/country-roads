@@ -136,11 +136,20 @@ public final class RoadPainter {
 
     /** Dry-stone wall or split-rail fence on the shoulder, where a run says so and the shoulder is level with the road. */
     private void wallOrFence(int x, int z, int top, float d, ChunkMask m, int i) {
-        if (m.run[i] < 0 || d < 1.0f || d >= 2.1f || m.kind[i] != EdgePlan.GROUND) return;
+        if (m.run[i] < 0 || m.kind[i] != EdgePlan.GROUND) return;
         int g = groundAt(x, z, top);
-        if (Math.abs(g - top) > 1 || !PaintRules.terrain(get(x, g, z))) return;
+        if (!PaintRules.terrain(get(x, g, z))) return;
         int s = (int) Math.floor(m.s[i]);
         long h = hash(x, z);
+        if (m.run[i] == EdgePlan.STONE_WALL && g == top && (d >= 2.1f && d < 3.1f && ((h >>> 50) & 7) < 3 || d >= 0.6f && d < 1.0f && ((h >>> 50) & 15) < 2)) {
+            // the wall is not a single line: loose stones and a few low courses either side of it
+            clear(x, g + 1, g + 2, z);
+            set(x, g + 1, z, ((h >>> 54) & 3) == 0 ? Palette.wallBody(h) : Palette.wallCap(h >>> 3) == null ? Blocks.COBBLESTONE_SLAB.defaultBlockState()
+                : Palette.wallCap(h >>> 3).hasProperty(net.minecraft.world.level.block.StairBlock.FACING) ? Blocks.MOSSY_COBBLESTONE_SLAB.defaultBlockState() : Palette.wallCap(h >>> 3));
+            return;
+        }
+        if (d < 1.0f || d >= 2.1f) return;
+        if (m.run[i] == EdgePlan.FENCE ? g != top : Math.abs(g - top) > 1) return;
         if (m.run[i] == EdgePlan.STONE_WALL) {
             if (Math.floorMod(s, 17) == 0) return;
             clear(x, g + 1, g + 3, z);
@@ -209,12 +218,14 @@ public final class RoadPainter {
         switch (kind) {
             case EdgePlan.BOARDWALK -> {
                 set(x, top, z, wood.planks().defaultBlockState());
+                if (half) set(x, top + 1, z, wood.slab().defaultBlockState());
                 if (in < 0.9f && Math.floorMod(s, 4) == 0) post(x, z, top - 1, wood.log().defaultBlockState());
-                clear(x, top + 1, top + 4, z);
+                clear(x, top + (half ? 2 : 1), top + 4, z);
             }
             case EdgePlan.BRIDGE -> {
                 boolean stone = m.runLen[i] > 20 && top - ground > 2;
                 set(x, top, z, stone ? Palette.masonry(h) : wood.planks().defaultBlockState());
+                if (half) set(x, top + 1, z, (stone ? Blocks.STONE_BRICK_SLAB : wood.slab()).defaultBlockState());
                 if (stone) {
                     int u = Math.floorMod(s, 10);
                     if (u == 0) post(x, z, top - 1, Palette.masonry(h));
@@ -225,7 +236,7 @@ public final class RoadPainter {
                 } else if (in < 0.9f && Math.floorMod(s, 5) == 0) {
                     post(x, z, top - 1, wood.log().defaultBlockState());
                 }
-                clear(x, top + 1, top + 4, z);
+                clear(x, top + (half ? 2 : 1), top + 4, z);
             }
             case EdgePlan.TUNNEL -> {
                 set(x, top, z, Palette.surface(pal(x, top, z), in, h, Blocks.STONE.defaultBlockState(), false));
@@ -235,7 +246,7 @@ public final class RoadPainter {
                 if (frame) set(x, top + 4, z, wood.planks().defaultBlockState());
                 else if (Math.floorMod(s, 12) == 6 && in > 0.8f) set(x, top + 4, z, Blocks.LANTERN.defaultBlockState().setValue(LanternBlock.HANGING, true));
                 if (!PaintRules.solid(get(x, top + 5, z))) set(x, top + 5, z, Blocks.STONE.defaultBlockState());
-                if (m.runPos[i] <= 1) set(x, top + 5, z, Palette.masonry(h));
+                if (m.runPos[i] <= 1 && ground > top + 7) set(x, top + 5, z, Palette.masonry(h));
             }
             default -> {
                 BlockState natural = get(x, ground, z);
@@ -251,6 +262,7 @@ public final class RoadPainter {
                 }
                 clear(x, from, Math.max(top + 4, Math.min(ground, top + MAX_BANK + 1)), z);
                 if (ground > top + MAX_BANK + 1) clear(x, top + 5, ground, z);
+                if (ground > top + 1) clearLeaves(x, ground + 1, ground + 10, z);
             }
         }
     }
@@ -280,7 +292,7 @@ public final class RoadPainter {
             if (d >= 1.5f) return;
             boolean frame = Math.floorMod(s, 6) == 0;
             for (int y = top; y <= top + 4; y++) {
-                if (m.runPos[i] <= 1) set(x, y, z, Palette.masonry(h + y));
+                if (m.runPos[i] <= 1 && ground > top + 6) set(x, y, z, Palette.masonry(h + y));
                 else if (frame && y > top) set(x, y, z, wood.log().defaultBlockState());
                 else if (!PaintRules.solid(get(x, y, z))) set(x, y, z, Blocks.STONE.defaultBlockState());
             }
@@ -298,35 +310,44 @@ public final class RoadPainter {
             clear(x, top + 1, top + 3, z);
             set(x, top, z, natural);
         } else if (ground > top + 1) {
-            // cut: 1:1 bank up from the road edge, or a retaining wall where the bank would be too tall
-            if (ground - top <= MAX_BANK || d >= 1) {
-                int bank = top + Math.max(0, (int) Math.floor(d + 0.5f));
-                if (ground > bank && (ground - top <= MAX_BANK + (int) d)) {
-                    clear(x, bank + 1, ground + 2, z);
-                    set(x, bank, z, natural);
-                }
-            } else {
-                for (int y = top + 1; y <= Math.min(ground, top + 6); y++) set(x, y, z, Palette.masonry(h + y));
-                clear(x, Math.min(ground, top + 6) + 1, ground + 1, z);
-                if (ground > top + 6) set(x, top + 6, z, Palette.masonry(h));
+            // cut: a 1:1 bank up from the road edge (beyond the reach the hillside keeps its own face)
+            int bank = top + Math.max(0, (int) Math.floor(d + 0.5f));
+            if (ground > bank) {
+                clear(x, bank + 1, ground + 2, z);
+                clearLeaves(x, ground + 3, ground + 10, z);
+                set(x, bank, z, natural);
             }
         } else if (ground == top - 1 && d < 1.5f) {
             set(x, top, z, natural);
             set(x, top - 1, z, Blocks.DIRT.defaultBlockState());
             clear(x, top + 1, top + 2, z);
-        } else if (ground < top - 1) {
-            // fill: 1:1 embankment down from the road edge, or a wall where it would be too tall
-            if (top - ground <= MAX_FILL + 1) {
-                int bank = top - Math.max(0, (int) Math.floor(d - 0.5f));
-                for (int y = ground + 1; y < bank; y++) set(x, y, z, Blocks.DIRT.defaultBlockState());
-                if (bank > ground) {
-                    set(x, bank, z, natural);
-                    clear(x, bank + 1, bank + 2, z);
-                }
-            } else if (d < 1) {
-                for (int y = ground + 1; y <= top; y++) set(x, y, z, Palette.rubble(h + y));
+        } else if (ground < top - 1 && top - ground <= MAX_FILL + 1) {
+            // fill: 1:1 embankment down from the road edge
+            int bank = top - Math.max(0, (int) Math.floor(d - 0.5f));
+            for (int y = ground + 1; y < bank; y++) set(x, y, z, Blocks.DIRT.defaultBlockState());
+            if (bank > ground) {
+                set(x, bank, z, natural);
+                clear(x, bank + 1, bank + 2, z);
             }
         }
+        feather(x, z, top, d, h);
+    }
+
+    /** The road frays into the verge: flush columns just outside the edge sometimes take an edge block. */
+    private void feather(int x, int z, int top, float d, long h) {
+        if (d >= 1.6f) return;
+        BlockState here = get(x, top, z);
+        if (!PaintRules.terrain(here) || PaintRules.solid(get(x, top + 1, z))) return;
+        int r = (int) ((h >>> 33) & 1023);
+        if (r >= (int) (560 * (1 - d / 1.6f))) return;
+        Palette.Surface pal = pal(x, top, z);
+        BlockState edge = pal.pick(pal.edge(), pal.edgeW(), (int) ((h >>> 43) & 1023));
+        clear(x, top + 1, top + 2, z);
+        set(x, top, z, edge);
+    }
+
+    private void clearLeaves(int x, int y0, int y1, int z) {
+        for (int y = y0; y <= y1; y++) if (get(x, y, z).is(BlockTags.LEAVES)) set(x, y, z, AIR);
     }
 
     private Palette.Surface pal(int x, int y, int z) {

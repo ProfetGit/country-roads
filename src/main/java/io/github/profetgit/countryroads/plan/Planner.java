@@ -82,7 +82,7 @@ public final class Planner {
         float[] y = profile(ground, water, river, kind);
         long seed = e.seed();
         double p1 = (seed & 0xffff) / 65536.0 * Math.PI * 2, p2 = ((seed >> 16) & 0xffff) / 65536.0 * Math.PI * 2;
-        for (int i = 0; i < n; i++) hw[i] = (float) (1.7 + 0.22 * Math.sin(i * 0.071 + p1) + 0.12 * Math.sin(i * 0.193 + p2));
+        for (int i = 0; i < n; i++) hw[i] = (float) (1.75 + 0.35 * Math.sin(i * 0.045 + p1) + 0.18 * Math.sin(i * 0.13 + p2));
         EdgePlan plan = new EdgePlan(e, x, z, y, hw, kind, wood, System.nanoTime() - t0);
         plan.nameA = NameGen.name(e.a().key(), Palette.surface(terrain.biome(e.a().pos().getX(), e.a().pos().getY(), e.a().pos().getZ())));
         plan.nameB = NameGen.name(e.b().key(), Palette.surface(terrain.biome(e.b().pos().getX(), e.b().pos().getY(), e.b().pos().getZ())));
@@ -265,10 +265,10 @@ public final class Planner {
         // dry stretches far below the ground are tunnels, far above it trestle bridges
         for (int i = 0; i < n; i++) {
             if (kind[i] != EdgePlan.GROUND) continue;
-            if (y[i] < ground[i] - 7) kind[i] = EdgePlan.TUNNEL;
+            if (y[i] < ground[i] - 9) kind[i] = EdgePlan.TUNNEL;
             else if (y[i] > ground[i] + 5) kind[i] = EdgePlan.BRIDGE;
         }
-        dropShortRuns(kind, EdgePlan.TUNNEL, 10);
+        dropShortRuns(kind, EdgePlan.TUNNEL, 16);
         return y;
     }
 

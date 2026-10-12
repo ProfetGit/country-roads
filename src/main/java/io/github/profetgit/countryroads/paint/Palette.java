@@ -66,11 +66,11 @@ public final class Palette {
     static final Surface TAIGA = new Surface("taiga",
         new BlockState[]{b(Blocks.DIRT_PATH), b(Blocks.COARSE_DIRT), b(Blocks.GRAVEL), b(Blocks.PODZOL), b(Blocks.PACKED_MUD)}, new int[]{110, 90, 20, 90},
         new BlockState[]{b(Blocks.DIRT_PATH), b(Blocks.PODZOL), b(Blocks.COARSE_DIRT), b(Blocks.GRAVEL)}, new int[]{260, 200, 80},
-        b(Blocks.SPRUCE_SLAB), 140);
+        b(Blocks.MUD_BRICK_SLAB), 140);
     static final Surface SNOWY = new Surface("snowy",
         new BlockState[]{b(Blocks.DIRT_PATH), b(Blocks.GRAVEL), b(Blocks.COARSE_DIRT)}, new int[]{260, 90},
         new BlockState[]{b(Blocks.GRAVEL), b(Blocks.SNOW_BLOCK), b(Blocks.PACKED_ICE), b(Blocks.DIRT_PATH)}, new int[]{330, 90, 200},
-        b(Blocks.SPRUCE_SLAB), 160);
+        b(Blocks.COBBLESTONE_SLAB), 160);
     static final Surface DESERT = new Surface("desert",
         new BlockState[]{b(Blocks.SMOOTH_SANDSTONE), b(Blocks.SANDSTONE), b(Blocks.SAND)}, new int[]{260, 60},
         new BlockState[]{b(Blocks.SAND), b(Blocks.SANDSTONE), b(Blocks.SMOOTH_SANDSTONE)}, new int[]{240, 160},
