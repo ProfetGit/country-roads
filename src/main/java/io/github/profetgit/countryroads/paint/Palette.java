@@ -13,14 +13,19 @@ import net.fabricmc.fabric.api.tag.convention.v2.ConventionalBiomeTags;
 public final class Palette {
     private Palette() {}
 
-    public record Wood(Block planks, Block log, Block fence, Block slab, Block sign) {}
+    public record Wood(Block planks, Block log, Block fence, Block slab, Block sign, Block wallSign, Block strippedLog, Block trapdoor, Block gate, Block hangingSign) {}
 
     static final Wood[] WOODS = {
-        new Wood(Blocks.SPRUCE_PLANKS, Blocks.SPRUCE_LOG, Blocks.SPRUCE_FENCE, Blocks.SPRUCE_SLAB, Blocks.SPRUCE_SIGN),
-        new Wood(Blocks.OAK_PLANKS, Blocks.OAK_LOG, Blocks.OAK_FENCE, Blocks.OAK_SLAB, Blocks.OAK_SIGN),
-        new Wood(Blocks.MANGROVE_PLANKS, Blocks.MANGROVE_LOG, Blocks.MANGROVE_FENCE, Blocks.MANGROVE_SLAB, Blocks.MANGROVE_SIGN),
-        new Wood(Blocks.DARK_OAK_PLANKS, Blocks.DARK_OAK_LOG, Blocks.DARK_OAK_FENCE, Blocks.DARK_OAK_SLAB, Blocks.DARK_OAK_SIGN),
-        new Wood(Blocks.JUNGLE_PLANKS, Blocks.JUNGLE_LOG, Blocks.JUNGLE_FENCE, Blocks.JUNGLE_SLAB, Blocks.JUNGLE_SIGN),
+        new Wood(Blocks.SPRUCE_PLANKS, Blocks.SPRUCE_LOG, Blocks.SPRUCE_FENCE, Blocks.SPRUCE_SLAB, Blocks.SPRUCE_SIGN, Blocks.SPRUCE_WALL_SIGN,
+            Blocks.STRIPPED_SPRUCE_LOG, Blocks.SPRUCE_TRAPDOOR, Blocks.SPRUCE_FENCE_GATE, Blocks.SPRUCE_HANGING_SIGN),
+        new Wood(Blocks.OAK_PLANKS, Blocks.OAK_LOG, Blocks.OAK_FENCE, Blocks.OAK_SLAB, Blocks.OAK_SIGN, Blocks.OAK_WALL_SIGN,
+            Blocks.STRIPPED_OAK_LOG, Blocks.OAK_TRAPDOOR, Blocks.OAK_FENCE_GATE, Blocks.OAK_HANGING_SIGN),
+        new Wood(Blocks.MANGROVE_PLANKS, Blocks.MANGROVE_LOG, Blocks.MANGROVE_FENCE, Blocks.MANGROVE_SLAB, Blocks.MANGROVE_SIGN, Blocks.MANGROVE_WALL_SIGN,
+            Blocks.STRIPPED_MANGROVE_LOG, Blocks.MANGROVE_TRAPDOOR, Blocks.MANGROVE_FENCE_GATE, Blocks.MANGROVE_HANGING_SIGN),
+        new Wood(Blocks.DARK_OAK_PLANKS, Blocks.DARK_OAK_LOG, Blocks.DARK_OAK_FENCE, Blocks.DARK_OAK_SLAB, Blocks.DARK_OAK_SIGN, Blocks.DARK_OAK_WALL_SIGN,
+            Blocks.STRIPPED_DARK_OAK_LOG, Blocks.DARK_OAK_TRAPDOOR, Blocks.DARK_OAK_FENCE_GATE, Blocks.DARK_OAK_HANGING_SIGN),
+        new Wood(Blocks.JUNGLE_PLANKS, Blocks.JUNGLE_LOG, Blocks.JUNGLE_FENCE, Blocks.JUNGLE_SLAB, Blocks.JUNGLE_SIGN, Blocks.JUNGLE_WALL_SIGN,
+            Blocks.STRIPPED_JUNGLE_LOG, Blocks.JUNGLE_TRAPDOOR, Blocks.JUNGLE_FENCE_GATE, Blocks.JUNGLE_HANGING_SIGN),
     };
 
     public static byte wood(Holder<Biome> b) {
@@ -117,11 +122,49 @@ public final class Palette {
         return pal.pick(pal.centre(), pal.centreW(), r);
     }
 
+    /** House path surface: the biome's road look (edge mix for the outer column). */
+    public static BlockState housePath(Holder<Biome> biome, float in, long h, BlockState natural) {
+        return surface(surface(biome), in, h, natural, true);
+    }
+
+    public static BlockState houseStep(Holder<Biome> biome) {
+        return surface(biome).step();
+    }
+
+    public static BlockState deck(Holder<Biome> biome) {
+        return wood(wood(biome)).planks().defaultBlockState();
+    }
+
     static BlockState masonry(long h) {
         int r = (int) ((h >>> 12) & 15);
         if (r < 3) return Blocks.MOSSY_STONE_BRICKS.defaultBlockState();
         if (r < 5) return Blocks.CRACKED_STONE_BRICKS.defaultBlockState();
         return Blocks.STONE_BRICKS.defaultBlockState();
+    }
+
+    /** Dry-stone wall body block: mostly cobblestone, some stone, andesite and mossy cobble. */
+    static BlockState wallBody(long h) {
+        int r = (int) ((h >>> 9) & 15);
+        if (r < 6) return Blocks.COBBLESTONE.defaultBlockState();
+        if (r < 9) return Blocks.MOSSY_COBBLESTONE.defaultBlockState();
+        if (r < 12) return Blocks.STONE.defaultBlockState();
+        return Blocks.ANDESITE.defaultBlockState();
+    }
+
+    /** Dry-stone wall cap: slabs, walls and stairs in the same stones, so the top line is uneven. */
+    static BlockState wallCap(long h) {
+        return switch ((int) ((h >>> 14) & 15)) {
+            case 0, 1, 2 -> Blocks.COBBLESTONE_SLAB.defaultBlockState();
+            case 3, 4 -> Blocks.MOSSY_COBBLESTONE_SLAB.defaultBlockState();
+            case 5, 6 -> Blocks.STONE_SLAB.defaultBlockState();
+            case 7 -> Blocks.ANDESITE_SLAB.defaultBlockState();
+            case 8, 9 -> Blocks.COBBLESTONE_WALL.defaultBlockState();
+            case 10 -> Blocks.MOSSY_COBBLESTONE_WALL.defaultBlockState();
+            case 11 -> Blocks.ANDESITE_WALL.defaultBlockState();
+            case 12 -> Blocks.COBBLESTONE_STAIRS.defaultBlockState();
+            case 13 -> Blocks.STONE_STAIRS.defaultBlockState();
+            default -> null;
+        };
     }
 
     static BlockState rubble(long h) {

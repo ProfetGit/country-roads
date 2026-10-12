@@ -1,0 +1,10 @@
+{
+  "block.countryroads.surveyors_stake": "Surveyor's Stake",
+  "countryroads.stake.surveying": "Surveying a path to the nearest road...",
+  "countryroads.stake.preview": "Path to the road: %s blocks. Needs %s path material (dirt, gravel, sand, packed mud...) and %s planks. Right-click the stake to build it, break the stake to cancel.",
+  "countryroads.stake.missing": "Not enough materials: %s more path material and %s more planks (your inventory and chests within 8 blocks count).",
+  "countryroads.stake.building": "Laying %s blocks of path...",
+  "countryroads.stake.built": "This path is built. Break the stake to take it up again.",
+  "countryroads.stake.no_road": "No road within %s blocks. Place the stake closer to a road (it must be loaded).",
+  "countryroads.stake.on_road": "The stake is already on the road."
+}

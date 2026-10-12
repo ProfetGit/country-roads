@@ -96,6 +96,9 @@ public final class DevCommands {
                         CountryRoads.LOG.info(sb.toString());
                         return 1;
                     }))))
+            .then(Commands.literal("staketest")
+                .then(Commands.argument("x", IntegerArgumentType.integer()).then(Commands.argument("z", IntegerArgumentType.integer())
+                    .executes(c -> StakeTest.run(c.getSource(), IntegerArgumentType.getInteger(c, "x"), IntegerArgumentType.getInteger(c, "z"))))))
             .then(Commands.literal("retroresume").executes(c -> {
                 io.github.profetgit.countryroads.retro.Retrofit.paused = false;
                 return 1;

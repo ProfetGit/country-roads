@@ -18,6 +18,8 @@ public final class ChunkMask {
     public final float[] s = new float[256];
     public final short[] runLen = new short[256], runPos = new short[256];
     public final byte[] wood = new byte[256];
+    /** Which side of the centreline (+1 right, -1 left, walking from village a to b), and the wall/fence there (-1 none). */
+    public final byte[] side = new byte[256], run = new byte[256];
     private boolean any;
     public final java.util.List<EdgePlan.Decor> decor = new java.util.ArrayList<>();
 
@@ -25,6 +27,7 @@ public final class ChunkMask {
         this.cx = cx;
         this.cz = cz;
         Arrays.fill(in, Float.NEGATIVE_INFINITY);
+        Arrays.fill(run, (byte) -1);
     }
 
     public boolean any() {
@@ -74,6 +77,11 @@ public final class ChunkMask {
                             m.runLen[c] = p.runLen[k];
                             m.runPos[c] = p.runPos[k];
                             m.wood[c] = p.wood[k];
+                            float cross = dx * (pz - z0) - dz * (px - x0);
+                            m.side[c] = (byte) (cross > 0 ? 1 : -1);
+                            m.run[c] = -1;
+                            for (EdgePlan.Run run : p.runs)
+                                if (i >= run.s0() && i <= run.s1() && (run.side() == 0 || run.side() == m.side[c])) m.run[c] = run.type();
                             m.s[c] = i + t;
                             m.any = true;
                         }

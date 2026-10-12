@@ -31,12 +31,24 @@ public final class EdgePlan {
 
     public static final byte SIGN = 0, LAMP = 1;
 
-    /** type SIGN: rot = standing sign rotation (0-15), front/back text; LAMP: rot unused. */
-    public record Decor(int x, int z, float y, byte type, byte rot, String front1, String front2, String back) {
+    /**
+     * A post beside the road at (x, z). toRoad: horizontal direction from the post to the road (its arm or main sign
+     * goes that way); along: direction along the road toward the destination (the welcome sign faces it).
+     * SIGN: front1 destination, front2 distance, back this village. Uses the post column and its toRoad/along neighbours.
+     */
+    public record Decor(int x, int z, float y, byte type, net.minecraft.core.Direction toRoad, net.minecraft.core.Direction along,
+                        String front1, String front2, String back) {
         public long chunk() {
             return ChunkPos.pack(x >> 4, z >> 4);
         }
     }
+
+    public static final byte STONE_WALL = 0, FENCE = 1;
+
+    /** A countryside wall or fence beside the road from sample s0 to s1; side +1 right, -1 left (of a to b), 0 both. */
+    public record Run(int s0, int s1, byte side, byte type) {}
+
+    public final java.util.List<Run> runs = new java.util.ArrayList<>();
     private final Long2ObjectOpenHashMap<int[]> bins = new Long2ObjectOpenHashMap<>();
 
     public EdgePlan(Edge edge, float[] x, float[] z, float[] y, float[] hw, byte[] kind, byte[] wood, long routeNanos) {

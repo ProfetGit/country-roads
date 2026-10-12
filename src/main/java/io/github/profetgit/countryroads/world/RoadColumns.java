@@ -35,6 +35,24 @@ public record RoadColumns(long[] bits) {
         if (open) bits[4 + (i >> 6)] |= 1L << (i & 63);
     }
 
+    public void unset(int lx, int lz) {
+        int i = (lz << 4) | lx;
+        bits[i >> 6] &= ~(1L << (i & 63));
+        bits[4 + (i >> 6)] &= ~(1L << (i & 63));
+    }
+
+    /** Marks (or unmarks) a column of a loaded chunk as road at runtime (house paths). */
+    public static void mark(Level level, int x, int z, boolean road) {
+        ChunkAccess c = level.getChunk(x >> 4, z >> 4, ChunkStatus.FULL, false);
+        if (!(c instanceof LevelChunk chunk)) return;
+        RoadColumns r = ((AttachmentTarget) chunk).getAttached(TYPE);
+        RoadColumns copy = new RoadColumns(r == null ? new long[8] : Arrays.copyOf(r.bits, 8));
+        if (road) copy.set(x & 15, z & 15, true);
+        else copy.unset(x & 15, z & 15);
+        ((AttachmentTarget) chunk).setAttached(TYPE, copy);
+        chunk.markUnsaved();
+    }
+
     public boolean road(int lx, int lz) {
         int i = (lz << 4) | lx;
         return bits.length >= 4 && (bits[i >> 6] & (1L << (i & 63))) != 0;

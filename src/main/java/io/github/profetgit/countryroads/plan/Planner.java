@@ -5,6 +5,7 @@ import io.github.profetgit.countryroads.route.Router;
 import io.github.profetgit.countryroads.world.TerrainSampler;
 import io.github.profetgit.countryroads.world.VillageOracle;
 import java.util.ArrayList;
+import net.minecraft.core.Direction;
 import java.util.List;
 import net.minecraft.world.level.levelgen.structure.BoundingBox;
 
@@ -99,20 +100,51 @@ public final class Planner {
         signEither(p, 4, 1, p.nameB, dist, p.nameA);
         signEither(p, n - 5, -1, p.nameA, dist, p.nameB);
         for (int k = 1; k <= 3; k++) {
-            lamp(p, 10 * k, 1, k % 2 == 0 ? 1 : -1);
-            lamp(p, n - 1 - 10 * k, -1, k % 2 == 0 ? 1 : -1);
+            post(p, 10 * k, 1, k % 2 == 0 ? 1 : -1, EdgePlan.LAMP, "", "", "");
+            post(p, n - 1 - 10 * k, -1, k % 2 == 0 ? 1 : -1, EdgePlan.LAMP, "", "", "");
+        }
+        runs(p);
+    }
+
+    /**
+     * Countryside dry-stone walls and split-rail fences along some stretches: a run every 80-260 blocks, 12-44 long,
+     * on one side or (rarely) both, only on plain ground and away from the village ends and posts.
+     */
+    static void runs(EdgePlan p) {
+        int n = p.length();
+        long h = p.edge.seed() ^ 0x5DEECE66DL;
+        int s = 30 + (int) Math.floorMod(h, 120L);
+        while (s < n - 30) {
+            h = h * 6364136223846793005L + 1442695040888963407L;
+            int len = 12 + (int) Math.floorMod(h >>> 33, 33L);
+            int e = Math.min(n - 30, s + len);
+            boolean ok = e - s >= 10;
+            for (int k = s; k <= e && ok; k++) ok = p.kind[k] == EdgePlan.GROUND;
+            for (EdgePlan.Decor d : p.decor) {
+                int near = nearestSample(p, d.x() + 0.5f, d.z() + 0.5f);
+                if (near >= s - 6 && near <= e + 6) ok = false;
+            }
+            if (ok) {
+                int r = (int) Math.floorMod(h >>> 17, 10L);
+                byte side = (byte) (r < 2 ? 0 : r < 6 ? 1 : -1);
+                byte type = Math.floorMod(h >>> 41, 10L) < 6 ? EdgePlan.STONE_WALL : EdgePlan.FENCE;
+                p.runs.add(new EdgePlan.Run(s, e, side, type));
+            }
+            s = e + 80 + (int) Math.floorMod(h >>> 25, 180L);
         }
     }
 
-    private static float[] side(EdgePlan p, int i, int dir, float offset, int sideSign) {
-        int a = Math.clamp(i - 3, 0, p.length() - 1), b = Math.clamp(i + 3, 0, p.length() - 1);
-        float tx = (p.x[b] - p.x[a]) * dir, tz = (p.z[b] - p.z[a]) * dir;
-        float len = (float) Math.hypot(tx, tz);
-        tx /= len;
-        tz /= len;
-        float rx = -tz * sideSign, rz = tx * sideSign;
-        float d = p.hw[i] + offset;
-        return new float[]{p.x[i] + rx * d, p.z[i] + rz * d, tx, tz};
+    private static int nearestSample(EdgePlan p, float x, float z) {
+        int best = 0;
+        float bd = Float.MAX_VALUE;
+        for (int i = 0; i < p.length(); i += 2) {
+            float d = (p.x[i] - x) * (p.x[i] - x) + (p.z[i] - z) * (p.z[i] - z);
+            if (d < bd) {
+                bd = d;
+                best = i;
+            }
+        }
+        return best;
     }
 
     /** Dry ground near the road's height under the post, from the generator's own terrain. */
@@ -127,7 +159,7 @@ public final class Planner {
             int j = i + dir * 3 * (k / 2);
             if (j < 0 || j >= p.length()) continue;
             int before = p.decor.size();
-            sign(p, j, dir, to, dist, here, k % 2 == 0 ? 1 : -1);
+            post(p, j, dir, k % 2 == 0 ? 1 : -1, EdgePlan.SIGN, to, dist + " blocks", here);
             if (p.decor.size() > before) {
                 if (standable(p.decor.getLast())) return;
                 p.decor.removeLast();
@@ -135,18 +167,30 @@ public final class Planner {
         }
     }
 
-    private static void sign(EdgePlan p, int i, int dir, String to, int dist, String here, int sideSign) {
-        if (p.kind[i] != EdgePlan.GROUND) return;
-        float[] s = side(p, i, dir, 1.4f, sideSign);
-        double theta = Math.atan2(s[2], -s[3]);
-        int rot = Math.floorMod((int) Math.round(Math.toDegrees(theta) / 22.5), 16);
-        p.decor.add(new EdgePlan.Decor((int) Math.floor(s[0]), (int) Math.floor(s[1]), p.y[i], EdgePlan.SIGN, (byte) rot, to, dist + " blocks", here));
-    }
-
-    private static void lamp(EdgePlan p, int i, int dir, int sideSign) {
-        if (i < 0 || i >= p.length() || p.kind[i] != EdgePlan.GROUND) return;
-        float[] s = side(p, i, dir, 1.3f, sideSign);
-        p.decor.add(new EdgePlan.Decor((int) Math.floor(s[0]), (int) Math.floor(s[1]), p.y[i], EdgePlan.LAMP, (byte) 0, "", "", ""));
+    /**
+     * A post 1.5 blocks outside the road edge. Its footprint (post plus the neighbour toward the road and the one along
+     * it) must sit inside one chunk, so posts near a chunk edge slide along the road a little.
+     */
+    private static void post(EdgePlan p, int i0, int dir, int sideSign, byte type, String f1, String f2, String back) {
+        for (int shift = 0; shift <= 6; shift++) {
+            int i = i0 + (shift % 2 == 0 ? shift / 2 : -(shift / 2 + 1)) * dir;
+            if (i < 3 || i >= p.length() - 3 || p.kind[i] != EdgePlan.GROUND) continue;
+            int a = i - 3, b = i + 3;
+            float tx = (p.x[b] - p.x[a]) * dir, tz = (p.z[b] - p.z[a]) * dir;
+            float len = (float) Math.hypot(tx, tz);
+            tx /= len;
+            tz /= len;
+            float rx = -tz * sideSign, rz = tx * sideSign;
+            float off = p.hw[i] + 1.5f;
+            int x = (int) Math.floor(p.x[i] + rx * off), z = (int) Math.floor(p.z[i] + rz * off);
+            int lx = x & 15, lz = z & 15;
+            if (lx == 0 || lx == 15 || lz == 0 || lz == 15) continue;
+            Direction toRoad = Direction.getApproximateNearest(-rx, 0, -rz);
+            Direction along = Direction.getApproximateNearest(tx, 0, tz);
+            if (along.getAxis() == toRoad.getAxis()) along = sideSign > 0 ? toRoad.getCounterClockWise() : toRoad.getClockWise();
+            p.decor.add(new EdgePlan.Decor(x, z, p.y[i], type, toRoad, along, f1, f2, back));
+            return;
+        }
     }
 
     /** Outer street of the village toward the other village (centre of that street's box), else the village start. */

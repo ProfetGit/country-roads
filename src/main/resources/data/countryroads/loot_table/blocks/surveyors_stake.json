@@ -1,0 +1,11 @@
+{
+  "type": "minecraft:block",
+  "pools": [
+    {
+      "condition": { "type": "minecraft:survives_explosion" },
+      "entries": [ { "type": "minecraft:item", "name": "countryroads:surveyors_stake" } ],
+      "rolls": 1
+    }
+  ],
+  "random_sequence": "countryroads:blocks/surveyors_stake"
+}

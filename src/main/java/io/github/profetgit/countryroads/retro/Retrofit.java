@@ -123,7 +123,7 @@ public final class Retrofit {
         return false;
     }
 
-    static boolean isCrafted(BlockState s) {
+    public static boolean isCrafted(BlockState s) {
         return s.is(BlockTags.PLANKS) || s.is(BlockTags.WOOL) || s.is(BlockTags.BEDS) || s.is(BlockTags.DOORS) || s.is(Blocks.CHEST)
             || s.is(Blocks.CRAFTING_TABLE) || s.is(Blocks.FURNACE) || s.is(Blocks.TORCH) || s.is(Blocks.WALL_TORCH) || s.is(Blocks.GLASS)
             || s.is(BlockTags.FENCES) || s.is(Blocks.FARMLAND) || s.is(BlockTags.STAIRS) || s.is(BlockTags.SLABS) || s.is(Blocks.COBBLESTONE)

@@ -87,23 +87,73 @@ public final class RoadPainter {
         int i = ChunkMask.idx(d.x() & 15, d.z() & 15);
         if (m.in[i] >= 0) return;
         int top = (int) Math.floor(Math.round(d.y() * 2) / 2.0);
-        int g = groundAt(d.x(), d.z(), top);
-        if (Math.abs(g - top) > 4 || !PaintRules.terrain(get(d.x(), g, d.z()))) return;
+        int x = d.x(), z = d.z();
+        int g = groundAt(x, z, top);
+        if (Math.abs(g - top) > 4 || !PaintRules.terrain(get(x, g, z))) return;
         Palette.Wood wood = Palette.wood(m.in[i] == Float.NEGATIVE_INFINITY ? 0 : m.wood[i]);
-        clear(d.x(), g + 1, g + 3, d.z());
-        set(d.x(), g + 1, d.z(), wood.fence().defaultBlockState());
-        if (d.type() == EdgePlan.SIGN) {
-            BlockState sign = wood.sign().defaultBlockState().setValue(StandingSignBlock.ROTATION, (int) d.rot());
-            set(d.x(), g + 2, d.z(), sign);
-            SignBlockEntity be = new SignBlockEntity(new BlockPos(d.x(), g + 2, d.z()), sign);
-            SignBlockEntityAccessor raw = (SignBlockEntityAccessor) be;
-            raw.countryroads$setFront(text("", d.front1(), d.front2(), ""));
-            raw.countryroads$setBack(text("", d.back(), "", ""));
-            raw.countryroads$setWaxed(true);
-            chunk.blockEntity(be);
+        long h = hash(x, z);
+        int ax = x + d.toRoad().getStepX(), az = z + d.toRoad().getStepZ();
+        clear(x, g + 1, g + 5, z);
+        // a gallows post: stone foot, three fences, an arm reaching over the road edge; a hanging sign or a lantern
+        // hangs from the arm. States are set exactly so the post never latches onto banks or grass beside it.
+        net.minecraft.core.Direction toRoad = d.toRoad();
+        BlockState foot = (((h >>> 5) & 1) == 0 ? Blocks.MOSSY_COBBLESTONE_WALL : Blocks.COBBLESTONE_WALL).defaultBlockState();
+        BlockState fence = wood.fence().defaultBlockState();
+        exact(x, g + 1, z, foot);
+        exact(x, g + 2, z, fence);
+        exact(x, g + 3, z, fence);
+        exact(x, g + 4, z, fence.setValue(net.minecraft.world.level.block.CrossCollisionBlock.PROPERTY_BY_DIRECTION.get(toRoad), true));
+        BlockState arm = get(ax, g + 4, az), under = get(ax, g + 3, az);
+        if ((arm.isAir() || arm.canBeReplaced()) && (under.isAir() || under.canBeReplaced())) {
+            exact(ax, g + 4, az, fence.setValue(net.minecraft.world.level.block.CrossCollisionBlock.PROPERTY_BY_DIRECTION.get(toRoad.getOpposite()), true));
+            if (d.type() == EdgePlan.SIGN) hangingSign(wood, ax, g + 3, az, d);
+            else exact(ax, g + 3, az, Blocks.LANTERN.defaultBlockState().setValue(LanternBlock.HANGING, true));
+        }
+    }
+
+    private void exact(int x, int y, int z, BlockState s) {
+        if (y <= chunk.minY() || y >= chunk.maxY()) return;
+        chunk.setExact(pos.set(x, y, z), s);
+    }
+
+    /** Front (toward this village, read when leaving): destination and distance. Back: welcome to this village. */
+    private void hangingSign(Palette.Wood wood, int x, int y, int z, EdgePlan.Decor d) {
+        double theta = Math.atan2(d.along().getStepX(), -d.along().getStepZ());
+        int rot = Math.floorMod((int) Math.round(Math.toDegrees(theta) / 22.5), 16);
+        BlockState sign = wood.hangingSign().defaultBlockState()
+            .setValue(net.minecraft.world.level.block.CeilingHangingSignBlock.ROTATION, rot)
+            .setValue(net.minecraft.world.level.block.CeilingHangingSignBlock.ATTACHED, true);
+        exact(x, y, z, sign);
+        var be = new net.minecraft.world.level.block.entity.HangingSignBlockEntity(new BlockPos(x, y, z), sign);
+        SignBlockEntityAccessor raw = (SignBlockEntityAccessor) be;
+        raw.countryroads$setFront(text(d.front1(), d.front2(), "", ""));
+        raw.countryroads$setBack(text("Welcome to", d.back(), "", ""));
+        raw.countryroads$setWaxed(true);
+        chunk.blockEntity(be);
+    }
+
+    /** Dry-stone wall or split-rail fence on the shoulder, where a run says so and the shoulder is level with the road. */
+    private void wallOrFence(int x, int z, int top, float d, ChunkMask m, int i) {
+        if (m.run[i] < 0 || d < 1.0f || d >= 2.1f || m.kind[i] != EdgePlan.GROUND) return;
+        int g = groundAt(x, z, top);
+        if (Math.abs(g - top) > 1 || !PaintRules.terrain(get(x, g, z))) return;
+        int s = (int) Math.floor(m.s[i]);
+        long h = hash(x, z);
+        if (m.run[i] == EdgePlan.STONE_WALL) {
+            if (Math.floorMod(s, 17) == 0) return;
+            clear(x, g + 1, g + 3, z);
+            boolean low = ((h >>> 3) & 7) == 0;
+            if (!low) set(x, g + 1, z, Palette.wallBody(h));
+            BlockState cap = Palette.wallCap(h >>> 7);
+            if (cap != null) {
+                if (cap.hasProperty(net.minecraft.world.level.block.StairBlock.FACING))
+                    cap = cap.setValue(net.minecraft.world.level.block.StairBlock.FACING, net.minecraft.core.Direction.Plane.HORIZONTAL.getRandomDirection(net.minecraft.util.RandomSource.create(h)));
+                set(x, low ? g + 1 : g + 2, z, cap);
+            }
         } else {
-            set(d.x(), g + 2, d.z(), wood.fence().defaultBlockState());
-            set(d.x(), g + 3, d.z(), Blocks.LANTERN.defaultBlockState());
+            if (Math.floorMod(s, 23) == 11) return;
+            clear(x, g + 1, g + 2, z);
+            set(x, g + 1, z, Palette.wood(m.wood[i]).fence().defaultBlockState());
         }
     }
 
@@ -236,6 +286,11 @@ public final class RoadPainter {
         }
 
         BlockState natural = PaintRules.surfaceOf(get(x, ground, z));
+        shoulder(x, z, top, d, ground, natural, h);
+        wallOrFence(x, z, top, d, m, i);
+    }
+
+    private void shoulder(int x, int z, int top, float d, int ground, BlockState natural, long h) {
         if (ground == top + 1 && d < 1.5f) {
             // flush shoulder: no one-block lip along the road
             clear(x, top + 1, top + 3, z);

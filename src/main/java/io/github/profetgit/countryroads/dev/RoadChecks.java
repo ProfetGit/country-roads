@@ -231,11 +231,31 @@ final class RoadChecks {
                     if (q.campChunk != 0 && camp == null) camp = q;
                 }
                 if (sign != null) {
-                    double a = Math.toRadians(sign.rot() * 22.5);
-                    double fx = -Math.sin(a), fz = Math.cos(a);
-                    shot(src, sign.x() + 0.5 + fx * 4 - fz * 1.5, sign.y() + 2.6, sign.z() + 0.5 + fz * 4 + fx * 1.5, sign.x() + 0.5, sign.y() + 2.2, sign.z() + 0.5, "sign");
+                    double fx = sign.toRoad().getStepX(), fz = sign.toRoad().getStepZ(), ax = sign.along().getStepX(), az = sign.along().getStepZ();
+                    shot(src, sign.x() + 0.5 + fx * 5 - ax * 2.5, sign.y() + 3.2, sign.z() + 0.5 + fz * 5 - az * 2.5, sign.x() + 0.5, sign.y() + 3, sign.z() + 0.5, "sign");
                 }
-                if (lamp != null) shot(src, lamp.x() + 6.5, lamp.y() + 4, lamp.z() + 6.5, lamp.x() + 0.5, lamp.y() + 1.5, lamp.z() + 0.5, "lamp");
+                if (lamp != null) {
+                    double fx = lamp.toRoad().getStepX(), fz = lamp.toRoad().getStepZ(), ax = lamp.along().getStepX(), az = lamp.along().getStepZ();
+                    shot(src, lamp.x() + 0.5 + fx * 6 + ax * 4, lamp.y() + 3.5, lamp.z() + 0.5 + fz * 6 + az * 4, lamp.x() + 0.5, lamp.y() + 3, lamp.z() + 0.5, "lamp");
+                }
+                for (byte type = 0; type <= 1; type++) {
+                    for (EdgePlan q : plans) {
+                        EdgePlan.Run hit = null;
+                        for (EdgePlan.Run r : q.runs) {
+                            int mid = (r.s0() + r.s1()) / 2;
+                            if (r.type() == type && Math.abs(q.x[mid] - at.getX()) <= radius && Math.abs(q.z[mid] - at.getZ()) <= radius) hit = r;
+                        }
+                        if (hit == null) continue;
+                        int mid = (hit.s0() + hit.s1()) / 2, b = Math.max(0, hit.s0() - 4);
+                        double ux = q.x[mid] - q.x[b], uz = q.z[mid] - q.z[b], ul = Math.hypot(ux, uz);
+                        int sd = hit.side() == 0 ? 1 : hit.side();
+                        double rx = -uz / ul * sd, rz = ux / ul * sd, off = q.hw[mid] + 1.5;
+                        // from the far edge of the road, behind the run, looking along the wall line
+                        shot(src, q.x[b] - rx * 1.5, q.y[b] + 2.6, q.z[b] - rz * 1.5, q.x[mid] + rx * off, q.y[mid] + 0.6, q.z[mid] + rz * off,
+                            type == 0 ? "stonewall" : "fence");
+                        break;
+                    }
+                }
                 if (camp != null && !camp.campBoxes.isEmpty()) {
                     // from the road's nearest point, above the road, looking at the camp
                     var b = camp.campBoxes.getFirst();
@@ -276,9 +296,11 @@ final class RoadChecks {
                     if (n.oracle.footprint(p.edge.a()).contains(d.x(), d.z(), 1) || n.oracle.footprint(p.edge.b()).contains(d.x(), d.z(), 1)) continue;
                     ChunkAccess chunk = level.getChunkSource().getChunk(d.x() >> 4, d.z() >> 4, ChunkStatus.FULL, true);
                     boolean found = false;
-                    for (int y = (int) d.y() - 5; y <= (int) d.y() + 6 && !found; y++) {
-                        BlockState st = chunk.getBlockState(pos.set(d.x(), y, d.z()));
-                        found = d.type() == EdgePlan.SIGN ? st.is(BlockTags.STANDING_SIGNS) : st.is(Blocks.LANTERN);
+                    for (int k = 0; k < 13 * 5 && !found; k++) {
+                        int y = (int) d.y() - 5 + k % 13;
+                        var nb = k / 13 == 0 ? net.minecraft.core.BlockPos.ZERO : net.minecraft.core.Direction.from2DDataValue(k / 13 - 1).getUnitVec3i();
+                        BlockState st = chunk.getBlockState(pos.set(d.x() + nb.getX(), y, d.z() + nb.getZ()));
+                        found = d.type() == EdgePlan.SIGN ? st.is(BlockTags.ALL_SIGNS) : st.is(Blocks.LANTERN);
                     }
                     if (d.type() == EdgePlan.SIGN) {
                         signs++;
@@ -300,6 +322,32 @@ final class RoadChecks {
                     report(src, "CR-CAMP " + p.camp + " at " + (c.x() << 4) + "," + (c.z() << 4) + (st != null && st.isValid() ? " present" : " MISSING"));
                 }
             }
+            int runs = 0, runCols = 0, runHit = 0;
+            for (EdgePlan p : n.readyPlans()) {
+                for (EdgePlan.Run r : p.runs) {
+                    int mid = (r.s0() + r.s1()) / 2;
+                    if (Math.abs(p.x[mid] - at.getX()) > radius || Math.abs(p.z[mid] - at.getZ()) > radius) continue;
+                    runs++;
+                    for (int i = r.s0() + 1; i < r.s1() - 1; i += 2) {
+                        float tx = p.x[i + 1] - p.x[i - 1], tz = p.z[i + 1] - p.z[i - 1], len = (float) Math.hypot(tx, tz);
+                        for (int side = -1; side <= 1; side += 2) {
+                            if (r.side() != 0 && r.side() != side) continue;
+                            float off = p.hw[i] + 1.5f;
+                            int x = (int) Math.floor(p.x[i] - tz / len * side * off), z = (int) Math.floor(p.z[i] + tx / len * side * off);
+                            ChunkAccess chunk = level.getChunkSource().getChunk(x >> 4, z >> 4, ChunkStatus.FULL, true);
+                            runCols++;
+                            boolean hit = false;
+                            for (int y = (int) p.y[i] - 2; y <= (int) p.y[i] + 3 && !hit; y++) {
+                                BlockState st = chunk.getBlockState(pos.set(x, y, z));
+                                hit = st.is(BlockTags.FENCES) || st.is(BlockTags.WALLS) || st.is(BlockTags.SLABS) || st.is(BlockTags.STAIRS)
+                                    || st.is(Blocks.COBBLESTONE) || st.is(Blocks.MOSSY_COBBLESTONE) || st.is(Blocks.ANDESITE) || st.is(Blocks.STONE);
+                            }
+                            if (hit) runHit++;
+                        }
+                    }
+                }
+            }
+            report(src, "CR-RUNS runs=" + runs + " columnsWithWallOrFence=" + runHit + "/" + runCols);
             String verdict = signsFound == signs && campsFound == camps && lampsFound >= lamps * 0.8 ? "PASS" : "FAIL";
             report(src, "CR-DECOR " + verdict + " signs=" + signsFound + "/" + signs + " lamps=" + lampsFound + "/" + lamps + " camps=" + campsFound + "/" + camps + " names=" + names);
             return true;

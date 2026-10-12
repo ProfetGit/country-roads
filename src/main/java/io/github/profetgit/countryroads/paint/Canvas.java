@@ -17,6 +17,9 @@ public interface Canvas {
 
     void set(BlockPos pos, BlockState state);
 
+    /** Exactly this state: no connection updates for it or its neighbours (posts that must not latch onto terrain). */
+    void setExact(BlockPos pos, BlockState state);
+
     /** A block entity for the block just set at its position (signs). */
     void blockEntity(BlockEntity be);
 
@@ -40,6 +43,10 @@ public interface Canvas {
                 chunk.setBlockState(pos, state, 0);
                 // fences, walls, stairs and the like get their connections when the chunk is finished
                 if (PaintRules.connects(state)) chunk.markPosForPostProcessing(pos);
+            }
+
+            public void setExact(BlockPos pos, BlockState state) {
+                chunk.setBlockState(pos, state, 0);
             }
 
             public void blockEntity(BlockEntity be) {
@@ -69,6 +76,10 @@ public interface Canvas {
             public void set(BlockPos pos, BlockState state) {
                 // clients see it and connecting blocks shape themselves; no neighbour physics (no falling sand, no drops)
                 level.setBlock(pos, state, Block.UPDATE_CLIENTS | (PaintRules.connects(state) ? Block.UPDATE_NEIGHBORS : Block.UPDATE_KNOWN_SHAPE));
+            }
+
+            public void setExact(BlockPos pos, BlockState state) {
+                level.setBlock(pos, state, Block.UPDATE_CLIENTS | Block.UPDATE_KNOWN_SHAPE);
             }
 
             public void blockEntity(BlockEntity be) {
