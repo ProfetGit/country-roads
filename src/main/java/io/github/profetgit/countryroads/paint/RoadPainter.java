@@ -129,7 +129,8 @@ public final class RoadPainter {
         // merged posts carry "name\ndistance" pairs: up to two destinations, two lines each
         String[] a = d.front1().split("\n", 2), b = d.front2().split("\n", 2);
         raw.countryroads$setFront(a.length == 2 ? text(a[0], a[1], b[0], b.length == 2 ? b[1] : "") : text("", d.front1(), d.front2(), ""));
-        raw.countryroads$setBack(text("Welcome to", d.back(), "", ""));
+        String[] back = d.back().split("\n", 2);
+        raw.countryroads$setBack(back.length == 2 ? text(back[0], back[1], "", "") : text("Welcome to", d.back(), "", ""));
         raw.countryroads$setWaxed(true);
         chunk.blockEntity(be);
     }

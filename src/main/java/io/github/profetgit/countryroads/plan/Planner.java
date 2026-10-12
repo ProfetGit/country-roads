@@ -36,10 +36,51 @@ public final class Planner {
 
     /** null when the pair gets no road (no land route, or far too costly). */
     public EdgePlan plan(Edge e) {
+        return plan(e, List.of());
+    }
+
+    private static boolean sameWay(Trunk t, VillageOracle.Village v, VillageOracle.Village to) {
+        if (!(t.p.edge.a().equals(v) || t.p.edge.b().equals(v))) return false;
+        VillageOracle.Village o = t.p.edge.a().equals(v) ? t.p.edge.b() : t.p.edge.a();
+        double a1 = Math.atan2(to.pos().getZ() - v.pos().getZ(), to.pos().getX() - v.pos().getX());
+        double a2 = Math.atan2(o.pos().getZ() - v.pos().getZ(), o.pos().getX() - v.pos().getX());
+        return Math.abs(Math.atan2(Math.sin(a1 - a2), Math.cos(a1 - a2))) < Math.toRadians(70);
+    }
+
+    /** A planned road sharing a village with this one; atStart: its sample 0 is at the shared village. */
+    private record Trunk(EdgePlan p, VillageOracle.Village shared, boolean atStart) {
+        int end() {
+            return atStart ? 0 : p.length() - 1;
+        }
+    }
+
+    /**
+     * trunks: already planned, shorter roads leaving one of this road's villages in a similar direction. This road
+     * starts where the trunk starts, prefers to travel along it, and where the two share the way it takes the trunk's
+     * exact line and heights, branching off smoothly with a junction signpost.
+     */
+    public EdgePlan plan(Edge e, List<EdgePlan> trunkPlans) {
         long t0 = System.nanoTime();
         VillageOracle.Footprint fa = oracle.footprint(e.a()), fb = oracle.footprint(e.b());
         int[] ja = joinPoint(fa, e.a(), e.b()), jb = joinPoint(fb, e.b(), e.a());
-        Router.Result r = router.route(ja[0], ja[1], jb[0], jb[1], ELLIPSE);
+        List<Trunk> trunks = new ArrayList<>();
+        for (EdgePlan t : trunkPlans) {
+            VillageOracle.Village shared = t.edge.a().equals(e.a()) || t.edge.a().equals(e.b()) ? t.edge.a() : t.edge.b();
+            trunks.add(new Trunk(t, shared, t.edge.a().equals(shared)));
+        }
+        Trunk trunkA = null, trunkB = null;
+        for (Trunk t : trunks) {
+            // share the trunk's street only when both roads leave the village the same way
+            if (t.shared.equals(e.a()) && trunkA == null && sameWay(t, e.a(), e.b())) trunkA = t;
+            if (t.shared.equals(e.b()) && trunkB == null && sameWay(t, e.b(), e.a())) trunkB = t;
+        }
+        if (trunkA != null) ja = new int[]{(int) Math.floor(trunkA.p.x[trunkA.end()]), (int) Math.floor(trunkA.p.z[trunkA.end()])};
+        if (trunkB != null) jb = new int[]{(int) Math.floor(trunkB.p.x[trunkB.end()]), (int) Math.floor(trunkB.p.z[trunkB.end()])};
+        it.unimi.dsi.fastutil.longs.LongOpenHashSet trunkCells = new it.unimi.dsi.fastutil.longs.LongOpenHashSet();
+        for (Trunk t : trunks)
+            for (int i = 0; i < t.p.length(); i += 4)
+                trunkCells.add(Router.cellKey(Math.floorDiv((int) t.p.x[i], Router.CELL), Math.floorDiv((int) t.p.z[i], Router.CELL)));
+        Router.Result r = router.route(ja[0], ja[1], jb[0], jb[1], ELLIPSE, trunkCells::contains);
         if (r == null) return null;
         double straight = Math.hypot(jb[0] - ja[0], jb[1] - ja[1]);
         if (r.cost() > straight * 10 * 14) return null;
@@ -52,6 +93,69 @@ public final class Planner {
         List<double[]> line = resample(pts, 1.0);
         if (line.size() > straight * 2.3 + 64) return null;
 
+        // snap onto existing roads wherever this one runs alongside them: their exact line and heights
+        int L = line.size();
+        float[] pinY = new float[L];
+        byte[] pinKind = new byte[L];
+        java.util.Arrays.fill(pinY, Float.NaN);
+        List<int[]> joins = new ArrayList<>();
+        for (Trunk t : trunks) {
+            int[] match = new int[L];
+            java.util.Arrays.fill(match, -1);
+            for (int i = 0; i < L; i++) {
+                if (!Float.isNaN(pinY[i])) continue;
+                double[] q = line.get(i);
+                double bd = 81;
+                for (int j = 0; j < t.p.length(); j++) {
+                    double dx = t.p.x[j] - q[0], dz = t.p.z[j] - q[1], d2 = dx * dx + dz * dz;
+                    if (d2 < bd) {
+                        bd = d2;
+                        match[i] = j;
+                    }
+                }
+            }
+            for (int i = 0; i < L; ) {
+                if (match[i] < 0) {
+                    i++;
+                    continue;
+                }
+                int a = i, b = i, gap = 0;
+                for (int k = i + 1; k < L && gap <= 6; k++) {
+                    if (match[k] >= 0) {
+                        b = k;
+                        gap = 0;
+                    } else gap++;
+                }
+                i = b + 1;
+                if (b - a + 1 < 12) continue;
+                double[] offA = null, offB = null;
+                int j = match[a];
+                for (int k = a; k <= b; k++) {
+                    if (match[k] >= 0) j = match[k];
+                    double[] q = line.get(k);
+                    if (k == a) offA = new double[]{t.p.x[j] - q[0], t.p.z[j] - q[1]};
+                    if (k == b) offB = new double[]{t.p.x[j] - q[0], t.p.z[j] - q[1]};
+                    line.set(k, new double[]{t.p.x[j], t.p.z[j]});
+                    pinY[k] = t.p.y[j];
+                    pinKind[k] = t.p.kind[j];
+                }
+                // ease the free road into and out of the shared stretch
+                for (int k = 1; k <= 14; k++) {
+                    double w = 1 - k / 15.0;
+                    if (a - k >= 0 && Float.isNaN(pinY[a - k])) {
+                        double[] q = line.get(a - k);
+                        line.set(a - k, new double[]{q[0] + offA[0] * w, q[1] + offA[1] * w});
+                    }
+                    if (b + k < L && Float.isNaN(pinY[b + k])) {
+                        double[] q = line.get(b + k);
+                        line.set(b + k, new double[]{q[0] + offB[0] * w, q[1] + offB[1] * w});
+                    }
+                }
+                if (a > 4) joins.add(new int[]{a - 4, -1});
+                if (b < L - 5) joins.add(new int[]{b + 4, 1});
+            }
+        }
+
         int start = 0, end = line.size() - 1;
         while (start < end && fa.contains((int) Math.floor(line.get(start)[0]), (int) Math.floor(line.get(start)[1]), 1)) start++;
         while (end > start && fb.contains((int) Math.floor(line.get(end)[0]), (int) Math.floor(line.get(end)[1]), 1)) end--;
@@ -60,13 +164,16 @@ public final class Planner {
         int n = end - start + 1;
         if (n < 8) return null;
 
-        float[] x = new float[n], z = new float[n], ground = new float[n], water = new float[n], hw = new float[n];
+        float[] x = new float[n], z = new float[n], ground = new float[n], water = new float[n], hw = new float[n], pin = new float[n];
+        byte[] kindPin = new byte[n];
         boolean[] river = new boolean[n];
         byte[] wood = new byte[n];
         for (int i = 0; i < n; i++) {
             double[] p = line.get(start + i);
             x[i] = (float) p[0];
             z[i] = (float) p[1];
+            pin[i] = pinY[start + i];
+            kindPin[i] = pinKind[start + i];
         }
         for (int i = 0; i < n; i++) {
             TerrainSampler.Sample s = terrain.sample((int) Math.floor(x[i]), (int) Math.floor(z[i]));
@@ -78,8 +185,11 @@ public final class Planner {
                 for (int k = i; k < Math.min(n, i + 16); k++) wood[k] = w;
             }
         }
+        // village ends meet the street at its own height
+        if (Float.isNaN(pin[0]) && water[0] <= ground[0]) pin[0] = ground[0];
+        if (Float.isNaN(pin[n - 1]) && water[n - 1] <= ground[n - 1]) pin[n - 1] = ground[n - 1];
         byte[] kind = new byte[n];
-        float[] y = profile(ground, water, river, kind);
+        float[] y = profile(ground, water, river, kind, pin, kindPin);
         long seed = e.seed();
         double p1 = (seed & 0xffff) / 65536.0 * Math.PI * 2, p2 = ((seed >> 16) & 0xffff) / 65536.0 * Math.PI * 2;
         for (int i = 0; i < n; i++) hw[i] = (float) (1.75 + 0.35 * Math.sin(i * 0.045 + p1) + 0.18 * Math.sin(i * 0.13 + p2));
@@ -87,6 +197,15 @@ public final class Planner {
         plan.nameA = NameGen.name(e.a().key(), Palette.surface(terrain.biome(e.a().pos().getX(), e.a().pos().getY(), e.a().pos().getZ())));
         plan.nameB = NameGen.name(e.b().key(), Palette.surface(terrain.biome(e.b().pos().getX(), e.b().pos().getY(), e.b().pos().getZ())));
         decorate(plan);
+        for (int[] jt : joins) {
+            // junction signpost where this road leaves a shared stretch: its destination that way, the other village back
+            int jn = jt[0] - start, dir = jt[1];
+            if (jn <= 4 || jn >= n - 5) continue;
+            boolean towardB = dir > 0;
+            String to = towardB ? plan.nameB : plan.nameA, back = towardB ? plan.nameA : plan.nameB;
+            int toDist = Math.round((towardB ? n - jn : jn) / 10f) * 10, backDist = Math.round((towardB ? jn : n - jn) / 10f) * 10;
+            post(plan, jn, dir, 1, EdgePlan.SIGN, to, toDist + " blocks", back + "\n" + backDist + " blocks");
+        }
         if (camps != null) camps.choose(plan);
         plan.decor.removeIf(d -> !standable(d));
         return plan;
@@ -214,6 +333,13 @@ public final class Planner {
      * not a river) or a bridge with a flat deck; deep cuts become tunnels, high fills bridges (trestles).
      */
     static float[] profile(float[] ground, float[] water, boolean[] river, byte[] kind) {
+        float[] pin = new float[ground.length];
+        java.util.Arrays.fill(pin, Float.NaN);
+        return profile(ground, water, river, kind, pin, new byte[ground.length]);
+    }
+
+    /** pin: fixed heights (village streets, a shared trunk), NaN where free; pinKind: the trunk's kinds there. */
+    static float[] profile(float[] ground, float[] water, boolean[] river, byte[] kind, float[] pin, byte[] pinKind) {
         int n = ground.length;
         float[] base = new float[n];
         for (int i = 0; i < n; i++) {
@@ -232,6 +358,7 @@ public final class Planner {
         }
         // short dry gaps inside a crossing (islands, sandbars) join it; tiny wet specks stay ground
         smoothKinds(kind, EdgePlan.GROUND, 6);
+        for (int i = 0; i < n; i++) if (!Float.isNaN(pin[i]) && (i > 0 && i < n - 1 || pinKind[i] != 0)) kind[i] = pinKind[i];
         for (int i = 0; i < n; i++) if (kind[i] == EdgePlan.BOARDWALK && river[i]) kind[i] = EdgePlan.BRIDGE;
 
         float[] y = new float[n];
@@ -257,14 +384,22 @@ public final class Planner {
             }
             i = j + 1;
         }
-        for (int pass = 0; pass < 4; pass++) {
+        for (int pass = 0; pass < 6; pass++) {
             for (int i = 0; i < n; i++) if (kind[i] != EdgePlan.GROUND) y[i] = Math.max(y[i], base[i]);
-            for (int i = 1; i < n; i++) y[i] = Math.clamp(y[i], y[i - 1] - MAX_GRADE, y[i - 1] + MAX_GRADE);
-            for (int i = n - 2; i >= 0; i--) y[i] = Math.clamp(y[i], y[i + 1] - MAX_GRADE, y[i + 1] + MAX_GRADE);
+            for (int i = 0; i < n; i++) if (!Float.isNaN(pin[i])) y[i] = pin[i];
+            // a steeper grade is allowed on the last stretch into a village, so the road climbs into the street
+            for (int i = 1; i < n; i++) {
+                float g = i < 24 || i > n - 25 ? 0.5f : MAX_GRADE;
+                if (Float.isNaN(pin[i])) y[i] = Math.clamp(y[i], y[i - 1] - g, y[i - 1] + g);
+            }
+            for (int i = n - 2; i >= 0; i--) {
+                float g = i < 24 || i > n - 25 ? 0.5f : MAX_GRADE;
+                if (Float.isNaN(pin[i])) y[i] = Math.clamp(y[i], y[i + 1] - g, y[i + 1] + g);
+            }
         }
         // dry stretches far below the ground are tunnels, far above it trestle bridges
         for (int i = 0; i < n; i++) {
-            if (kind[i] != EdgePlan.GROUND) continue;
+            if (kind[i] != EdgePlan.GROUND || !Float.isNaN(pin[i])) continue;
             if (y[i] < ground[i] - 9) kind[i] = EdgePlan.TUNNEL;
             else if (y[i] > ground[i] + 5) kind[i] = EdgePlan.BRIDGE;
         }

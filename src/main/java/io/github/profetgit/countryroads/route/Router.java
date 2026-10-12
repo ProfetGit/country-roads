@@ -47,6 +47,15 @@ public final class Router {
 
     /** Route from (ax, az) to (bx, bz) block coords; null when no acceptable route exists. */
     public Result route(int ax, int az, int bx, int bz, double ellipseFactor) {
+        return route(ax, az, bx, bz, ellipseFactor, k -> false);
+    }
+
+    public static long cellKey(int i, int j) {
+        return ((long) i << 32) ^ (j & 0xffffffffL);
+    }
+
+    /** trunk: coarse cells an existing road runs through; travelling along them is cheap (the road is already built). */
+    public Result route(int ax, int az, int bx, int bz, double ellipseFactor, java.util.function.LongPredicate trunk) {
         int ai = Math.floorDiv(ax, CELL), aj = Math.floorDiv(az, CELL);
         int bi = Math.floorDiv(bx, CELL), bj = Math.floorDiv(bz, CELL);
         double d = Math.hypot(bi - ai, bj - aj);
@@ -75,7 +84,9 @@ public final class Router {
                 int ni = i + DX[nh], nj = j + DZ[nh];
                 if (Math.hypot(ni - ai, nj - aj) + Math.hypot(ni - bi, nj - bj) > limit) continue;
                 TerrainSampler.Sample next = sample(samples, ni, nj);
-                long step = stepCost(here, next, (nh & 1) == 1, Math.abs(t));
+                long step = trunk.test(cellKey(ni, nj))
+                    ? Math.round(((nh & 1) == 1 ? CELL * Math.sqrt(2) : CELL) * 10 * (0.6 + (Math.abs(t) == 0 ? 0 : Math.abs(t) == 1 ? 0.15 : 0.8)))
+                    : stepCost(here, next, (nh & 1) == 1, Math.abs(t));
                 if (step < 0) continue;
                 long g = n.g + step;
                 long ns = state(ni, nj, nh);

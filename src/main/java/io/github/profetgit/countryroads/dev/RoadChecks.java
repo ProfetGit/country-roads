@@ -234,6 +234,19 @@ final class RoadChecks {
                     double fx = sign.toRoad().getStepX(), fz = sign.toRoad().getStepZ(), ax = sign.along().getStepX(), az = sign.along().getStepZ();
                     shot(src, sign.x() + 0.5 + fx * 5 - ax * 2.5, sign.y() + 3.2, sign.z() + 0.5 + fz * 5 - az * 2.5, sign.x() + 0.5, sign.y() + 3, sign.z() + 0.5, "sign");
                 }
+                EdgePlan.Decor junction = null;
+                for (EdgePlan q : plans)
+                    for (EdgePlan.Decor d : q.decor)
+                        if (junction == null && d.back().contains("\n") && Math.abs(d.x() - at.getX()) <= radius && Math.abs(d.z() - at.getZ()) <= radius) junction = d;
+                if (junction != null)
+                    shot(src, junction.x() - 14.5, junction.y() + 22, junction.z() - 14.5, junction.x() + 4, junction.y(), junction.z() + 4, "junction");
+                for (EdgePlan q : plans) {
+                    if (Math.abs(q.x[0] - at.getX()) > radius || Math.abs(q.z[0] - at.getZ()) > radius || q.length() < 40) continue;
+                    float ux = q.x[0] - q.x[30], uz = q.z[0] - q.z[30];
+                    float ul = (float) Math.hypot(ux, uz);
+                    shot(src, q.x[30] - ux / ul * 6 + 3, q.y[30] + 10, q.z[30] - uz / ul * 6 + 3, q.x[0], q.y[0] + 1, q.z[0], "villagejoin");
+                    break;
+                }
                 if (lamp != null) {
                     double fx = lamp.toRoad().getStepX(), fz = lamp.toRoad().getStepZ(), ax = lamp.along().getStepX(), az = lamp.along().getStepZ();
                     shot(src, lamp.x() + 0.5 + fx * 6 + ax * 4, lamp.y() + 3.5, lamp.z() + 0.5 + fz * 6 + az * 4, lamp.x() + 0.5, lamp.y() + 3, lamp.z() + 0.5, "lamp");
@@ -437,7 +450,7 @@ final class RoadChecks {
                     len[0] += p.length();
                 }
                 String line = "CR-ROAD " + e.a().pos().toShortString() + " -> " + e.b().pos().toShortString() + " straight=" + (int) e.length()
-                    + (p == null ? " NONE" : " length=" + p.length() + " ms=" + p.routeNanos / 1_000_000);
+                    + (p == null ? " NONE" : " length=" + p.length() + " ms=" + p.routeNanos / 1_000_000) + " trunks=" + n.trunkDeps(e).size();
                 CountryRoads.LOG.info(line);
                 return false;
             }

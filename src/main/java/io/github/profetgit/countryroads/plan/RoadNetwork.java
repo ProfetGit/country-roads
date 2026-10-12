@@ -119,28 +119,88 @@ public final class RoadNetwork {
         return best - Math.hypot(e.b().pos().getX() - ax, e.b().pos().getZ() - az) / 64;
     }
 
+    /**
+     * Plans the road. Roads leaving a village in a similar direction share a trunk: the shorter ones are planned first
+     * and the longer road follows them. The order comes from the village layout alone, so it is the same in every run.
+     */
     public CompletableFuture<EdgePlan> plan(Edge e) {
-        return plans.computeIfAbsent(e, k -> CompletableFuture.supplyAsync(() -> {
-            // planning is deterministic, so a transient failure (a race inside vanilla) is simply tried again
-            for (int attempt = 1; ; attempt++) {
-                try {
-                    EdgePlan p = planner.plan(k);
-                    if (p == null) failed.incrementAndGet();
-                    else {
-                        routed.incrementAndGet();
-                        routeNanos.addAndGet(p.routeNanos);
-                    }
-                    return p;
-                } catch (Throwable t) {
-                    if (attempt >= 3) {
-                        CountryRoads.LOG.error("Planning road {} failed", k, t);
-                        failed.incrementAndGet();
-                        return null;
-                    }
-                    CountryRoads.LOG.warn("Planning road {} failed ({}), retrying", k, t.toString());
-                }
+        CompletableFuture<EdgePlan> f = plans.get(e);
+        if (f != null) return f;
+        List<CompletableFuture<EdgePlan>> deps = new ArrayList<>();
+        for (Edge d : trunkDeps(e)) deps.add(plan(d));
+        CompletableFuture<EdgePlan> mine = new CompletableFuture<>();
+        CompletableFuture<EdgePlan> prev = plans.putIfAbsent(e, mine);
+        if (prev != null) return prev;
+        CompletableFuture.allOf(deps.toArray(CompletableFuture[]::new)).whenCompleteAsync((v, err) -> {
+            List<EdgePlan> trunks = new ArrayList<>();
+            for (var d : deps) {
+                EdgePlan p = d.getNow(null);
+                if (p != null) trunks.add(p);
             }
-        }, POOL));
+            mine.complete(planWithRetries(e, trunks));
+        }, POOL);
+        return mine;
+    }
+
+    private EdgePlan planWithRetries(Edge k, List<EdgePlan> trunks) {
+        // planning is deterministic, so a transient failure (a race inside vanilla) is simply tried again
+        for (int attempt = 1; ; attempt++) {
+            try {
+                EdgePlan p = planner.plan(k, trunks);
+                if (p == null) failed.incrementAndGet();
+                else {
+                    routed.incrementAndGet();
+                    routeNanos.addAndGet(p.routeNanos);
+                }
+                return p;
+            } catch (Throwable t) {
+                if (attempt >= 3) {
+                    CountryRoads.LOG.error("Planning road {} failed", k, t);
+                    failed.incrementAndGet();
+                    return null;
+                }
+                CountryRoads.LOG.warn("Planning road {} failed ({}), retrying", k, t.toString());
+            }
+        }
+    }
+
+
+    /**
+     * The roads this one may share the way with: shorter roads that start at one of its villages, or whose straight
+     * line passes within 48 blocks of its own. They are planned first; this road snaps onto them where it runs alongside.
+     */
+    public List<Edge> trunkDeps(Edge e) {
+        List<Edge> out = new ArrayList<>();
+        java.util.Set<Edge> seen = new java.util.HashSet<>();
+        for (VillageOracle.Village v : new VillageOracle.Village[]{e.a(), e.b()}) {
+            for (Edge d : edgesInRegion(v.pos().getX() >> REGION_SHIFT, v.pos().getZ() >> REGION_SHIFT)) {
+                if (d.equals(e) || !seen.add(d) || !shorter(d, e)) continue;
+                boolean shares = d.a().equals(v) || d.b().equals(v) || d.a().equals(e.a()) || d.a().equals(e.b()) || d.b().equals(e.a()) || d.b().equals(e.b());
+                if (shares || segmentDistance(d, e) < 48) out.add(d);
+            }
+        }
+        out.sort((p, q) -> shorter(p, q) ? -1 : shorter(q, p) ? 1 : 0);
+        return out;
+    }
+
+    private static double segmentDistance(Edge p, Edge q) {
+        double best = Double.MAX_VALUE;
+        for (int k = 0; k <= 24; k++) {
+            double t = k / 24.0;
+            double px = p.a().pos().getX() + (p.b().pos().getX() - p.a().pos().getX()) * t, pz = p.a().pos().getZ() + (p.b().pos().getZ() - p.a().pos().getZ()) * t;
+            double ax = q.a().pos().getX(), az = q.a().pos().getZ(), bx = q.b().pos().getX(), bz = q.b().pos().getZ();
+            double dx = bx - ax, dz = bz - az, len2 = dx * dx + dz * dz;
+            double u = len2 == 0 ? 0 : Math.clamp(((px - ax) * dx + (pz - az) * dz) / len2, 0, 1);
+            best = Math.min(best, Math.hypot(ax + u * dx - px, az + u * dz - pz));
+        }
+        return best;
+    }
+
+    private static boolean shorter(Edge p, Edge q) {
+        long dp = d2(p.a(), p.b()), dq = d2(q.a(), q.b());
+        if (dp != dq) return dp < dq;
+        int c = Long.compare(p.a().key(), q.a().key());
+        return c != 0 ? c < 0 : p.b().key() < q.b().key();
     }
 
     /** Plans whose road can come near this chunk (blocks until they are ready). */
