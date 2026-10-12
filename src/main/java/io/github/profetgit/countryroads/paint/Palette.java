@@ -55,11 +55,11 @@ public final class Palette {
     }
 
     static final Surface TEMPERATE = new Surface("temperate",
-        new BlockState[]{b(Blocks.DIRT_PATH), b(Blocks.COARSE_DIRT), b(Blocks.GRAVEL)}, new int[]{90, 40},
-        new BlockState[]{b(Blocks.DIRT_PATH), b(Blocks.COARSE_DIRT), b(Blocks.GRAVEL)}, new int[]{350, 60},
+        new BlockState[]{b(Blocks.DIRT_PATH), b(Blocks.COARSE_DIRT), b(Blocks.GRAVEL), b(Blocks.PACKED_MUD)}, new int[]{90, 40, 110},
+        new BlockState[]{b(Blocks.DIRT_PATH), b(Blocks.COARSE_DIRT), b(Blocks.GRAVEL), b(Blocks.PACKED_MUD)}, new int[]{330, 60, 90},
         b(Blocks.MUD_BRICK_SLAB), 120);
     static final Surface TAIGA = new Surface("taiga",
-        new BlockState[]{b(Blocks.DIRT_PATH), b(Blocks.COARSE_DIRT), b(Blocks.GRAVEL), b(Blocks.PODZOL)}, new int[]{110, 90, 20},
+        new BlockState[]{b(Blocks.DIRT_PATH), b(Blocks.COARSE_DIRT), b(Blocks.GRAVEL), b(Blocks.PODZOL), b(Blocks.PACKED_MUD)}, new int[]{110, 90, 20, 90},
         new BlockState[]{b(Blocks.DIRT_PATH), b(Blocks.PODZOL), b(Blocks.COARSE_DIRT), b(Blocks.GRAVEL)}, new int[]{260, 200, 80},
         b(Blocks.SPRUCE_SLAB), 140);
     static final Surface SNOWY = new Surface("snowy",
@@ -83,7 +83,7 @@ public final class Palette {
         new BlockState[]{b(Blocks.COARSE_DIRT), b(Blocks.PACKED_MUD), b(Blocks.DIRT_PATH)}, new int[]{300, 260},
         b(Blocks.MUD_BRICK_SLAB), 160);
     static final Surface JUNGLE = new Surface("jungle",
-        new BlockState[]{b(Blocks.DIRT_PATH), b(Blocks.COARSE_DIRT), b(Blocks.ROOTED_DIRT), b(Blocks.MOSS_BLOCK)}, new int[]{140, 90, 40},
+        new BlockState[]{b(Blocks.DIRT_PATH), b(Blocks.COARSE_DIRT), b(Blocks.ROOTED_DIRT), b(Blocks.MOSS_BLOCK), b(Blocks.PACKED_MUD)}, new int[]{140, 90, 40, 90},
         new BlockState[]{b(Blocks.DIRT_PATH), b(Blocks.MOSS_BLOCK), b(Blocks.ROOTED_DIRT), b(Blocks.COARSE_DIRT)}, new int[]{220, 160, 120},
         b(Blocks.MOSSY_COBBLESTONE_SLAB), 160);
     static final Surface STONY = new Surface("stony",
