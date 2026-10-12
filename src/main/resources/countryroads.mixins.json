@@ -3,7 +3,11 @@
   "minVersion": "0.8",
   "package": "io.github.profetgit.countryroads.mixin",
   "compatibilityLevel": "JAVA_21",
-  "mixins": [],
+  "mixins": [
+    "ChunkStatusTasksMixin",
+    "FeaturePlacerMixin",
+    "WorldGenRegionMixin"
+  ],
   "injectors": {
     "defaultRequire": 1
   }

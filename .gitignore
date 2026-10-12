@@ -9,3 +9,5 @@ __pycache__/
 run/
 run-server/
 dev/server/.work/
+dev/capture/out/
+dev/capture/.work/

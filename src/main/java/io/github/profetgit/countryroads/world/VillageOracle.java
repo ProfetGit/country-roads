@@ -19,7 +19,10 @@ import net.minecraft.world.level.levelgen.LegacyRandomSource;
 import net.minecraft.world.level.levelgen.RandomState;
 import net.minecraft.world.level.levelgen.densityfunction.SamplerContext;
 import net.minecraft.world.level.levelgen.WorldgenRandom;
+import net.minecraft.world.level.levelgen.structure.BoundingBox;
+import net.minecraft.world.level.levelgen.structure.PoolElementStructurePiece;
 import net.minecraft.world.level.levelgen.structure.Structure;
+import net.minecraft.world.level.levelgen.structure.StructurePiece;
 import net.minecraft.world.level.levelgen.structure.StructureSet;
 import net.minecraft.world.level.levelgen.structure.placement.RandomSpreadStructurePlacement;
 import net.minecraft.world.level.levelgen.structure.placement.StructurePlacement;
@@ -29,7 +32,20 @@ import net.minecraft.world.level.levelgen.structure.placement.StructurePlacement
  * structure sets that contain a village. Thread-safe; results are memoised per candidate chunk.
  */
 public final class VillageOracle {
-    public record Village(Identifier structure, ChunkPos chunk, BlockPos pos) {}
+    public record Village(Identifier structure, ChunkPos chunk, BlockPos pos) {
+        public long key() {
+            return chunk.pack();
+        }
+    }
+
+    /** Piece boxes of a generated village; streets are the jigsaw pieces whose template path has "/streets/". */
+    public record Footprint(List<BoundingBox> pieces, List<BoundingBox> streets) {
+        public boolean contains(int x, int z, int inflate) {
+            for (BoundingBox b : pieces)
+                if (x >= b.minX() - inflate && x <= b.maxX() + inflate && z >= b.minZ() - inflate && z <= b.maxZ() + inflate) return true;
+            return false;
+        }
+    }
 
     /** Modded villages not in #minecraft:village; resolved only when present. */
     public static final Set<String> KNOWN_MODDED = Set.of(
@@ -98,6 +114,30 @@ public final class VillageOracle {
         }
         out.sort(Comparator.comparingInt((Village v) -> v.chunk().x()).thenComparingInt(v -> v.chunk().z()));
         return out;
+    }
+
+    private final ConcurrentHashMap<Long, Footprint> footprints = new ConcurrentHashMap<>();
+
+    /** The village's pieces, generated the way Structure.generate does (deterministic, no chunk access). */
+    public Footprint footprint(Village v) {
+        return footprints.computeIfAbsent(v.key(), k -> {
+            List<BoundingBox> pieces = new ArrayList<>();
+            List<BoundingBox> streets = new ArrayList<>();
+            var holder = level.registryAccess().lookupOrThrow(net.minecraft.core.registries.Registries.STRUCTURE).get(v.structure());
+            if (holder.isPresent()) {
+                Structure structure = holder.get().value();
+                var ctx = new Structure.GenerationContext(level.registryAccess(), generator, generator.getBiomeSource(), sampler.get(),
+                    randomState, level.getStructureTemplateManager(), state.getLevelSeed(), v.chunk(), level, structure.biomes()::contains);
+                structure.findValidGenerationPoint(ctx).ifPresent(stub -> {
+                    for (StructurePiece p : stub.getPiecesBuilder().build().pieces()) {
+                        pieces.add(p.getBoundingBox());
+                        if (p instanceof PoolElementStructurePiece pe && pe.getElement().toString().contains("/streets/")) streets.add(p.getBoundingBox());
+                    }
+                });
+            }
+            if (pieces.isEmpty()) pieces.add(new BoundingBox(v.pos().getX() - 8, 0, v.pos().getZ() - 8, v.pos().getX() + 8, 0, v.pos().getZ() + 8));
+            return new Footprint(List.copyOf(pieces), List.copyOf(streets));
+        });
     }
 
     private Optional<Village> at(int setIndex, ChunkPos c) {

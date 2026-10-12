@@ -36,6 +36,10 @@ public final class DevCommands {
         if (task != null && task.getAsBoolean()) TASKS.poll();
     }
 
+    public static void queue(java.util.function.BooleanSupplier task) {
+        TASKS.add(task);
+    }
+
     public static boolean busy() {
         return !TASKS.isEmpty();
     }
@@ -47,6 +51,22 @@ public final class DevCommands {
                 .then(Commands.argument("radius", IntegerArgumentType.integer(16, 20000)).executes(DevCommands::villages)))
             .then(Commands.literal("oraclecheck")
                 .then(Commands.argument("radius", IntegerArgumentType.integer(16, 4000)).executes(DevCommands::oracleCheck)))
+            .then(Commands.literal("pregen")
+                .then(Commands.argument("radius", IntegerArgumentType.integer(16, 4000)).executes(c -> RoadChecks.pregen(c.getSource(), IntegerArgumentType.getInteger(c, "radius")))))
+            .then(Commands.literal("check")
+                .then(Commands.argument("radius", IntegerArgumentType.integer(16, 4000)).executes(c -> RoadChecks.check(c.getSource(), IntegerArgumentType.getInteger(c, "radius")))))
+            .then(Commands.literal("roads")
+                .then(Commands.argument("radius", IntegerArgumentType.integer(16, 8000)).executes(c -> RoadChecks.roads(c.getSource(), IntegerArgumentType.getInteger(c, "radius")))))
+            .then(Commands.literal("shots")
+                .then(Commands.argument("radius", IntegerArgumentType.integer(16, 4000)).executes(c -> {
+                    CommandSourceStack src = c.getSource();
+                    int r = IntegerArgumentType.getInteger(c, "radius");
+                    queue(() -> {
+                        RoadChecks.shots(src, r);
+                        return true;
+                    });
+                    return 1;
+                })))
             .then(Commands.literal("idle").executes(c -> {
                 if (busy()) return 0;
                 CountryRoads.LOG.info("CR-IDLE");
