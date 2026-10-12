@@ -39,6 +39,16 @@ public final class Planner {
         return plan(e, List.of());
     }
 
+    /** +1 when the other road lies to the left of travel (so the right side is clear), else -1. */
+    private static int awaySide(List<double[]> line, int i, int dir, EdgePlan other, int j) {
+        int a = Math.clamp(i - 3, 0, line.size() - 1), b = Math.clamp(i + 3, 0, line.size() - 1);
+        double tx = (line.get(b)[0] - line.get(a)[0]) * dir, tz = (line.get(b)[1] - line.get(a)[1]) * dir;
+        int k = Math.clamp(j, 0, other.length() - 1);
+        double ox = other.x[k] - line.get(i)[0], oz = other.z[k] - line.get(i)[1];
+        double cross = tx * oz - tz * ox;
+        return cross > 0 ? -1 : 1;
+    }
+
     private static boolean sameWay(Trunk t, VillageOracle.Village v, VillageOracle.Village to) {
         if (!(t.p.edge.a().equals(v) || t.p.edge.b().equals(v))) return false;
         VillageOracle.Village o = t.p.edge.a().equals(v) ? t.p.edge.b() : t.p.edge.a();
@@ -151,8 +161,9 @@ public final class Planner {
                         line.set(b + k, new double[]{q[0] + offB[0] * w, q[1] + offB[1] * w});
                     }
                 }
-                if (a > 4) joins.add(new int[]{a - 4, -1});
-                if (b < L - 5) joins.add(new int[]{b + 4, 1});
+                // the signpost goes on the side away from the other road
+                if (a > 4) joins.add(new int[]{a - 4, -1, awaySide(line, a - 4, -1, t.p, match[a])});
+                if (b < L - 5) joins.add(new int[]{b + 4, 1, awaySide(line, b + 4, 1, t.p, match[b])});
             }
         }
 
@@ -204,7 +215,7 @@ public final class Planner {
             boolean towardB = dir > 0;
             String to = towardB ? plan.nameB : plan.nameA, back = towardB ? plan.nameA : plan.nameB;
             int toDist = Math.round((towardB ? n - jn : jn) / 10f) * 10, backDist = Math.round((towardB ? jn : n - jn) / 10f) * 10;
-            post(plan, jn, dir, 1, EdgePlan.SIGN, to, toDist + " blocks", back + "\n" + backDist + " blocks");
+            post(plan, jn, dir, jt[2], EdgePlan.SIGN, to, toDist + " blocks", back + "\n" + backDist + " blocks");
         }
         if (camps != null) camps.choose(plan);
         plan.decor.removeIf(d -> !standable(d));

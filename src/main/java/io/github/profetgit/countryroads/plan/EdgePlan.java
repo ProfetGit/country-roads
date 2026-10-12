@@ -10,8 +10,12 @@ import net.minecraft.world.level.ChunkPos;
  */
 public final class EdgePlan {
     public static final byte GROUND = 0, CAUSEWAY = 1, BRIDGE = 2, BOARDWALK = 3, TUNNEL = 4;
-    /** Columns this far outside the road edge still carry mask data (guards, tree clearing). */
-    public static final float REACH = 5f;
+    /**
+     * Columns this far outside the road edge still carry mask data: trees whose trunk stands this close are not
+     * placed (a big oak's branches reach about this far, and a bank cut beneath them would leave the crown hanging).
+     * Banks and other shaping stop at RoadPainter.BANK_REACH.
+     */
+    public static final float REACH = 9f;
 
     public final Edge edge;
     public final float[] x, z, y, hw;

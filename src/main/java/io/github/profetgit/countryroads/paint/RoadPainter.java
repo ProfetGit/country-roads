@@ -33,6 +33,7 @@ import io.github.profetgit.countryroads.mixin.SignBlockEntityAccessor;
 public final class RoadPainter {
     private static final BlockState AIR = Blocks.AIR.defaultBlockState();
     static final int MAX_FILL = 4, MAX_BANK = 5;
+    static final float BANK_REACH = 5f;
 
     private final Canvas chunk;
     private final BlockPos.MutableBlockPos pos = new BlockPos.MutableBlockPos();
@@ -68,6 +69,7 @@ public final class RoadPainter {
                         int x = (m.cx << 4) + lx, z = (m.cz << 4) + lz;
                         if (pass == 0 && in >= 0) {
                             p.road(x, z, top, q - top >= 0.5, in, m, i);
+                            p.settle(x, z, top, true);
                             cols.set(lx, lz, m.kind[i] != EdgePlan.TUNNEL);
                             painted++;
                         } else if (pass == 1 && in < 0) {
@@ -261,8 +263,8 @@ public final class RoadPainter {
                     set(x, top + 1, z, pal.step().setValue(SlabBlock.TYPE, SlabType.BOTTOM));
                     from++;
                 }
-                clear(x, from, Math.max(top + 4, Math.min(ground, top + MAX_BANK + 1)), z);
-                if (ground > top + MAX_BANK + 1) clear(x, top + 5, ground, z);
+                // everything above the road goes, up to the plants that stood on the old ground
+                clear(x, from, Math.max(top + 4, ground + 2), z);
                 if (ground > top + 1) clearLeaves(x, ground + 1, ground + 10, z);
             }
         }
@@ -270,6 +272,30 @@ public final class RoadPainter {
 
     /** Columns beside the road: rails, tunnel walls, banks, embankments, retaining walls. */
     private void beside(int x, int z, int top, float d, ChunkMask m, int i) {
+        if (d >= BANK_REACH) return;
+        besideShape(x, z, top, d, m, i);
+        settle(x, z, top, false);
+    }
+
+    /**
+     * Grass, podzol and mycelium show frost sides when "snowy": keep that flag true only under snow. In cold biomes the
+     * verge gets its snow back after shaping; the road itself stays clear.
+     */
+    private void settle(int x, int z, int top, boolean road) {
+        int g = groundAt(x, z, top + 6);
+        BlockState s = get(x, g, z);
+        if (!s.hasProperty(net.minecraft.world.level.block.state.properties.BlockStateProperties.SNOWY)) return;
+        BlockState above = get(x, g + 1, z);
+        boolean snow = above.is(Blocks.SNOW) || above.is(Blocks.SNOW_BLOCK);
+        if (!snow && !road && above.isAir() && chunk.biome(x, g + 1, z).value().coldEnoughToSnow(pos.set(x, g + 1, z), 63)) {
+            set(x, g + 1, z, Blocks.SNOW.defaultBlockState());
+            snow = true;
+        }
+        if (s.getValue(net.minecraft.world.level.block.state.properties.BlockStateProperties.SNOWY) != snow)
+            set(x, g, z, s.setValue(net.minecraft.world.level.block.state.properties.BlockStateProperties.SNOWY, snow));
+    }
+
+    private void besideShape(int x, int z, int top, float d, ChunkMask m, int i) {
         long h = hash(x, z);
         byte kind = m.kind[i];
         int s = (int) Math.floor(m.s[i]);
@@ -301,18 +327,19 @@ public final class RoadPainter {
         }
 
         BlockState natural = PaintRules.surfaceOf(get(x, ground, z));
-        shoulder(x, z, top, d, ground, natural, h);
+        shoulder(x, z, top, d, ground, natural, h, m.y[i]);
         wallOrFence(x, z, top, d, m, i);
     }
 
-    private void shoulder(int x, int z, int top, float d, int ground, BlockState natural, long h) {
+    private void shoulder(int x, int z, int top, float d, int ground, BlockState natural, long h, float roadY) {
         if (ground == top + 1 && d < 1.5f) {
             // flush shoulder: no one-block lip along the road
             clear(x, top + 1, top + 3, z);
             set(x, top, z, natural);
         } else if (ground > top + 1) {
-            // cut: a 1:1 bank up from the road edge (beyond the reach the hillside keeps its own face)
-            int bank = top + Math.max(0, (int) Math.floor(d + 0.5f));
+            // cut: a 1:1 bank up from the road edge (beyond the reach the hillside keeps its own face); measured from the
+            // road's smooth height, so the bank's steps follow the road instead of each column's rounding
+            int bank = Math.max(top, Math.round(roadY + Math.max(0f, d - 0.5f)));
             if (ground > bank) {
                 clear(x, bank + 1, ground + 2, z);
                 clearLeaves(x, ground + 3, ground + 10, z);
@@ -324,7 +351,7 @@ public final class RoadPainter {
             clear(x, top + 1, top + 2, z);
         } else if (ground < top - 1 && top - ground <= MAX_FILL + 1) {
             // fill: 1:1 embankment down from the road edge
-            int bank = top - Math.max(0, (int) Math.floor(d - 0.5f));
+            int bank = Math.min(top, Math.round(roadY - Math.max(0f, d - 0.5f)));
             for (int y = ground + 1; y < bank; y++) set(x, y, z, Blocks.DIRT.defaultBlockState());
             if (bank > ground) {
                 set(x, bank, z, natural);
@@ -340,7 +367,7 @@ public final class RoadPainter {
         BlockState here = get(x, top, z);
         if (!PaintRules.terrain(here) || PaintRules.solid(get(x, top + 1, z))) return;
         int r = (int) ((h >>> 33) & 1023);
-        if (r >= (int) (560 * (1 - d / 1.6f))) return;
+        if (r >= (int) (400 * (1 - d / 1.6f))) return;
         Palette.Surface pal = pal(x, top, z);
         BlockState edge = pal.pick(pal.edge(), pal.edgeW(), (int) ((h >>> 43) & 1023));
         clear(x, top + 1, top + 2, z);

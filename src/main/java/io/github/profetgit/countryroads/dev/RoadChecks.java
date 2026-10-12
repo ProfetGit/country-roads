@@ -77,7 +77,7 @@ final class RoadChecks {
         int[] a = area(src, radius);
         int total = a[2] * a[2];
         int[] next = {0};
-        long[] cols = {0}, bad = {0}, breaks = {0}, steps = {0}, skipped = {0};
+        long[] cols = {0}, bad = {0}, breaks = {0}, steps = {0}, skipped = {0}, floating = {0}, snowyBare = {0};
         Set<String> examples = new LinkedHashSet<>();
         MessageDigest sha;
         try {
@@ -101,6 +101,28 @@ final class RoadChecks {
                     // deliberately left alone (old-world chunk players live in)
                     skipped[0]++;
                     continue;
+                }
+                for (int c = 0; c < 256; c++) {
+                    if (m.in[c] < -5 || m.in[c] == Float.NEGATIVE_INFINITY) continue;
+                    int fx = (cx << 4) + (c & 15), fz = (cz << 4) + (c >> 4), ft = (int) Math.floor(m.surface(c));
+                    for (int y = ft - 3; y <= ft + 14; y++) {
+                        BlockState st = chunk.getBlockState(pos.set(fx, y, fz));
+                        if (st.isAir()) continue;
+                        BlockState below = chunk.getBlockState(pos.set(fx, y - 1, fz));
+                        boolean plant = st.canBeReplaced() && st.getFluidState().isEmpty() && !st.is(Blocks.SNOW) && !st.is(BlockTags.LEAVES) && !st.is(Blocks.VINE) && !st.is(BlockTags.CAVE_VINES) && !st.is(Blocks.HANGING_ROOTS);
+                        if (plant && below.isAir()) {
+                            floating[0]++;
+                            if (examples.size() < 6) examples.add("floating " + fx + "," + y + "," + fz + "=" + st.getBlock().getDescriptionId());
+                        }
+                        if (st.hasProperty(net.minecraft.world.level.block.state.properties.BlockStateProperties.SNOWY)
+                            && st.getValue(net.minecraft.world.level.block.state.properties.BlockStateProperties.SNOWY)) {
+                            BlockState up = chunk.getBlockState(pos.set(fx, y + 1, fz));
+                            if (up.isAir()) {
+                                snowyBare[0]++;
+                                if (examples.size() < 6) examples.add("frosty " + fx + "," + y + "," + fz);
+                            }
+                        }
+                    }
                 }
                 for (int lz = 0; lz < 16; lz++) {
                     for (int lx = 0; lx < 16; lx++) {
@@ -135,8 +157,8 @@ final class RoadChecks {
                 }
             }
             if (next[0] < total) return false;
-            String verdict = cols[0] > 0 && bad[0] == 0 && breaks[0] == 0 ? "PASS" : "FAIL";
-            report(src, "CR-CHECK " + verdict + " roadColumns=" + cols[0] + " bad=" + bad[0] + " breaks=" + breaks[0] + " oneBlockSteps=" + steps[0] + " skippedChunks=" + skipped[0]
+            String verdict = cols[0] > 0 && bad[0] == 0 && breaks[0] == 0 && floating[0] == 0 && snowyBare[0] == 0 ? "PASS" : "FAIL";
+            report(src, "CR-CHECK " + verdict + " roadColumns=" + cols[0] + " bad=" + bad[0] + " breaks=" + breaks[0] + " oneBlockSteps=" + steps[0] + " skippedChunks=" + skipped[0] + " floatingPlants=" + floating[0] + " frostyBareGrass=" + snowyBare[0]
                 + " examples=" + examples);
             report(src, "CR-HASH " + HexFormat.of().formatHex(sha.digest()).substring(0, 16) + " columns=" + cols[0]);
             return true;

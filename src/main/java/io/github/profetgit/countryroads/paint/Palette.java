@@ -68,9 +68,9 @@ public final class Palette {
         new BlockState[]{b(Blocks.DIRT_PATH), b(Blocks.PODZOL), b(Blocks.COARSE_DIRT), b(Blocks.GRAVEL)}, new int[]{260, 200, 80},
         b(Blocks.MUD_BRICK_SLAB), 140);
     static final Surface SNOWY = new Surface("snowy",
-        new BlockState[]{b(Blocks.DIRT_PATH), b(Blocks.GRAVEL), b(Blocks.COARSE_DIRT)}, new int[]{260, 90},
-        new BlockState[]{b(Blocks.GRAVEL), b(Blocks.SNOW_BLOCK), b(Blocks.PACKED_ICE), b(Blocks.DIRT_PATH)}, new int[]{330, 90, 200},
-        b(Blocks.COBBLESTONE_SLAB), 160);
+        new BlockState[]{b(Blocks.DIRT_PATH), b(Blocks.GRAVEL), b(Blocks.COARSE_DIRT)}, new int[]{140, 60},
+        new BlockState[]{b(Blocks.DIRT_PATH), b(Blocks.GRAVEL), b(Blocks.SNOW_BLOCK)}, new int[]{300, 110},
+        b(Blocks.COBBLESTONE_SLAB), 200);
     static final Surface DESERT = new Surface("desert",
         new BlockState[]{b(Blocks.SMOOTH_SANDSTONE), b(Blocks.SANDSTONE), b(Blocks.SAND)}, new int[]{260, 60},
         new BlockState[]{b(Blocks.SAND), b(Blocks.SANDSTONE), b(Blocks.SMOOTH_SANDSTONE)}, new int[]{240, 160},
@@ -99,7 +99,8 @@ public final class Palette {
     /** Palette from biome tags (vanilla, then conventional c: tags), else from climate. */
     public static Surface surface(Holder<Biome> b) {
         if (b.is(ConventionalBiomeTags.IS_BADLANDS) || b.is(BiomeTags.IS_BADLANDS)) return BADLANDS;
-        if (b.is(ConventionalBiomeTags.IS_DESERT) || b.is(ConventionalBiomeTags.IS_SANDY) || b.is(ConventionalBiomeTags.IS_BEACH)) return DESERT;
+        boolean cold = b.is(ConventionalBiomeTags.IS_SNOWY) || b.is(ConventionalBiomeTags.IS_ICY) || b.value().getBaseTemperature() < 0.15f;
+        if (!cold && (b.is(ConventionalBiomeTags.IS_DESERT) || b.is(ConventionalBiomeTags.IS_SANDY) || b.is(ConventionalBiomeTags.IS_BEACH))) return DESERT;
         if (b.is(ConventionalBiomeTags.IS_SWAMP) || b.is(Biomes.MANGROVE_SWAMP)) return SWAMP;
         if (b.is(ConventionalBiomeTags.IS_SAVANNA) || b.is(BiomeTags.IS_SAVANNA)) return SAVANNA;
         if (b.is(ConventionalBiomeTags.IS_JUNGLE) || b.is(BiomeTags.IS_JUNGLE)) return JUNGLE;
