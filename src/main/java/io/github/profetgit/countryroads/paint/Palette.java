@@ -117,7 +117,7 @@ public final class Palette {
     static BlockState surface(Surface pal, float in, long h, BlockState natural, boolean onGround) {
         int r = (int) ((h >>> 8) & 1023);
         if (in < 0.6f) {
-            if (r < pal.keepNatural() && onGround && PaintRules.terrain(natural) && !natural.is(Blocks.DIRT)) return natural;
+            if (r < pal.keepNatural() && onGround && keepable(pal, natural)) return natural;
             return pal.pick(pal.edge(), pal.edgeW(), (int) ((h >>> 24) & 1023));
         }
         return pal.pick(pal.centre(), pal.centreW(), r);
@@ -134,6 +134,13 @@ public final class Palette {
 
     public static BlockState deck(Holder<Biome> biome) {
         return wood(wood(biome)).planks().defaultBlockState();
+    }
+
+    /** Which natural top blocks may stay as patches on the road edge (never bare grass in snow, never stray sand). */
+    static boolean keepable(Surface pal, BlockState natural) {
+        if (pal == SNOWY) return false;
+        if (pal == DESERT || pal == BADLANDS) return natural.is(Blocks.SAND) || natural.is(Blocks.RED_SAND);
+        return natural.is(Blocks.GRASS_BLOCK) || natural.is(Blocks.PODZOL) || natural.is(Blocks.MYCELIUM);
     }
 
     static BlockState masonry(long h) {

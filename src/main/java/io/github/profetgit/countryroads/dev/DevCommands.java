@@ -90,7 +90,9 @@ public final class DevCommands {
                         var m = n.mask(x >> 4, z >> 4);
                         int i = io.github.profetgit.countryroads.plan.ChunkMask.idx(x & 15, z & 15);
                         int top = (int) Math.floor(m.surface(i));
-                        StringBuilder sb = new StringBuilder("CR-COLUMN " + x + "," + z + " in=" + m.in[i] + " y=" + m.y[i] + " kind=" + m.kind[i] + " :");
+                        var biome = level.getBiome(new net.minecraft.core.BlockPos(x, top, z));
+                        StringBuilder sb = new StringBuilder("CR-COLUMN " + x + "," + z + " in=" + m.in[i] + " y=" + m.y[i] + " kind=" + m.kind[i]
+                            + " biome=" + biome.unwrapKey().map(k -> k.identifier().toString()).orElse("?") + " palette=" + io.github.profetgit.countryroads.paint.Palette.surface(biome).name() + " :");
                         for (int y = top + 4; y >= top - 8; y--)
                             sb.append(" ").append(y).append("=").append(level.getBlockState(new net.minecraft.core.BlockPos(x, y, z)).getBlock().getDescriptionId().replace("block.minecraft.", ""));
                         CountryRoads.LOG.info(sb.toString());
