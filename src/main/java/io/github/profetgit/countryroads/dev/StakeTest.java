@@ -60,12 +60,19 @@ final class StakeTest {
                 }
                 case 1 -> {
                     built[1] = be.journal.size();
+                    walk(level, cells[0], stake);
                     if (keep) {
                         // leave it built and print a camera shot: behind the stake, looking down the path
                         var cs = cells[0];
                         var far = cs.get(Math.min(cs.size() - 1, 14));
-                        double dx = far.x() - stake.getX(), dz = far.z() - stake.getZ(), l = Math.max(1, Math.hypot(dx, dz));
-                        double cx = stake.getX() + 0.5 - dx / l * 6, cz = stake.getZ() + 0.5 - dz / l * 6, cy = stake.getY() + 4;
+                        for (int i = 4; i < cs.size(); i++)
+                            if (cs.get(i).stair() >= 0 && !cs.get(i).edge()) {
+                                far = cs.get(i);
+                                break;
+                            }
+                        var prevCell = cs.get(Math.max(0, cs.indexOf(far) - 6));
+                        double dx = far.x() - prevCell.x(), dz = far.z() - prevCell.z(), l = Math.max(1, Math.hypot(dx, dz));
+                        double cx = far.x() + 0.5 - dx / l * 7, cz = far.z() + 0.5 - dz / l * 7, cy = far.y() + 5;
                         double lx = far.x() + 0.5 - cx, ly = far.y() + 1 - cy, lz = far.z() + 0.5 - cz;
                         CountryRoads.LOG.info(String.format(java.util.Locale.ROOT, "CR-SHOT %.1f %.1f %.1f %.1f %.1f housepath", cx, cy, cz,
                             Math.toDegrees(Math.atan2(-lx, lz)), -Math.toDegrees(Math.atan2(ly, Math.hypot(lx, lz)))));
@@ -89,6 +96,44 @@ final class StakeTest {
             }
         });
         return 1;
+    }
+
+    /**
+     * Walks the built path: centre cells must touch along a side, differ by at most one block, every rise must be a
+     * stair facing up the slope in its upper cell, and two blocks of headroom must be free. Prints CR-STAKE-WALK.
+     */
+    private static void walk(ServerLevel level, java.util.List<HousePaths.Cell> cells, BlockPos stake) {
+        int bad = 0, stairs = 0, steps = 0, flat = 0;
+        HousePaths.Cell prev = null;
+        for (HousePaths.Cell c : cells) {
+            BlockPos at = new BlockPos(c.x(), c.y(), c.z());
+            var state = level.getBlockState(at);
+            boolean isStair = state.getBlock() instanceof net.minecraft.world.level.block.StairBlock;
+            if (isStair) stairs++;
+            if (isStair != (c.stair() >= 0) && !c.water()) bad = fail(++bad, "stair mismatch", at, state);
+            if (isStair && state.getValue(net.minecraft.world.level.block.StairBlock.FACING) != HousePaths.DIRS[c.stair()]) bad = fail(++bad, "stair facing", at, state);
+            if (!isStair && !state.isSolid() && !c.water()) bad = fail(++bad, "surface not solid", at, state);
+            for (int dy = 1; dy <= 2; dy++)
+                if (!level.getBlockState(at.above(dy)).getCollisionShape(level, at.above(dy)).isEmpty()) bad = fail(++bad, "headroom", at.above(dy), level.getBlockState(at.above(dy)));
+            if (!c.edge()) {
+                if (prev != null) {
+                    int dy = c.y() - prev.y(), man = Math.abs(c.x() - prev.x()) + Math.abs(c.z() - prev.z());
+                    if (man != 1) bad = fail(++bad, "cells do not touch", at, state);
+                    if (Math.abs(dy) > 1) bad = fail(++bad, "step over one block", at, state);
+                    if (dy == 0) flat++;
+                    else steps++;
+                    var upper = dy > 0 ? c : prev;
+                    if (Math.abs(dy) == 1 && upper.stair() < 0 && !upper.water()) bad = fail(++bad, "step without stair", new BlockPos(upper.x(), upper.y(), upper.z()), state);
+                }
+                prev = c;
+            }
+        }
+        CountryRoads.LOG.info("CR-STAKE-WALK " + (bad == 0 ? "PASS" : "FAIL") + " cells=" + cells.size() + " flat=" + flat + " steps=" + steps + " stairs=" + stairs + " bad=" + bad);
+    }
+
+    private static int fail(int n, String what, BlockPos at, net.minecraft.world.level.block.state.BlockState s) {
+        if (n <= 8) CountryRoads.LOG.info("CR-STAKE-WALK-BAD " + what + " at " + at.toShortString() + " " + s);
+        return n;
     }
 
     /** One number per path cell and its 8 neighbours: hash of the blocks from 3 below to 3 above the planned surface. */

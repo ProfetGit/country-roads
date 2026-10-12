@@ -33,10 +33,9 @@ import net.minecraft.world.item.Items;
 import net.minecraft.world.level.ChunkPos;
 import net.minecraft.world.level.block.Block;
 import net.minecraft.world.level.block.Blocks;
-import net.minecraft.world.level.block.SlabBlock;
+import net.minecraft.world.level.block.StairBlock;
 import net.minecraft.world.level.block.entity.BlockEntity;
 import net.minecraft.world.level.block.state.BlockState;
-import net.minecraft.world.level.block.state.properties.SlabType;
 import net.minecraft.world.level.levelgen.Heightmap;
 
 /**
@@ -46,7 +45,7 @@ import net.minecraft.world.level.levelgen.Heightmap;
  * stake restores every block it changed and refunds what was paid.
  */
 public final class HousePaths {
-    static final int RADIUS = 160, MAX_EXPANSIONS = 150_000, PREVIEW_TICKS = 2400, CONTAINER_REACH = 8;
+    static final int RADIUS = 160, MAX_EXPANSIONS = 400_000, PREVIEW_TICKS = 2400, CONTAINER_REACH = 8;
     static final long SLICE_NANOS = 2_000_000;
     /**
      * Path blocks go in (and come back out) exactly, without neighbour updates: a full update would break the top half
@@ -56,11 +55,32 @@ public final class HousePaths {
     static final Set<Item> EARTH = Set.of(Items.DIRT, Items.COARSE_DIRT, Items.GRAVEL, Items.SAND, Items.RED_SAND, Items.PACKED_MUD,
         Items.MUD, Items.ROOTED_DIRT, Items.COBBLESTONE, Items.DIRT_PATH);
 
-    /** One path cell: column, planned surface (half blocks), whether it is a deck over water. */
-    public record Cell(int x, int z, double y, boolean water, boolean edge) {}
+    /** One path cell: column, surface block Y, deck over water, outer column, and the stair facing (index into DIRS, -1 for a flat block). */
+    public record Cell(int x, int z, int y, boolean water, boolean edge, int stair) {}
 
     /** A finished survey: cells from the door to the road, and the bill. */
     public record Survey(List<Cell> cells, int earth, int planks) {}
+
+    public static final Direction[] DIRS = {Direction.NORTH, Direction.EAST, Direction.SOUTH, Direction.WEST};
+    static final int[] DX = {0, 1, 0, -1}, DZ = {-1, 0, 1, 0};
+    static final int TURN = 5, END_STEP = 12, START = 4, OFF = 1 << 27;
+    static final int UNKNOWN = Integer.MIN_VALUE, CLOSED = -100000;
+
+    private static long skey(int x, int z, int d) {
+        return ((long) (x + OFF) << 31) | ((long) (z + OFF) << 3) | d;
+    }
+
+    private static int sx(long s) {
+        return (int) (s >>> 31) - OFF;
+    }
+
+    private static int sz(long s) {
+        return (int) ((s >>> 3) & 0x0FFFFFFF) - OFF;
+    }
+
+    private static int sd(long s) {
+        return (int) (s & 7);
+    }
 
     private static final class Job {
         final ServerLevel level;
@@ -70,7 +90,7 @@ public final class HousePaths {
         final PriorityQueue<long[]> open = new PriorityQueue<>((a, b) -> a[0] != b[0] ? Long.compare(a[0], b[0]) : Long.compare(a[1], b[1]));
         final Long2LongOpenHashMap parent = new Long2LongOpenHashMap();
         final Long2IntOpenHashMap cost = new Long2IntOpenHashMap();
-        final Long2IntOpenHashMap height = new Long2IntOpenHashMap();
+        final Long2IntOpenHashMap ground = new Long2IntOpenHashMap();
         int expansions;
 
         Job(ServerLevel level, BlockPos stake, ServerPlayer player) {
@@ -80,6 +100,7 @@ public final class HousePaths {
             this.sx = stake.getX();
             this.sz = stake.getZ();
             cost.defaultReturnValue(Integer.MAX_VALUE);
+            ground.defaultReturnValue(UNKNOWN);
         }
     }
 
@@ -110,9 +131,8 @@ public final class HousePaths {
     public static void survey(ServerLevel level, BlockPos stake, ServerPlayer player) {
         SURVEYS.removeIf(j -> j.stake.equals(stake));
         Job j = new Job(level, stake, player);
-        long k = key(stake.getX(), stake.getZ());
+        long k = skey(stake.getX(), stake.getZ(), START);
         j.cost.put(k, 0);
-        j.height.put(k, stake.getY() - 1);
         j.open.add(new long[]{0, k});
         SURVEYS.add(j);
         tell(player, Component.translatable("countryroads.stake.surveying").withStyle(ChatFormatting.GRAY), true);
@@ -188,31 +208,31 @@ public final class HousePaths {
                 }
                 DustParticleOptions dust = new DustParticleOptions(0xF5D76E, 1.1f);
                 for (Cell c : p.cells)
-                    p.level.sendParticles(p.player, dust, true, false, c.x + 0.5, Math.floor(c.y) + 1.15, c.z + 0.5, 1, 0.15, 0.02, 0.15, 0);
+                    p.level.sendParticles(p.player, dust, true, false, c.x + 0.5, c.y + 1.15, c.z + 0.5, 1, 0.15, 0.02, 0.15, 0);
             }
         }
     }
 
-    /** Dijkstra over terrain columns; true when finished (found or failed). */
+    /**
+     * Dijkstra over terrain columns, four-connected so every cell touches the next along a side, with a small penalty for
+     * turning (straight runs, few corners). True when finished (found or failed).
+     */
     private static boolean step(Job j, long until) {
         ServerLevel level = j.level;
         while (!j.open.isEmpty()) {
             if (System.nanoTime() > until) return false;
             long[] n = j.open.poll();
-            long k = n[1];
+            long s = n[1];
             int c = (int) n[0];
-            if (c != j.cost.get(k)) continue;
-            int x = ChunkPos.getX(k), z = ChunkPos.getZ(k);
+            if (c != j.cost.get(s)) continue;
+            int x = sx(s), z = sz(s), d0 = sd(s);
             if (!(x == j.sx && z == j.sz) && RoadColumns.isOpenRoad(level, x, z)) {
-                finish(j, k);
+                finish(j, s);
                 return true;
             }
             if (++j.expansions > MAX_EXPANSIONS) break;
-            int y = j.height.get(k);
-            for (Direction d : Direction.Plane.HORIZONTAL) step(j, x, z, y, c, d.getStepX(), d.getStepZ(), 10);
-            for (int dx = -1; dx <= 1; dx += 2)
-                for (int dz = -1; dz <= 1; dz += 2)
-                    if (passable(j, x + dx, z) >= -1000 && passable(j, x, z + dz) >= -1000) step(j, x, z, y, c, dx, dz, 14);
+            for (int d = 0; d < 4; d++)
+                if (d0 == START || d != ((d0 + 2) & 3)) expand(j, s, x, z, d0, c, d);
         }
         io.github.profetgit.countryroads.CountryRoads.LOG.debug("Survey from {} found no road after {} columns", j.stake, j.expansions);
         if (j.player == null) io.github.profetgit.countryroads.CountryRoads.LOG.info("CR-STAKE-DEBUG expansions=" + j.expansions);
@@ -220,21 +240,35 @@ public final class HousePaths {
         return true;
     }
 
-    private static void step(Job j, int x, int z, int y, int c, int dx, int dz, int base) {
-        int nx = x + dx, nz = z + dz;
-        if (Math.max(Math.abs(nx - j.sx), Math.abs(nz - j.sz)) > RADIUS) return;
-        int ny = passable(j, nx, nz);
+    private static void expand(Job j, long s, int x, int z, int d0, int c, int d) {
+        int nx = x + DX[d], nz = z + DZ[d];
+        if (Math.max(Math.abs(nx - j.sx), Math.abs(nz - j.sz)) > RADIUS || (nx == j.sx && nz == j.sz)) return;
+        int ny = ground(j, nx, nz);
         if (ny < -1000) return;
+        int from = ground(j, x, z);
         boolean wet = ny >= 100000;
-        int walkTo = wet ? ny - 100000 + 1 : ny, walkFrom = y >= 100000 ? y - 100000 + 1 : y;
-        if (Math.abs(walkTo - walkFrom) > 1) return;
-        int cost = c + base + 8 * Math.abs(walkTo - walkFrom) + (wet ? 30 : 0);
-        long k = key(nx, nz);
-        if (cost >= j.cost.get(k)) return;
-        j.cost.put(k, cost);
-        j.height.put(k, ny);
-        j.parent.put(k, key(x, z));
-        j.open.add(new long[]{cost, k});
+        int walkTo = wet ? ny - 100000 + 1 : ny, walkFrom = from >= 100000 ? from - 100000 + 1 : from;
+        int dy = walkTo - walkFrom;
+        if (Math.abs(dy) > 1) return;
+        int add = 10 + (d0 != START && d0 != d ? TURN : 0) + 8 * Math.abs(dy) + (wet ? 30 : 0);
+        if (dy < 0 && x == j.sx && z == j.sz) add += END_STEP;
+        else if (dy > 0 && RoadColumns.isOpenRoad(j.level, nx, nz)) add += END_STEP;
+        long ns = skey(nx, nz, d);
+        int cost = c + add;
+        if (cost >= j.cost.get(ns)) return;
+        j.cost.put(ns, cost);
+        j.parent.put(ns, s);
+        j.open.add(new long[]{cost, ns});
+    }
+
+    private static int ground(Job j, int x, int z) {
+        long k = key(x, z);
+        int v = j.ground.get(k);
+        if (v == UNKNOWN) {
+            v = passable(j, x, z);
+            j.ground.put(k, v);
+        }
+        return v;
     }
 
     /**
@@ -243,77 +277,101 @@ public final class HousePaths {
      */
     private static int passable(Job j, int x, int z) {
         ServerLevel level = j.level;
-        if (level.getChunkSource().getChunkNow(x >> 4, z >> 4) == null) return -100000;
+        if (level.getChunkSource().getChunkNow(x >> 4, z >> 4) == null) return CLOSED;
         int top = level.getHeight(Heightmap.Types.MOTION_BLOCKING_NO_LEAVES, x, z) - 1;
         BlockState s = level.getBlockState(new BlockPos(x, top, z));
         if (s.is(Blocks.WATER)) {
             int below = top;
             while (below > level.getMinY() && level.getBlockState(new BlockPos(x, below, z)).is(Blocks.WATER) && top - below < 6) below--;
-            return top - below >= 6 ? -100000 : top + 100000;
+            return top - below >= 6 ? CLOSED : top + 100000;
         }
-        if (!s.getFluidState().isEmpty() || s.is(BlockTags.LOGS) || (Retrofit.isCrafted(s) && !RoadColumns.isRoad(level, x, z))) return -100000;
+        if (!s.getFluidState().isEmpty() || s.is(BlockTags.LOGS) || (Retrofit.isCrafted(s) && !RoadColumns.isRoad(level, x, z))) return CLOSED;
         if (x == j.sx && z == j.sz) return j.stake.getY() - 1;
         return top;
     }
 
-    private static void finish(Job j, long roadKey) {
-        List<long[]> line = new ArrayList<>();
-        long k = j.parent.get(roadKey);
-        while (true) {
-            if (k == key(j.sx, j.sz)) break;
-            line.add(new long[]{k, j.height.get(k)});
-            if (!j.parent.containsKey(k)) break;
-            k = j.parent.get(k);
+    /** The planned surface and stair facing of every centre cell. */
+    record Plan(int[] y, int[] stair) {}
+
+    /**
+     * Heights are whole blocks and never differ by more than one between neighbours (the search guarantees it). A cell
+     * that is a lone bump or dip is levelled with its neighbours, then every one-block rise gets a stair in its upper
+     * cell, facing up the slope; a one-block drop onto or off the fixed ends (door, road) stays a plain step.
+     * dir[i] is the move into cell i, dir[n] the move into the road.
+     */
+    static Plan plan(int[] ty, boolean[] wet, int startY, int roadY, int[] dir) {
+        int n = ty.length;
+        int[] y = ty.clone(), stair = new int[n];
+        for (int pass = 0; pass < 3; pass++)
+            for (int i = 0; i < n; i++) {
+                if (wet[i]) continue;
+                int p = i == 0 ? startY : y[i - 1], q = i == n - 1 ? roadY : y[i + 1];
+                if (y[i] > p && y[i] > q) y[i] = Math.max(p, q);
+                else if (y[i] < p && y[i] < q) y[i] = Math.min(p, q);
+            }
+        for (int i = 0; i < n; i++) {
+            stair[i] = -1;
+            if (wet[i]) continue;
+            int p = i == 0 ? startY : y[i - 1], q = i == n - 1 ? roadY : y[i + 1];
+            if (y[i] == p + 1) stair[i] = dir[i];
+            else if (y[i] == q + 1) stair[i] = (dir[i + 1] + 2) & 3;
         }
-        java.util.Collections.reverse(line);
-        if (line.isEmpty()) {
+        return new Plan(y, stair);
+    }
+
+    private static void finish(Job j, long endState) {
+        long startState = skey(j.sx, j.sz, START);
+        List<Long> chain = new ArrayList<>();
+        long s = j.parent.get(endState);
+        while (s != startState) {
+            chain.add(s);
+            s = j.parent.get(s);
+        }
+        java.util.Collections.reverse(chain);
+        int n = chain.size();
+        if (n == 0) {
             tell(j.player, Component.translatable("countryroads.stake.on_road"), true);
             return;
         }
-        int n = line.size();
-        double[] y = new double[n];
+        int[] xs = new int[n], zs = new int[n], ty = new int[n], dir = new int[n + 1];
         boolean[] wet = new boolean[n];
-        for (int i = 0; i < n; i++) {
-            int h = (int) line.get(i)[1];
-            wet[i] = h >= 100000;
-            y[i] = wet[i] ? h - 100000 + 1 : h;
-        }
-        for (int pass = 0; pass < 2; pass++) {
-            for (int i = 1; i < n; i++) if (!wet[i]) y[i] = Math.max(y[i - 1] - 0.5, Math.min(y[i - 1] + 0.5, y[i]));
-            for (int i = n - 2; i >= 0; i--) if (!wet[i]) y[i] = Math.max(y[i + 1] - 0.5, Math.min(y[i + 1] + 0.5, y[i]));
-        }
-        List<Cell> cells = new ArrayList<>();
         java.util.HashSet<Long> used = new java.util.HashSet<>();
+        for (int i = 0; i < n; i++) {
+            long st = chain.get(i);
+            xs[i] = sx(st);
+            zs[i] = sz(st);
+            dir[i] = sd(st);
+            int h = ground(j, xs[i], zs[i]);
+            wet[i] = h >= 100000;
+            ty[i] = wet[i] ? h - 100000 + 1 : h;
+            used.add(key(xs[i], zs[i]));
+        }
+        dir[n] = sd(endState);
+        int roadH = ground(j, sx(endState), sz(endState));
+        Plan plan = plan(ty, wet, j.stake.getY() - 1, roadH >= 100000 ? roadH - 100000 + 1 : roadH, dir);
+        List<Cell> cells = new ArrayList<>();
         int earth = 0, planks = 0;
         for (int i = 0; i < n; i++) {
-            int x = ChunkPos.getX(line.get(i)[0]), z = ChunkPos.getZ(line.get(i)[0]);
-            double yy = Math.round(y[i] * 2) / 2.0;
-            cells.add(new Cell(x, z, yy, wet[i], false));
-            used.add(line.get(i)[0]);
+            cells.add(new Cell(xs[i], zs[i], plan.y[i], wet[i], false, plan.stair[i]));
             if (wet[i]) planks++;
             else earth++;
-            // width 2 except the last three cells at the door
-            if (i >= 3 && i + 1 < n) {
-                int px = ChunkPos.getX(line.get(i + 1)[0]) - ChunkPos.getX(line.get(i - 1)[0]), pz = ChunkPos.getZ(line.get(i + 1)[0]) - ChunkPos.getZ(line.get(i - 1)[0]);
-                int rx = Integer.signum(-pz), rz = Integer.signum(px);
-                if (Math.abs(rx) + Math.abs(rz) == 2) rz = 0;
-                long side = key(x + rx, z + rz);
-                if (!used.contains(side) && !wet[i]) {
-                    int sh = passable(j, x + rx, z + rz);
-                    if (sh > -1000 && sh < 100000 && Math.abs(sh - yy) <= 1 && !RoadColumns.isRoad(j.level, x + rx, z + rz)) {
-                        cells.add(new Cell(x + rx, z + rz, yy, false, true));
-                        used.add(side);
-                        earth++;
-                    }
-                }
+            // width 2 on the right of travel, except the first three cells at the door and the last at the road
+            if (i >= 3 && i + 1 < n && !wet[i]) {
+                int rx = xs[i] + (-DZ[dir[i]]), rz = zs[i] + DX[dir[i]];
+                if (used.contains(key(rx, rz)) || (rx == j.sx && rz == j.sz) || RoadColumns.isRoad(j.level, rx, rz)) continue;
+                int sh = ground(j, rx, rz);
+                if (sh < -1000 || sh >= 100000 || Math.abs(sh - plan.y[i]) > 1) continue;
+                cells.add(new Cell(rx, rz, plan.y[i], false, true, plan.stair[i]));
+                used.add(key(rx, rz));
+                earth++;
             }
         }
-        Survey s = new Survey(cells, (earth + 1) / 2, planks);
+        Survey sv = new Survey(cells, (earth + 1) / 2, planks);
         if (j.level.getBlockEntity(j.stake) instanceof StakeBlockEntity be && be.status != StakeBlockEntity.BUILT) {
             be.status = StakeBlockEntity.PREVIEW;
-            be.survey = s;
+            be.survey = sv;
             if (j.player != null) PREVIEWS.put(j.stake, new Preview(j.level, j.stake, j.player, cells, j.level.getGameTime() + PREVIEW_TICKS));
-            tell(j.player, Component.translatable("countryroads.stake.preview", n, s.earth, s.planks).withStyle(ChatFormatting.YELLOW), false);
+            tell(j.player, Component.translatable("countryroads.stake.preview", n, sv.earth, sv.planks).withStyle(ChatFormatting.YELLOW), false);
         }
     }
 
@@ -330,31 +388,37 @@ public final class HousePaths {
     }
 
     private static void lay(ServerLevel level, StakeBlockEntity be, Cell c) {
-        int top = (int) Math.floor(c.y);
-        boolean half = c.y - top >= 0.5;
+        int y = c.y;
         BlockPos.MutableBlockPos p = new BlockPos.MutableBlockPos();
         long h = c.x * 0x2545F4914F6CDD1DL ^ c.z * 0x9E3779B97F4A7C15L;
+        BlockPos at = new BlockPos(c.x, y, c.z);
+        var biome = level.getBiome(at);
         BlockState surface;
         if (c.water) {
-            surface = Palette.deck(level.getBiome(p.set(c.x, top, c.z)));
+            surface = Palette.deck(biome);
         } else {
-            BlockState natural = level.getBlockState(p.set(c.x, top, c.z));
-            surface = Palette.housePath(level.getBiome(p), c.edge ? 0.3f : 1f, h, natural);
-            if (!PaintRules.solid(level.getBlockState(p.set(c.x, top - 1, c.z)))) change(level, be, p.immutable(), Blocks.DIRT.defaultBlockState());
+            int t = level.getHeight(Heightmap.Types.MOTION_BLOCKING_NO_LEAVES, c.x, c.z) - 1;
+            BlockState natural = level.getBlockState(p.set(c.x, t, c.z));
+            for (int yy = t; yy > y; yy--)
+                if (!level.getBlockState(p.set(c.x, yy, c.z)).isAir()) change(level, be, p.immutable(), Blocks.AIR.defaultBlockState());
+            for (int yy = t + 1; yy < y; yy++)
+                if (!PaintRules.solid(level.getBlockState(p.set(c.x, yy, c.z)))) change(level, be, p.immutable(), Blocks.DIRT.defaultBlockState());
+            if (!PaintRules.solid(level.getBlockState(at.below()))) change(level, be, at.below(), Blocks.DIRT.defaultBlockState());
+            surface = c.stair >= 0
+                ? Palette.houseStair(biome).setValue(StairBlock.FACING, DIRS[c.stair])
+                : Palette.housePath(biome, c.edge ? 0.3f : 1f, h, natural);
         }
-        BlockPos at = new BlockPos(c.x, top, c.z);
         change(level, be, at, surface);
-        if (half) change(level, be, at.above(), Palette.houseStep(level.getBiome(at)).setValue(SlabBlock.TYPE, SlabType.BOTTOM));
-        for (int dy = half ? 2 : 1; dy <= 2; dy++) {
+        for (int dy = 1; dy <= 2; dy++) {
             BlockPos q = at.above(dy);
             BlockState s = level.getBlockState(q);
-            if (!s.isAir() && (s.canBeReplaced() || s.is(Blocks.SNOW))) change(level, be, q, Blocks.AIR.defaultBlockState());
+            if (!s.isAir() && (s.canBeReplaced() || s.is(Blocks.SNOW) || s.is(BlockTags.LEAVES))) change(level, be, q, Blocks.AIR.defaultBlockState());
         }
         if (!RoadColumns.isRoad(level, c.x, c.z)) {
             RoadColumns.mark(level, c.x, c.z, true);
             be.columns.add(key(c.x, c.z));
         }
-        level.sendParticles(new BlockParticleOption(ParticleTypes.BLOCK, surface), c.x + 0.5, top + 1.05, c.z + 0.5, 6, 0.3, 0.05, 0.3, 0);
+        level.sendParticles(new BlockParticleOption(ParticleTypes.BLOCK, surface), c.x + 0.5, y + 1.05, c.z + 0.5, 6, 0.3, 0.05, 0.3, 0);
         if (((c.x + c.z) & 3) == 0)
             level.playSound(null, at, surface.getSoundType().getPlaceSound(), SoundSource.BLOCKS, 0.5f, 0.9f + ((h >>> 40) & 7) * 0.03f);
     }

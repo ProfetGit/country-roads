@@ -128,8 +128,13 @@ public final class Palette {
         return surface(surface(biome), in, h, natural, true);
     }
 
-    public static BlockState houseStep(Holder<Biome> biome) {
-        return surface(biome).step();
+    public static BlockState houseStair(Holder<Biome> biome) {
+        Block slab = surface(biome).step().getBlock();
+        if (slab == Blocks.MUD_BRICK_SLAB) return Blocks.MUD_BRICK_STAIRS.defaultBlockState();
+        if (slab == Blocks.SMOOTH_SANDSTONE_SLAB) return Blocks.SMOOTH_SANDSTONE_STAIRS.defaultBlockState();
+        if (slab == Blocks.SMOOTH_RED_SANDSTONE_SLAB) return Blocks.SMOOTH_RED_SANDSTONE_STAIRS.defaultBlockState();
+        if (slab == Blocks.MOSSY_COBBLESTONE_SLAB) return Blocks.MOSSY_COBBLESTONE_STAIRS.defaultBlockState();
+        return Blocks.COBBLESTONE_STAIRS.defaultBlockState();
     }
 
     public static BlockState deck(Holder<Biome> biome) {
