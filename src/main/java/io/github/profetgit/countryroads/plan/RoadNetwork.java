@@ -176,12 +176,13 @@ public final class RoadNetwork {
         ChunkMask m = masks.get(key);
         if (m != null) return m;
         List<EdgePlan> ready = new ArrayList<>();
-        for (EdgePlan p : plansNear(cx, cz, 40)) if (p.touches(key) || hasDecorOrCamp(p, cx, cz)) ready.add(p);
+        List<EdgePlan> near = plansNear(cx, cz, 40);
+        for (EdgePlan p : near) if (p.touches(key) || hasDecorOrCamp(p, cx, cz)) ready.add(p);
         if (ready.isEmpty()) m = ChunkMask.EMPTY;
         else {
             List<VillageOracle.Footprint> villages = new ArrayList<>();
             for (var v : oracle.find(cx - 12, cz - 12, cx + 12, cz + 12)) villages.add(oracle.footprint(v));
-            m = ChunkMask.build(cx, cz, ready, villages);
+            m = ChunkMask.build(cx, cz, ready, villages, near);
             if (!m.any()) m = ChunkMask.EMPTY;
         }
         if (masks.size() > 50_000) masks.clear();

@@ -47,7 +47,34 @@ public final class ChunkMask {
         return Math.round(y[i] * 2) / 2.0;
     }
 
-    public static ChunkMask build(int cx, int cz, List<EdgePlan> plans, List<VillageOracle.Footprint> villages) {
+    /**
+     * Posts from different roads can land on top of each other (two roads leaving one village). Signposts within 4
+     * blocks merge into one post whose sign lists both destinations; lamp posts near any other post are dropped. The
+     * survivor is chosen by position, so every chunk agrees.
+     */
+    public static java.util.List<EdgePlan.Decor> resolveDecor(List<EdgePlan> plans) {
+        java.util.List<EdgePlan.Decor> all = new java.util.ArrayList<>();
+        for (EdgePlan p : plans) all.addAll(p.decor);
+        all.sort(java.util.Comparator.comparingInt((EdgePlan.Decor d) -> d.type()).thenComparingInt(EdgePlan.Decor::x).thenComparingInt(EdgePlan.Decor::z)
+            .thenComparing(EdgePlan.Decor::front1));
+        java.util.List<EdgePlan.Decor> out = new java.util.ArrayList<>();
+        for (EdgePlan.Decor d : all) {
+            int hit = -1;
+            for (int k = 0; k < out.size() && hit < 0; k++) {
+                EdgePlan.Decor o = out.get(k);
+                if (Math.max(Math.abs(o.x() - d.x()), Math.abs(o.z() - d.z())) <= 4) hit = k;
+            }
+            if (hit < 0) out.add(d);
+            else if (d.type() == EdgePlan.SIGN && out.get(hit).type() == EdgePlan.SIGN && !out.get(hit).front1().contains(d.front1())) {
+                EdgePlan.Decor o = out.get(hit);
+                out.set(hit, new EdgePlan.Decor(o.x(), o.z(), o.y(), o.type(), o.toRoad(), o.along(),
+                    o.front1() + "\n" + o.front2(), d.front1() + "\n" + d.front2(), o.back()));
+            }
+        }
+        return out;
+    }
+
+    public static ChunkMask build(int cx, int cz, List<EdgePlan> plans, List<VillageOracle.Footprint> villages, List<EdgePlan> near) {
         ChunkMask m = new ChunkMask(cx, cz);
         long key = net.minecraft.world.level.ChunkPos.pack(cx, cz);
         int bx = cx << 4, bz = cz << 4;
@@ -89,15 +116,13 @@ public final class ChunkMask {
                 }
             }
         }
-        for (EdgePlan p : plans) {
-            for (EdgePlan.Decor d : p.decor) {
-                if (d.chunk() != key) continue;
-                boolean inVillage = false;
-                for (VillageOracle.Footprint f : villages) inVillage |= f.contains(d.x(), d.z(), 1);
-                if (!inVillage) {
-                    m.decor.add(d);
-                    m.any = true;
-                }
+        for (EdgePlan.Decor d : resolveDecor(near)) {
+            if (d.chunk() != key) continue;
+            boolean inVillage = false;
+            for (VillageOracle.Footprint f : villages) inVillage |= f.contains(d.x(), d.z(), 1);
+            if (!inVillage) {
+                m.decor.add(d);
+                m.any = true;
             }
         }
         if (m.any) {

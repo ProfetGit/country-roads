@@ -18,7 +18,7 @@ import net.minecraft.world.level.levelgen.Heightmap;
 final class StakeTest {
     private StakeTest() {}
 
-    static int run(CommandSourceStack src, int x, int z) {
+    static int run(CommandSourceStack src, int x, int z, boolean keep) {
         ServerLevel level = src.getLevel();
         int r = 170, cr = (r >> 4) + 1;
         for (int dx = -cr; dx <= cr; dx++)
@@ -60,6 +60,18 @@ final class StakeTest {
                 }
                 case 1 -> {
                     built[1] = be.journal.size();
+                    if (keep) {
+                        // leave it built and print a camera shot: behind the stake, looking down the path
+                        var cs = cells[0];
+                        var far = cs.get(Math.min(cs.size() - 1, 14));
+                        double dx = far.x() - stake.getX(), dz = far.z() - stake.getZ(), l = Math.max(1, Math.hypot(dx, dz));
+                        double cx = stake.getX() + 0.5 - dx / l * 6, cz = stake.getZ() + 0.5 - dz / l * 6, cy = stake.getY() + 4;
+                        double lx = far.x() + 0.5 - cx, ly = far.y() + 1 - cy, lz = far.z() + 0.5 - cz;
+                        CountryRoads.LOG.info(String.format(java.util.Locale.ROOT, "CR-SHOT %.1f %.1f %.1f %.1f %.1f housepath", cx, cy, cz,
+                            Math.toDegrees(Math.atan2(-lx, lz)), -Math.toDegrees(Math.atan2(ly, Math.hypot(lx, lz)))));
+                        CountryRoads.LOG.info("CR-STAKE KEPT cells=" + built[0] + " journal=" + built[1]);
+                        return true;
+                    }
                     int[] mid = snapshot(level, cells[0]);
                     int changed = diff(before[0], mid);
                     HousePaths.takeUp(level, stake);

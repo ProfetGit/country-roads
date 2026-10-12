@@ -27,12 +27,13 @@ def main() -> int:
     ap.add_argument("--name", default="look")
     ap.add_argument("--mods", nargs="*", default=[])
     ap.add_argument("--time", type=int, default=5000)
+    ap.add_argument("--after", nargs="*", default=[], help="extra commands after pregen (e.g. 'countryroads staketest X Z keep')")
     a = ap.parse_args()
     x, z = a.at
     p = f"execute positioned {x} 80 {z} run countryroads"
     run = subprocess.run([sys.executable, str(ROOT / "dev/server/wg.py"), "--seed", a.seed, "--name", f"cap-{a.name}",
                           *(["--mods", *a.mods] if a.mods else []),
-                          f"{p} pregen {a.radius + 128}", f"{p} shots {a.radius}"], capture_output=True, text=True)
+                          f"{p} pregen {a.radius + 128}", *a.after, f"{p} shots {a.radius}"], capture_output=True, text=True)
     print(run.stdout)
     shots = [l.split()[1:] for l in run.stdout.splitlines() if l.startswith("CR-SHOT ") and "none" not in l]
     if run.returncode or not shots:

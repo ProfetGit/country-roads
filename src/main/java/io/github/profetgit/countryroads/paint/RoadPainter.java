@@ -126,7 +126,9 @@ public final class RoadPainter {
         exact(x, y, z, sign);
         var be = new net.minecraft.world.level.block.entity.HangingSignBlockEntity(new BlockPos(x, y, z), sign);
         SignBlockEntityAccessor raw = (SignBlockEntityAccessor) be;
-        raw.countryroads$setFront(text(d.front1(), d.front2(), "", ""));
+        // merged posts carry "name\ndistance" pairs: up to two destinations, two lines each
+        String[] a = d.front1().split("\n", 2), b = d.front2().split("\n", 2);
+        raw.countryroads$setFront(a.length == 2 ? text(a[0], a[1], b[0], b.length == 2 ? b[1] : "") : text("", d.front1(), d.front2(), ""));
         raw.countryroads$setBack(text("Welcome to", d.back(), "", ""));
         raw.countryroads$setWaxed(true);
         chunk.blockEntity(be);

@@ -98,7 +98,9 @@ public final class DevCommands {
                     }))))
             .then(Commands.literal("staketest")
                 .then(Commands.argument("x", IntegerArgumentType.integer()).then(Commands.argument("z", IntegerArgumentType.integer())
-                    .executes(c -> StakeTest.run(c.getSource(), IntegerArgumentType.getInteger(c, "x"), IntegerArgumentType.getInteger(c, "z"))))))
+                    .executes(c -> StakeTest.run(c.getSource(), IntegerArgumentType.getInteger(c, "x"), IntegerArgumentType.getInteger(c, "z"), false))
+                    .then(Commands.literal("keep")
+                        .executes(c -> StakeTest.run(c.getSource(), IntegerArgumentType.getInteger(c, "x"), IntegerArgumentType.getInteger(c, "z"), true))))))
             .then(Commands.literal("retroresume").executes(c -> {
                 io.github.profetgit.countryroads.retro.Retrofit.paused = false;
                 return 1;
