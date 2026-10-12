@@ -60,6 +60,10 @@ public final class RoadNetwork {
         return n.oracle.setCount() == 0 ? null : n;
     }
 
+    public static java.util.concurrent.Executor executor() {
+        return POOL;
+    }
+
     public static void clear() {
         NETWORKS.clear();
     }

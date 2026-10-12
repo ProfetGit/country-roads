@@ -46,6 +46,9 @@ def main() -> int:
     ap.add_argument("--port", type=int, default=25591)
     ap.add_argument("--timeout", type=float, default=900)
     ap.add_argument("--xmx", default="4G")
+    ap.add_argument("--no-mod", action="store_true", help="vanilla + Fabric API only (old-world tests); waits --wait s after commands")
+    ap.add_argument("--wait", type=float, default=60)
+    ap.add_argument("--jvm", action="append", default=[], help="extra JVM arg, repeatable: --jvm=-Dcountryroads.retrofit.paused=true")
     ap.add_argument("cmds", nargs="*")
     a = ap.parse_args()
 
@@ -60,10 +63,11 @@ def main() -> int:
         f"online-mode=false\nserver-ip=127.0.0.1\nserver-port={a.port}\nlevel-seed={a.seed}\n"
         "generate-structures=true\nview-distance=4\nsimulation-distance=4\nspawn-protection=0\ndifficulty=peaceful\n"
         "max-tick-time=-1\npause-when-empty-seconds=-1\nsync-chunk-writes=false\nenable-query=false\nenable-rcon=false\n")
-    for j in [mod_jar(), ms.fabric_api(MC), *map(Path, a.mods)]:
+    for j in [*([] if a.no_mod else [mod_jar()]), ms.fabric_api(MC), *map(Path, a.mods)]:
         shutil.copy(j, work / "mods")
     cmd = ms.command(MC, "fabric", work)
     cmd = [c.replace("-Xmx2G", f"-Xmx{a.xmx}") for c in cmd]
+    cmd = cmd[:1] + a.jvm + cmd[1:]
     log = work / "server.log"
     ok = True
     with slots.slot("server", f"countryroads {a.name}"), open(log, "w") as out:
@@ -79,7 +83,9 @@ def main() -> int:
                 proc.stdin.write(c + "\n")
             proc.stdin.flush()
             end = time.time() + a.timeout
-            while True:
+            if a.no_mod:
+                time.sleep(a.wait)
+            while not a.no_mod:
                 proc.stdin.write("countryroads idle\n")
                 proc.stdin.flush()
                 if ms.wait_for(log, proc, r"CR-IDLE", 3):

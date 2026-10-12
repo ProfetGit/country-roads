@@ -71,8 +71,64 @@ public final class DevCommands {
                 .then(Commands.argument("radius", IntegerArgumentType.integer(16, 4000)).executes(c -> RoadChecks.decor(c.getSource(), IntegerArgumentType.getInteger(c, "radius")))))
             .then(Commands.literal("perks")
                 .then(Commands.argument("radius", IntegerArgumentType.integer(16, 4000)).executes(c -> RoadChecks.perks(c.getSource(), IntegerArgumentType.getInteger(c, "radius")))))
+            .then(Commands.literal("inhabit")
+                .then(Commands.argument("x", IntegerArgumentType.integer()).then(Commands.argument("z", IntegerArgumentType.integer())
+                    .executes(c -> {
+                        var level = c.getSource().getLevel();
+                        int x = IntegerArgumentType.getInteger(c, "x"), z = IntegerArgumentType.getInteger(c, "z");
+                        var chunk = level.getChunk(x >> 4, z >> 4);
+                        chunk.setInhabitedTime(io.github.profetgit.countryroads.retro.Retrofit.LIVED_IN * 2);
+                        CountryRoads.LOG.info("CR-INHABIT chunk " + (x >> 4) + "," + (z >> 4));
+                        return 1;
+                    }))))
+            .then(Commands.literal("column")
+                .then(Commands.argument("x", IntegerArgumentType.integer()).then(Commands.argument("z", IntegerArgumentType.integer())
+                    .executes(c -> {
+                        var level = c.getSource().getLevel();
+                        int x = IntegerArgumentType.getInteger(c, "x"), z = IntegerArgumentType.getInteger(c, "z");
+                        var n = io.github.profetgit.countryroads.plan.RoadNetwork.get(level);
+                        var m = n.mask(x >> 4, z >> 4);
+                        int i = io.github.profetgit.countryroads.plan.ChunkMask.idx(x & 15, z & 15);
+                        int top = (int) Math.floor(m.surface(i));
+                        StringBuilder sb = new StringBuilder("CR-COLUMN " + x + "," + z + " in=" + m.in[i] + " y=" + m.y[i] + " kind=" + m.kind[i] + " :");
+                        for (int y = top + 4; y >= top - 8; y--)
+                            sb.append(" ").append(y).append("=").append(level.getBlockState(new net.minecraft.core.BlockPos(x, y, z)).getBlock().getDescriptionId().replace("block.minecraft.", ""));
+                        CountryRoads.LOG.info(sb.toString());
+                        return 1;
+                    }))))
+            .then(Commands.literal("retroresume").executes(c -> {
+                io.github.profetgit.countryroads.retro.Retrofit.paused = false;
+                return 1;
+            }))
+            .then(Commands.literal("inhabitroads")
+                .then(Commands.argument("radius", IntegerArgumentType.integer(16, 4000)).executes(c -> {
+                    var level = c.getSource().getLevel();
+                    var n = io.github.profetgit.countryroads.plan.RoadNetwork.get(level);
+                    var at = net.minecraft.core.BlockPos.containing(c.getSource().getPosition());
+                    int r = IntegerArgumentType.getInteger(c, "radius") >> 4, marked = 0;
+                    for (int cx = (at.getX() >> 4) - r; cx <= (at.getX() >> 4) + r && marked < 3; cx += 5)
+                        for (int cz = (at.getZ() >> 4) - r; cz <= (at.getZ() >> 4) + r && marked < 3; cz++)
+                            if (n.mask(cx, cz).any()) {
+                                level.getChunk(cx, cz).setInhabitedTime(io.github.profetgit.countryroads.retro.Retrofit.LIVED_IN * 2);
+                                CountryRoads.LOG.info("CR-INHABIT chunk " + cx + "," + cz);
+                                marked++;
+                                cz += 6;
+                            }
+                    return marked;
+                })))
+            .then(Commands.literal("retrostats").executes(c -> {
+                queue(() -> {
+                    if (io.github.profetgit.countryroads.retro.Retrofit.busy()) return false;
+                    var R = io.github.profetgit.countryroads.retro.Retrofit.class;
+                    CountryRoads.LOG.info("CR-RETRO queued=" + io.github.profetgit.countryroads.retro.Retrofit.queued + " noRoad=" + io.github.profetgit.countryroads.retro.Retrofit.plain
+                        + " painted=" + io.github.profetgit.countryroads.retro.Retrofit.painted + " livedIn=" + io.github.profetgit.countryroads.retro.Retrofit.skippedLivedIn
+                        + " crafted=" + io.github.profetgit.countryroads.retro.Retrofit.skippedCrafted + " craftedBlocks=" + io.github.profetgit.countryroads.retro.Retrofit.craftedSeen);
+                    return true;
+                });
+                return 1;
+            }))
             .then(Commands.literal("idle").executes(c -> {
-                if (busy()) return 0;
+                if (busy() || io.github.profetgit.countryroads.retro.Retrofit.busy()) return 0;
                 CountryRoads.LOG.info("CR-IDLE");
                 return 1;
             }))

@@ -4,7 +4,9 @@ import io.github.profetgit.countryroads.dev.DevCommands;
 import io.github.profetgit.countryroads.perk.RoadSpeed;
 import io.github.profetgit.countryroads.plan.RoadNetwork;
 import io.github.profetgit.countryroads.world.RoadColumns;
+import io.github.profetgit.countryroads.retro.Retrofit;
 import net.fabricmc.api.ModInitializer;
+import net.fabricmc.fabric.api.event.lifecycle.v1.ServerChunkEvents;
 import net.fabricmc.fabric.api.event.lifecycle.v1.ServerLifecycleEvents;
 import net.fabricmc.fabric.api.command.v2.CommandRegistrationCallback;
 import net.fabricmc.fabric.api.event.lifecycle.v1.ServerTickEvents;
@@ -21,6 +23,8 @@ public final class CountryRoads implements ModInitializer {
         RoadColumns.init();
         ServerTickEvents.END_SERVER_TICK.register(server -> DevCommands.tick());
         ServerTickEvents.END_LEVEL_TICK.register(RoadSpeed::tick);
+        ServerTickEvents.END_SERVER_TICK.register(server -> Retrofit.tick());
+        ServerChunkEvents.CHUNK_LOAD.register(Retrofit::onLoad);
         ServerLifecycleEvents.SERVER_STOPPED.register(server -> RoadNetwork.clear());
         LOG.info("Country Roads loaded");
     }

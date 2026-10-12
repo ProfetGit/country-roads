@@ -36,6 +36,8 @@ abstract class ChunkStatusTasksMixin {
         try {
             ChunkMask m = GenContext.mask(chunk.getPos());
             if (m != null) RoadPainter.paint(chunk, m);
+            else if (io.github.profetgit.countryroads.plan.RoadNetwork.get(context.level()) != null)
+                io.github.profetgit.countryroads.world.RoadColumns.store(chunk, io.github.profetgit.countryroads.world.RoadColumns.empty());
         } catch (Throwable t) {
             CountryRoads.LOG.error("Road painting failed for chunk {}", chunk.getPos(), t);
         } finally {

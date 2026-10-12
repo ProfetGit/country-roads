@@ -49,8 +49,13 @@ public record RoadColumns(long[] bits) {
         return Arrays.stream(bits).anyMatch(b -> b != 0);
     }
 
+    /** Always stored, empty too: its presence means "Country Roads has handled this chunk" (old-world retrofit skips it). */
     public static void store(ChunkAccess chunk, RoadColumns cols) {
-        if (cols.any()) ((AttachmentTarget) chunk).setAttached(TYPE, cols);
+        ((AttachmentTarget) chunk).setAttached(TYPE, cols);
+    }
+
+    public static boolean handled(ChunkAccess chunk) {
+        return ((AttachmentTarget) chunk).hasAttached(TYPE);
     }
 
     /** Road column at (x, z) if that chunk is loaded; never loads or generates a chunk. */

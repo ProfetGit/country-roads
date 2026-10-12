@@ -34,17 +34,24 @@ public final class RoadPainter {
     private static final BlockState AIR = Blocks.AIR.defaultBlockState();
     static final int MAX_FILL = 4, MAX_BANK = 5;
 
-    private final ChunkAccess chunk;
+    private final Canvas chunk;
     private final BlockPos.MutableBlockPos pos = new BlockPos.MutableBlockPos();
 
-    private RoadPainter(ChunkAccess chunk) {
+    private RoadPainter(Canvas chunk) {
         this.chunk = chunk;
     }
 
+    /** Worldgen: paints a generating chunk and records its road columns (empty too: "this chunk was handled"). */
     public static int paint(ChunkAccess chunk, ChunkMask m) {
-        if (!m.any()) return 0;
-        RoadPainter p = new RoadPainter(chunk);
         RoadColumns cols = RoadColumns.empty();
+        int painted = m.any() ? paint(Canvas.proto(chunk), m, cols) : 0;
+        RoadColumns.store(chunk, cols);
+        return painted;
+    }
+
+    public static int paint(Canvas canvas, ChunkMask m, RoadColumns cols) {
+        if (!m.any()) return 0;
+        RoadPainter p = new RoadPainter(canvas);
         int painted = 0;
         GenContext.bypass(true);
         try {
@@ -57,7 +64,7 @@ public final class RoadPainter {
                         if (in == Float.NEGATIVE_INFINITY) continue;
                         double q = m.surface(i);
                         int top = (int) Math.floor(q);
-                        if (top <= chunk.getMinY() + 4 || top >= chunk.getMaxY() - 8) continue;
+                        if (top <= canvas.minY() + 4 || top >= canvas.maxY() - 8) continue;
                         int x = (m.cx << 4) + lx, z = (m.cz << 4) + lz;
                         if (pass == 0 && in >= 0) {
                             p.road(x, z, top, q - top >= 0.5, in, m, i);
@@ -70,7 +77,6 @@ public final class RoadPainter {
                 }
             }
             for (EdgePlan.Decor d : m.decor) p.decor(d, m);
-            RoadColumns.store(chunk, cols);
         } finally {
             GenContext.bypass(false);
         }
@@ -94,7 +100,7 @@ public final class RoadPainter {
             raw.countryroads$setFront(text("", d.front1(), d.front2(), ""));
             raw.countryroads$setBack(text("", d.back(), "", ""));
             raw.countryroads$setWaxed(true);
-            chunk.setBlockEntity(be);
+            chunk.blockEntity(be);
         } else {
             set(d.x(), g + 2, d.z(), wood.fence().defaultBlockState());
             set(d.x(), g + 3, d.z(), Blocks.LANTERN.defaultBlockState());
@@ -107,21 +113,39 @@ public final class RoadPainter {
     }
 
     private BlockState get(int x, int y, int z) {
-        return chunk.getBlockState(pos.set(x, y, z));
+        return chunk.get(pos.set(x, y, z));
     }
 
     private void set(int x, int y, int z, BlockState s) {
-        if (y <= chunk.getMinY() || y >= chunk.getMaxY()) return;
-        chunk.setBlockState(pos.set(x, y, z), s, 0);
-        // fences, walls, stairs and the like get their connections when the chunk is finished
-        if (PaintRules.connects(s)) chunk.markPosForPostProcessing(pos);
+        if (y <= chunk.minY() || y >= chunk.maxY()) return;
+        chunk.set(pos.set(x, y, z), s);
     }
 
     private void clear(int x, int y0, int y1, int z) {
-        for (int y = y0; y <= y1; y++) if (!get(x, y, z).isAir()) set(x, y, z, AIR);
+        for (int y = y0; y <= y1; y++) {
+            BlockState here = get(x, y, z);
+            if (here.isAir()) continue;
+            if (here.is(BlockTags.LOGS)) chunk.beforeRemovingLog(pos.set(x, y, z).immutable());
+            if (!get(x, y, z).isAir()) set(x, y, z, AIR);
+        }
+    }
+
+    static final String DEBUG = System.getProperty("countryroads.debugColumn", "");
+
+    private String dump(int x, int z, int top) {
+        StringBuilder sb = new StringBuilder();
+        for (int y = top + 3; y >= top - 6; y--) sb.append(' ').append(y).append('=').append(get(x, y, z).getBlock().getDescriptionId().replace("block.minecraft.", ""));
+        return sb.toString();
     }
 
     private void road(int x, int z, int top, boolean half, float in, ChunkMask m, int i) {
+        boolean dbg = DEBUG.equals(x + "," + z);
+        if (dbg) io.github.profetgit.countryroads.CountryRoads.LOG.info("CR-TRACE before " + x + "," + z + " top=" + top + " ground=" + groundAt(x, z, top) + dump(x, z, top));
+        road0(x, z, top, half, in, m, i);
+        if (dbg) io.github.profetgit.countryroads.CountryRoads.LOG.info("CR-TRACE after" + dump(x, z, top));
+    }
+
+    private void road0(int x, int z, int top, boolean half, float in, ChunkMask m, int i) {
         long h = hash(x, z);
         int ground = groundAt(x, z, top);
         byte kind = m.kind[i];
@@ -165,6 +189,8 @@ public final class RoadPainter {
                 BlockState natural = get(x, ground, z);
                 fillBelow(x, z, ground, top);
                 Palette.Surface pal = pal(x, top, z);
+                // overhangs over caves: the surface gets a solid block under it (gravel and sand would fall)
+                if (!PaintRules.solid(get(x, top - 1, z))) set(x, top - 1, z, Blocks.DIRT.defaultBlockState());
                 set(x, top, z, Palette.surface(pal, in, h, natural, ground == top));
                 int from = top + 1;
                 if (half) {
@@ -247,7 +273,7 @@ public final class RoadPainter {
     }
 
     private Palette.Surface pal(int x, int y, int z) {
-        return Palette.surface(chunk.getNoiseBiome(net.minecraft.core.QuartPos.fromBlock(x), net.minecraft.core.QuartPos.fromBlock(y), net.minecraft.core.QuartPos.fromBlock(z)));
+        return Palette.surface(chunk.biome(x, y, z));
     }
 
     private void fillBelow(int x, int z, int ground, int top) {
@@ -257,7 +283,7 @@ public final class RoadPainter {
     /** A post from y down to the ground or riverbed. */
     private void post(int x, int z, int y, BlockState s) {
         BlockState post = s.hasProperty(RotatedPillarBlock.AXIS) ? s : s;
-        for (int k = y; k > chunk.getMinY() + 1 && k > y - 64; k--) {
+        for (int k = y; k > chunk.minY() + 1 && k > y - 64; k--) {
             BlockState here = get(x, k, z);
             if (PaintRules.solid(here) && here.getFluidState().isEmpty()) break;
             set(x, k, z, post);
@@ -266,7 +292,7 @@ public final class RoadPainter {
 
     /** Top block of the terrain itself (solid, not a tree), searched near the planned surface. */
     private int groundAt(int x, int z, int top) {
-        int hi = Math.min(chunk.getMaxY() - 1, top + 24), lo = Math.max(chunk.getMinY(), top - 48);
+        int hi = Math.min(chunk.maxY() - 1, top + 24), lo = Math.max(chunk.minY(), top - 48);
         for (int y = hi; y >= lo; y--) if (PaintRules.terrain(get(x, y, z))) return y;
         return lo;
     }
