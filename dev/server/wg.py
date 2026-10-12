@@ -59,7 +59,7 @@ def main() -> int:
     (work / "server.properties").write_text(
         f"online-mode=false\nserver-ip=127.0.0.1\nserver-port={a.port}\nlevel-seed={a.seed}\n"
         "generate-structures=true\nview-distance=4\nsimulation-distance=4\nspawn-protection=0\ndifficulty=peaceful\n"
-        "max-tick-time=-1\nsync-chunk-writes=false\nenable-query=false\nenable-rcon=false\n")
+        "max-tick-time=-1\npause-when-empty-seconds=-1\nsync-chunk-writes=false\nenable-query=false\nenable-rcon=false\n")
     for j in [mod_jar(), ms.fabric_api(MC), *map(Path, a.mods)]:
         shutil.copy(j, work / "mods")
     cmd = ms.command(MC, "fabric", work)

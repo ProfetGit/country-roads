@@ -1,5 +1,6 @@
 package io.github.profetgit.countryroads.mixin;
 
+import io.github.profetgit.countryroads.CountryRoads;
 import io.github.profetgit.countryroads.gen.GenContext;
 import io.github.profetgit.countryroads.paint.RoadPainter;
 import io.github.profetgit.countryroads.plan.ChunkMask;
@@ -20,15 +21,25 @@ abstract class ChunkStatusTasksMixin {
     @Inject(method = "generateFeatures", at = @At("HEAD"))
     private static void countryroads$begin(WorldGenContext context, ChunkStep step, StaticCache2D<GenerationChunkHolder> chunks, ChunkAccess chunk,
                                            CallbackInfoReturnable<CompletableFuture<ChunkAccess>> cir) {
-        GenContext.begin(context.level(), chunk.getPos());
+        try {
+            GenContext.begin(context.level(), chunk.getPos());
+        } catch (Throwable t) {
+            GenContext.end();
+            CountryRoads.LOG.error("Road planning failed for chunk {}", chunk.getPos(), t);
+        }
     }
 
     @Inject(method = "generateFeatures", at = @At(value = "INVOKE",
         target = "Lnet/minecraft/world/level/levelgen/blending/Blender;generateBorderTicks(Lnet/minecraft/server/level/WorldGenRegion;Lnet/minecraft/world/level/chunk/ChunkAccess;)V"))
     private static void countryroads$paint(WorldGenContext context, ChunkStep step, StaticCache2D<GenerationChunkHolder> chunks, ChunkAccess chunk,
                                            CallbackInfoReturnable<CompletableFuture<ChunkAccess>> cir) {
-        ChunkMask m = GenContext.mask(chunk.getPos());
-        if (m != null) RoadPainter.paint(chunk, m);
-        GenContext.end();
+        try {
+            ChunkMask m = GenContext.mask(chunk.getPos());
+            if (m != null) RoadPainter.paint(chunk, m);
+        } catch (Throwable t) {
+            CountryRoads.LOG.error("Road painting failed for chunk {}", chunk.getPos(), t);
+        } finally {
+            GenContext.end();
+        }
     }
 }

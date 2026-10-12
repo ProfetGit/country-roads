@@ -118,6 +118,27 @@ public final class VillageOracle {
 
     private final ConcurrentHashMap<Long, Footprint> footprints = new ConcurrentHashMap<>();
 
+    /**
+     * Jigsaw piece generation reads StructureTemplate palettes whose block cache is a plain HashMap. Our planner
+     * threads take turns, and a ConcurrentModificationException from a vanilla worldgen thread racing us is retried.
+     */
+    public static final Object JIGSAW = new Object();
+
+    public static <T> T jigsaw(java.util.function.Supplier<T> work) {
+        RuntimeException last = null;
+        for (int attempt = 0; attempt < 4; attempt++) {
+            try {
+                synchronized (JIGSAW) {
+                    return work.get();
+                }
+            } catch (java.util.ConcurrentModificationException e) {
+                last = e;
+                Thread.onSpinWait();
+            }
+        }
+        throw last;
+    }
+
     /** The village's pieces, generated the way Structure.generate does (deterministic, no chunk access). */
     public Footprint footprint(Village v) {
         return footprints.computeIfAbsent(v.key(), k -> {
@@ -128,12 +149,11 @@ public final class VillageOracle {
                 Structure structure = holder.get().value();
                 var ctx = new Structure.GenerationContext(level.registryAccess(), generator, generator.getBiomeSource(), sampler.get(),
                     randomState, level.getStructureTemplateManager(), state.getLevelSeed(), v.chunk(), level, structure.biomes()::contains);
-                structure.findValidGenerationPoint(ctx).ifPresent(stub -> {
-                    for (StructurePiece p : stub.getPiecesBuilder().build().pieces()) {
-                        pieces.add(p.getBoundingBox());
-                        if (p instanceof PoolElementStructurePiece pe && pe.getElement().toString().contains("/streets/")) streets.add(p.getBoundingBox());
-                    }
-                });
+                var built = jigsaw(() -> structure.findValidGenerationPoint(ctx).map(stub -> stub.getPiecesBuilder().build().pieces()).orElse(List.of()));
+                for (StructurePiece p : built) {
+                    pieces.add(p.getBoundingBox());
+                    if (p instanceof PoolElementStructurePiece pe && pe.getElement().toString().contains("/streets/")) streets.add(p.getBoundingBox());
+                }
             }
             if (pieces.isEmpty()) pieces.add(new BoundingBox(v.pos().getX() - 8, 0, v.pos().getZ() - 8, v.pos().getX() + 8, 0, v.pos().getZ() + 8));
             return new Footprint(List.copyOf(pieces), List.copyOf(streets));

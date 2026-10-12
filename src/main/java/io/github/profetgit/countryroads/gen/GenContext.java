@@ -1,6 +1,7 @@
 package io.github.profetgit.countryroads.gen;
 
 import io.github.profetgit.countryroads.plan.ChunkMask;
+import io.github.profetgit.countryroads.plan.EdgePlan;
 import io.github.profetgit.countryroads.plan.RoadNetwork;
 import it.unimi.dsi.fastutil.longs.Long2ObjectOpenHashMap;
 import net.minecraft.core.BlockPos;
@@ -90,7 +91,7 @@ public final class GenContext {
                 int x = origin.getX() + dx, z = origin.getZ() + dz;
                 ChunkMask m = c.maskAt(x, z);
                 if (m == null || !m.any()) continue;
-                if (m.in[ChunkMask.idx(x & 15, z & 15)] >= -3.5f) return true;
+                if (m.in[ChunkMask.idx(x & 15, z & 15)] >= -EdgePlan.REACH) return true;
             }
         }
         return false;

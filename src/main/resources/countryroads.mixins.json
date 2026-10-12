@@ -5,7 +5,11 @@
   "compatibilityLevel": "JAVA_21",
   "mixins": [
     "ChunkStatusTasksMixin",
+    "ChunkStatusTasksStartsMixin",
     "FeaturePlacerMixin",
+    "MapItemMixin",
+    "NaturalSpawnerMixin",
+    "SignBlockEntityAccessor",
     "WorldGenRegionMixin"
   ],
   "injectors": {

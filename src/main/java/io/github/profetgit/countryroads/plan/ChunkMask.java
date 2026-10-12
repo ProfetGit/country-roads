@@ -16,7 +16,10 @@ public final class ChunkMask {
     public final float[] y = new float[256];
     public final byte[] kind = new byte[256];
     public final float[] s = new float[256];
+    public final short[] runLen = new short[256], runPos = new short[256];
+    public final byte[] wood = new byte[256];
     private boolean any;
+    public final java.util.List<EdgePlan.Decor> decor = new java.util.ArrayList<>();
 
     public ChunkMask(int cx, int cz) {
         this.cx = cx;
@@ -66,7 +69,11 @@ public final class ChunkMask {
                         if (v > m.in[c]) {
                             m.in[c] = v;
                             m.y[c] = p.y[i] + t * (p.y[i + 1] - p.y[i]);
-                            m.kind[c] = t < 0.5f ? p.kind[i] : p.kind[i + 1];
+                            int k = t < 0.5f ? i : i + 1;
+                            m.kind[c] = p.kind[k];
+                            m.runLen[c] = p.runLen[k];
+                            m.runPos[c] = p.runPos[k];
+                            m.wood[c] = p.wood[k];
                             m.s[c] = i + t;
                             m.any = true;
                         }
@@ -74,7 +81,24 @@ public final class ChunkMask {
                 }
             }
         }
+        for (EdgePlan p : plans) {
+            for (EdgePlan.Decor d : p.decor) {
+                if (d.chunk() != key) continue;
+                boolean inVillage = false;
+                for (VillageOracle.Footprint f : villages) inVillage |= f.contains(d.x(), d.z(), 1);
+                if (!inVillage) {
+                    m.decor.add(d);
+                    m.any = true;
+                }
+            }
+        }
         if (m.any) {
+            for (EdgePlan p : plans)
+                for (net.minecraft.world.level.levelgen.structure.BoundingBox b : p.campBoxes)
+                    for (int lx = 0; lx < 16; lx++)
+                        for (int lz = 0; lz < 16; lz++)
+                            if (bx + lx >= b.minX() - 2 && bx + lx <= b.maxX() + 2 && bz + lz >= b.minZ() - 2 && bz + lz <= b.maxZ() + 2)
+                                m.in[idx(lx, lz)] = Float.NEGATIVE_INFINITY;
             for (VillageOracle.Footprint f : villages)
                 for (int lx = 0; lx < 16; lx++)
                     for (int lz = 0; lz < 16; lz++)

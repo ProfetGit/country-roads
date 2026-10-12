@@ -67,6 +67,10 @@ public final class DevCommands {
                     });
                     return 1;
                 })))
+            .then(Commands.literal("decor")
+                .then(Commands.argument("radius", IntegerArgumentType.integer(16, 4000)).executes(c -> RoadChecks.decor(c.getSource(), IntegerArgumentType.getInteger(c, "radius")))))
+            .then(Commands.literal("perks")
+                .then(Commands.argument("radius", IntegerArgumentType.integer(16, 4000)).executes(c -> RoadChecks.perks(c.getSource(), IntegerArgumentType.getInteger(c, "radius")))))
             .then(Commands.literal("idle").executes(c -> {
                 if (busy()) return 0;
                 CountryRoads.LOG.info("CR-IDLE");

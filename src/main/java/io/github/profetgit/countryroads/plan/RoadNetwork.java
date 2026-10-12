@@ -38,6 +38,7 @@ public final class RoadNetwork {
     public final VillageOracle oracle;
     public final TerrainSampler terrain;
     private final Planner planner;
+    public final Camps camps;
     private final ConcurrentHashMap<Edge, CompletableFuture<EdgePlan>> plans = new ConcurrentHashMap<>();
     private final ConcurrentHashMap<Long, List<Edge>> regionEdges = new ConcurrentHashMap<>();
     private final ConcurrentHashMap<Long, ChunkMask> masks = new ConcurrentHashMap<>();
@@ -48,7 +49,8 @@ public final class RoadNetwork {
         this.level = level;
         this.oracle = new VillageOracle(level, Set.of());
         this.terrain = new TerrainSampler(level);
-        this.planner = new Planner(terrain, oracle);
+        this.camps = new Camps(level, terrain);
+        this.planner = new Planner(terrain, oracle, camps);
     }
 
     /** null outside the overworld or when the world has no villages. */
@@ -115,20 +117,53 @@ public final class RoadNetwork {
 
     public CompletableFuture<EdgePlan> plan(Edge e) {
         return plans.computeIfAbsent(e, k -> CompletableFuture.supplyAsync(() -> {
-            try {
-                EdgePlan p = planner.plan(k);
-                if (p == null) failed.incrementAndGet();
-                else {
-                    routed.incrementAndGet();
-                    routeNanos.addAndGet(p.routeNanos);
+            // planning is deterministic, so a transient failure (a race inside vanilla) is simply tried again
+            for (int attempt = 1; ; attempt++) {
+                try {
+                    EdgePlan p = planner.plan(k);
+                    if (p == null) failed.incrementAndGet();
+                    else {
+                        routed.incrementAndGet();
+                        routeNanos.addAndGet(p.routeNanos);
+                    }
+                    return p;
+                } catch (Throwable t) {
+                    if (attempt >= 3) {
+                        CountryRoads.LOG.error("Planning road {} failed", k, t);
+                        failed.incrementAndGet();
+                        return null;
+                    }
+                    CountryRoads.LOG.warn("Planning road {} failed ({}), retrying", k, t.toString());
                 }
-                return p;
-            } catch (Throwable t) {
-                CountryRoads.LOG.error("Planning road {} failed", k, t);
-                failed.incrementAndGet();
-                return null;
             }
         }, POOL));
+    }
+
+    /** Plans whose road can come near this chunk (blocks until they are ready). */
+    public List<EdgePlan> plansNear(int cx, int cz, int margin) {
+        int bx = cx << 4, bz = cz << 4;
+        List<CompletableFuture<EdgePlan>> pending = new ArrayList<>();
+        for (Edge e : edgesInRegion(bx >> REGION_SHIFT, bz >> REGION_SHIFT)) {
+            double d = e.length();
+            double minor = d / 2 * Math.sqrt(Planner.ELLIPSE * Planner.ELLIPSE - 1) + margin;
+            if (boxSegmentDistance(bx, bz, bx + 15, bz + 15, e) <= minor) pending.add(plan(e));
+        }
+        List<EdgePlan> out = new ArrayList<>();
+        long t0 = System.nanoTime();
+        for (var f : pending) {
+            EdgePlan p = f.join();
+            if (p != null) out.add(p);
+        }
+        waitNanos.addAndGet(System.nanoTime() - t0);
+        return out;
+    }
+
+    /** The plan whose wayside camp starts in this chunk, if any. */
+    public EdgePlan campAt(int cx, int cz) {
+        if (!camps.available()) return null;
+        long key = ChunkPos.pack(cx, cz);
+        for (EdgePlan p : plansNear(cx, cz, 80)) if (p.campChunk == key) return p;
+        return null;
     }
 
     /** Road data of a chunk; blocks until the plans touching it are ready. */
@@ -136,20 +171,8 @@ public final class RoadNetwork {
         long key = ChunkPos.pack(cx, cz);
         ChunkMask m = masks.get(key);
         if (m != null) return m;
-        int bx = cx << 4, bz = cz << 4;
-        List<CompletableFuture<EdgePlan>> pending = new ArrayList<>();
-        for (Edge e : edgesInRegion(bx >> REGION_SHIFT, bz >> REGION_SHIFT)) {
-            double d = e.length();
-            double minor = d / 2 * Math.sqrt(Planner.ELLIPSE * Planner.ELLIPSE - 1) + 40;
-            if (boxSegmentDistance(bx, bz, bx + 15, bz + 15, e) <= minor) pending.add(plan(e));
-        }
         List<EdgePlan> ready = new ArrayList<>();
-        long t0 = System.nanoTime();
-        for (var f : pending) {
-            EdgePlan p = f.join();
-            if (p != null && p.touches(key)) ready.add(p);
-        }
-        waitNanos.addAndGet(System.nanoTime() - t0);
+        for (EdgePlan p : plansNear(cx, cz, 40)) if (p.touches(key) || hasDecorOrCamp(p, cx, cz)) ready.add(p);
         if (ready.isEmpty()) m = ChunkMask.EMPTY;
         else {
             List<VillageOracle.Footprint> villages = new ArrayList<>();
@@ -160,6 +183,12 @@ public final class RoadNetwork {
         if (masks.size() > 50_000) masks.clear();
         masks.put(key, m);
         return m;
+    }
+
+    private static boolean hasDecorOrCamp(EdgePlan p, int cx, int cz) {
+        long key = ChunkPos.pack(cx, cz);
+        for (EdgePlan.Decor d : p.decor) if (d.chunk() == key) return true;
+        return false;
     }
 
     public List<EdgePlan> readyPlans() {

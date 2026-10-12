@@ -2,82 +2,273 @@ package io.github.profetgit.countryroads.paint;
 
 import io.github.profetgit.countryroads.gen.GenContext;
 import io.github.profetgit.countryroads.plan.ChunkMask;
+import io.github.profetgit.countryroads.plan.EdgePlan;
+import io.github.profetgit.countryroads.world.RoadColumns;
 import net.minecraft.core.BlockPos;
 import net.minecraft.tags.BlockTags;
 import net.minecraft.world.level.block.Blocks;
+import net.minecraft.world.level.block.LanternBlock;
+import net.minecraft.world.level.block.RotatedPillarBlock;
 import net.minecraft.world.level.block.SlabBlock;
 import net.minecraft.world.level.block.state.BlockState;
 import net.minecraft.world.level.block.state.properties.SlabType;
 import net.minecraft.world.level.chunk.ChunkAccess;
+import java.util.List;
+import net.minecraft.network.chat.Component;
+import net.minecraft.world.item.DyeColor;
+import net.minecraft.world.level.block.StandingSignBlock;
+import net.minecraft.world.level.block.entity.SignBlockEntity;
+import net.minecraft.world.level.block.entity.SignText;
+import io.github.profetgit.countryroads.mixin.SignBlockEntityAccessor;
 
 /**
- * Lays the road into one chunk after its features: every block is a function of the plan (surface Y) and of this
- * column's own blocks, so neighbouring chunks always agree at the border.
+ * Lays the road into one chunk after its features. Every block is a function of the plan (surface Y, kind, arc
+ * position) and of this column's own blocks, so neighbouring chunks always agree at the border.
+ *
+ * Shapes: on dry ground the road is cut or filled to the planned surface; beside it the terrain gets a 1:1 bank (cut)
+ * or embankment (fill), or a masonry retaining wall where the step is too tall. Water gets a boardwalk on posts or a
+ * bridge (timber up to 20 blocks, stone with arches beyond); a dry gap far below the plan (ravine) gets a trestle.
+ * Tunnels keep the rock above and get timber frames, lanterns and stone portals.
  */
 public final class RoadPainter {
     private static final BlockState AIR = Blocks.AIR.defaultBlockState();
+    static final int MAX_FILL = 4, MAX_BANK = 5;
 
-    private RoadPainter() {}
+    private final ChunkAccess chunk;
+    private final BlockPos.MutableBlockPos pos = new BlockPos.MutableBlockPos();
+
+    private RoadPainter(ChunkAccess chunk) {
+        this.chunk = chunk;
+    }
 
     public static int paint(ChunkAccess chunk, ChunkMask m) {
         if (!m.any()) return 0;
+        RoadPainter p = new RoadPainter(chunk);
+        RoadColumns cols = RoadColumns.empty();
         int painted = 0;
-        int bx = m.cx << 4, bz = m.cz << 4;
-        BlockPos.MutableBlockPos pos = new BlockPos.MutableBlockPos();
         GenContext.bypass(true);
         try {
-            for (int lz = 0; lz < 16; lz++) {
-                for (int lx = 0; lx < 16; lx++) {
-                    int i = ChunkMask.idx(lx, lz);
-                    float in = m.in[i];
-                    if (in < 0) continue;
-                    int x = bx + lx, z = bz + lz;
-                    double q = m.surface(i);
-                    int top = (int) Math.floor(q);
-                    boolean half = q - top >= 0.5;
-                    if (top <= chunk.getMinY() + 2 || top >= chunk.getMaxY() - 6) continue;
-                    int ground = groundAt(chunk, pos, x, z, top);
-                    BlockState natural = chunk.getBlockState(pos.set(x, ground, z));
-                    long h = hash(x, z);
-
-                    for (int y = ground + 1; y < top; y++) {
-                        pos.set(x, y, z);
-                        chunk.setBlockState(pos, top - y <= 3 ? Blocks.DIRT.defaultBlockState() : Blocks.COBBLESTONE.defaultBlockState(), 0);
+            // the road first, then banks and walls beside it (they read the finished road columns)
+            for (int pass = 0; pass < 2; pass++) {
+                for (int lz = 0; lz < 16; lz++) {
+                    for (int lx = 0; lx < 16; lx++) {
+                        int i = ChunkMask.idx(lx, lz);
+                        float in = m.in[i];
+                        if (in == Float.NEGATIVE_INFINITY) continue;
+                        double q = m.surface(i);
+                        int top = (int) Math.floor(q);
+                        if (top <= chunk.getMinY() + 4 || top >= chunk.getMaxY() - 8) continue;
+                        int x = (m.cx << 4) + lx, z = (m.cz << 4) + lz;
+                        if (pass == 0 && in >= 0) {
+                            p.road(x, z, top, q - top >= 0.5, in, m, i);
+                            cols.set(lx, lz, m.kind[i] != EdgePlan.TUNNEL);
+                            painted++;
+                        } else if (pass == 1 && in < 0) {
+                            p.beside(x, z, top, -in, m, i);
+                        }
                     }
-                    pos.set(x, top, z);
-                    chunk.setBlockState(pos, Palette.surface(in, h, natural, ground == top), 0);
-                    int clearFrom = top + 1;
-                    if (half) {
-                        pos.set(x, top + 1, z);
-                        chunk.setBlockState(pos, Palette.step(h).setValue(SlabBlock.TYPE, SlabType.BOTTOM), 0);
-                        clearFrom++;
-                    }
-                    int clearTo = Math.max(top + 4, ground + 2);
-                    for (int y = clearFrom; y <= clearTo; y++) {
-                        pos.set(x, y, z);
-                        if (!chunk.getBlockState(pos).isAir()) chunk.setBlockState(pos, AIR, 0);
-                    }
-                    painted++;
                 }
             }
+            for (EdgePlan.Decor d : m.decor) p.decor(d, m);
+            RoadColumns.store(chunk, cols);
         } finally {
             GenContext.bypass(false);
         }
         return painted;
     }
 
-    /** Top block of the terrain itself (solid, not a tree), searched near the planned surface. */
-    static int groundAt(ChunkAccess chunk, BlockPos.MutableBlockPos pos, int x, int z, int top) {
-        int hi = Math.min(chunk.getMaxY() - 1, top + 24), lo = Math.max(chunk.getMinY(), top - 40);
-        for (int y = hi; y >= lo; y--) {
-            BlockState s = chunk.getBlockState(pos.set(x, y, z));
-            if (isTerrain(s)) return y;
+    private void decor(EdgePlan.Decor d, ChunkMask m) {
+        int i = ChunkMask.idx(d.x() & 15, d.z() & 15);
+        if (m.in[i] >= 0) return;
+        int top = (int) Math.floor(Math.round(d.y() * 2) / 2.0);
+        int g = groundAt(d.x(), d.z(), top);
+        if (Math.abs(g - top) > 4 || !PaintRules.terrain(get(d.x(), g, d.z()))) return;
+        Palette.Wood wood = Palette.wood(m.in[i] == Float.NEGATIVE_INFINITY ? 0 : m.wood[i]);
+        clear(d.x(), g + 1, g + 3, d.z());
+        set(d.x(), g + 1, d.z(), wood.fence().defaultBlockState());
+        if (d.type() == EdgePlan.SIGN) {
+            BlockState sign = wood.sign().defaultBlockState().setValue(StandingSignBlock.ROTATION, (int) d.rot());
+            set(d.x(), g + 2, d.z(), sign);
+            SignBlockEntity be = new SignBlockEntity(new BlockPos(d.x(), g + 2, d.z()), sign);
+            SignBlockEntityAccessor raw = (SignBlockEntityAccessor) be;
+            raw.countryroads$setFront(text("", d.front1(), d.front2(), ""));
+            raw.countryroads$setBack(text("", d.back(), "", ""));
+            raw.countryroads$setWaxed(true);
+            chunk.setBlockEntity(be);
+        } else {
+            set(d.x(), g + 2, d.z(), wood.fence().defaultBlockState());
+            set(d.x(), g + 3, d.z(), Blocks.LANTERN.defaultBlockState());
         }
-        return lo;
     }
 
-    public static boolean isTerrain(BlockState s) {
-        return !s.isAir() && s.getFluidState().isEmpty() && s.isSolid() && !s.is(BlockTags.LEAVES) && !s.is(BlockTags.LOGS);
+    private static SignText text(String a, String b, String c, String d) {
+        List<Component> lines = List.of(Component.literal(a), Component.literal(b), Component.literal(c), Component.literal(d));
+        return new SignText(lines, lines, DyeColor.BLACK, false);
+    }
+
+    private BlockState get(int x, int y, int z) {
+        return chunk.getBlockState(pos.set(x, y, z));
+    }
+
+    private void set(int x, int y, int z, BlockState s) {
+        if (y <= chunk.getMinY() || y >= chunk.getMaxY()) return;
+        chunk.setBlockState(pos.set(x, y, z), s, 0);
+        // fences, walls, stairs and the like get their connections when the chunk is finished
+        if (PaintRules.connects(s)) chunk.markPosForPostProcessing(pos);
+    }
+
+    private void clear(int x, int y0, int y1, int z) {
+        for (int y = y0; y <= y1; y++) if (!get(x, y, z).isAir()) set(x, y, z, AIR);
+    }
+
+    private void road(int x, int z, int top, boolean half, float in, ChunkMask m, int i) {
+        long h = hash(x, z);
+        int ground = groundAt(x, z, top);
+        byte kind = m.kind[i];
+        int s = (int) Math.floor(m.s[i]);
+        Palette.Wood wood = Palette.wood(m.wood[i]);
+        if (kind == EdgePlan.GROUND && top - ground - 1 > MAX_FILL) kind = EdgePlan.BRIDGE;
+        if (kind == EdgePlan.TUNNEL && ground <= top + 5) kind = EdgePlan.GROUND;
+
+        switch (kind) {
+            case EdgePlan.BOARDWALK -> {
+                set(x, top, z, wood.planks().defaultBlockState());
+                if (in < 0.9f && Math.floorMod(s, 4) == 0) post(x, z, top - 1, wood.log().defaultBlockState());
+                clear(x, top + 1, top + 4, z);
+            }
+            case EdgePlan.BRIDGE -> {
+                boolean stone = m.runLen[i] > 20 && top - ground > 2;
+                set(x, top, z, stone ? Palette.masonry(h) : wood.planks().defaultBlockState());
+                if (stone) {
+                    int u = Math.floorMod(s, 10);
+                    if (u == 0) post(x, z, top - 1, Palette.masonry(h));
+                    else {
+                        int arch = (int) Math.round(2.2 * (1 - Math.sin(Math.PI * u / 10.0)));
+                        for (int y = top - 1; y >= top - 1 - arch && y > ground; y--) set(x, y, z, Palette.masonry(h + y));
+                    }
+                } else if (in < 0.9f && Math.floorMod(s, 5) == 0) {
+                    post(x, z, top - 1, wood.log().defaultBlockState());
+                }
+                clear(x, top + 1, top + 4, z);
+            }
+            case EdgePlan.TUNNEL -> {
+                set(x, top, z, Palette.surface(pal(x, top, z), in, h, Blocks.STONE.defaultBlockState(), false));
+                fillBelow(x, z, ground, top);
+                boolean frame = Math.floorMod(s, 6) == 0;
+                clear(x, top + 1, frame ? top + 3 : top + 4, z);
+                if (frame) set(x, top + 4, z, wood.planks().defaultBlockState());
+                else if (Math.floorMod(s, 12) == 6 && in > 0.8f) set(x, top + 4, z, Blocks.LANTERN.defaultBlockState().setValue(LanternBlock.HANGING, true));
+                if (!PaintRules.solid(get(x, top + 5, z))) set(x, top + 5, z, Blocks.STONE.defaultBlockState());
+                if (m.runPos[i] <= 1) set(x, top + 5, z, Palette.masonry(h));
+            }
+            default -> {
+                BlockState natural = get(x, ground, z);
+                fillBelow(x, z, ground, top);
+                Palette.Surface pal = pal(x, top, z);
+                set(x, top, z, Palette.surface(pal, in, h, natural, ground == top));
+                int from = top + 1;
+                if (half) {
+                    set(x, top + 1, z, pal.step().setValue(SlabBlock.TYPE, SlabType.BOTTOM));
+                    from++;
+                }
+                clear(x, from, Math.max(top + 4, Math.min(ground, top + MAX_BANK + 1)), z);
+                if (ground > top + MAX_BANK + 1) clear(x, top + 5, ground, z);
+            }
+        }
+    }
+
+    /** Columns beside the road: rails, tunnel walls, banks, embankments, retaining walls. */
+    private void beside(int x, int z, int top, float d, ChunkMask m, int i) {
+        long h = hash(x, z);
+        byte kind = m.kind[i];
+        int s = (int) Math.floor(m.s[i]);
+        Palette.Wood wood = Palette.wood(m.wood[i]);
+        int ground = groundAt(x, z, top);
+        if (kind == EdgePlan.GROUND && top - ground - 1 > MAX_FILL && d < 1) kind = EdgePlan.BRIDGE;
+        if (kind == EdgePlan.TUNNEL && ground <= top + 5) kind = EdgePlan.GROUND;
+
+        if ((kind == EdgePlan.BRIDGE) && d < 1) {
+            boolean stone = m.runLen[i] > 20 && top - ground > 2;
+            set(x, top, z, stone ? Palette.masonry(h) : wood.planks().defaultBlockState());
+            set(x, top + 1, z, stone ? Blocks.STONE_BRICK_WALL.defaultBlockState() : wood.fence().defaultBlockState());
+            if (Math.floorMod(s, 10) == 0) set(x, top + 2, z, Blocks.LANTERN.defaultBlockState());
+            if (stone && Math.floorMod(s, 10) == 0) post(x, z, top - 1, Palette.masonry(h));
+            else if (!stone && Math.floorMod(s, 5) == 0) post(x, z, top - 1, wood.log().defaultBlockState());
+            clear(x, top + 2 + (Math.floorMod(s, 10) == 0 ? 1 : 0), top + 4, z);
+            return;
+        }
+        if (kind == EdgePlan.BOARDWALK || kind == EdgePlan.BRIDGE) return;
+        if (kind == EdgePlan.TUNNEL) {
+            if (d >= 1.5f) return;
+            boolean frame = Math.floorMod(s, 6) == 0;
+            for (int y = top; y <= top + 4; y++) {
+                if (m.runPos[i] <= 1) set(x, y, z, Palette.masonry(h + y));
+                else if (frame && y > top) set(x, y, z, wood.log().defaultBlockState());
+                else if (!PaintRules.solid(get(x, y, z))) set(x, y, z, Blocks.STONE.defaultBlockState());
+            }
+            return;
+        }
+
+        BlockState natural = PaintRules.surfaceOf(get(x, ground, z));
+        if (ground == top + 1 && d < 1.5f) {
+            // flush shoulder: no one-block lip along the road
+            clear(x, top + 1, top + 3, z);
+            set(x, top, z, natural);
+        } else if (ground > top + 1) {
+            // cut: 1:1 bank up from the road edge, or a retaining wall where the bank would be too tall
+            if (ground - top <= MAX_BANK || d >= 1) {
+                int bank = top + Math.max(0, (int) Math.floor(d + 0.5f));
+                if (ground > bank && (ground - top <= MAX_BANK + (int) d)) {
+                    clear(x, bank + 1, ground + 2, z);
+                    set(x, bank, z, natural);
+                }
+            } else {
+                for (int y = top + 1; y <= Math.min(ground, top + 6); y++) set(x, y, z, Palette.masonry(h + y));
+                clear(x, Math.min(ground, top + 6) + 1, ground + 1, z);
+                if (ground > top + 6) set(x, top + 6, z, Palette.masonry(h));
+            }
+        } else if (ground == top - 1 && d < 1.5f) {
+            set(x, top, z, natural);
+            set(x, top - 1, z, Blocks.DIRT.defaultBlockState());
+            clear(x, top + 1, top + 2, z);
+        } else if (ground < top - 1) {
+            // fill: 1:1 embankment down from the road edge, or a wall where it would be too tall
+            if (top - ground <= MAX_FILL + 1) {
+                int bank = top - Math.max(0, (int) Math.floor(d - 0.5f));
+                for (int y = ground + 1; y < bank; y++) set(x, y, z, Blocks.DIRT.defaultBlockState());
+                if (bank > ground) {
+                    set(x, bank, z, natural);
+                    clear(x, bank + 1, bank + 2, z);
+                }
+            } else if (d < 1) {
+                for (int y = ground + 1; y <= top; y++) set(x, y, z, Palette.rubble(h + y));
+            }
+        }
+    }
+
+    private Palette.Surface pal(int x, int y, int z) {
+        return Palette.surface(chunk.getNoiseBiome(net.minecraft.core.QuartPos.fromBlock(x), net.minecraft.core.QuartPos.fromBlock(y), net.minecraft.core.QuartPos.fromBlock(z)));
+    }
+
+    private void fillBelow(int x, int z, int ground, int top) {
+        for (int y = ground + 1; y < top; y++) set(x, y, z, top - y <= 3 ? Blocks.DIRT.defaultBlockState() : Palette.rubble(hash(x, z) + y));
+    }
+
+    /** A post from y down to the ground or riverbed. */
+    private void post(int x, int z, int y, BlockState s) {
+        BlockState post = s.hasProperty(RotatedPillarBlock.AXIS) ? s : s;
+        for (int k = y; k > chunk.getMinY() + 1 && k > y - 64; k--) {
+            BlockState here = get(x, k, z);
+            if (PaintRules.solid(here) && here.getFluidState().isEmpty()) break;
+            set(x, k, z, post);
+        }
+    }
+
+    /** Top block of the terrain itself (solid, not a tree), searched near the planned surface. */
+    private int groundAt(int x, int z, int top) {
+        int hi = Math.min(chunk.getMaxY() - 1, top + 24), lo = Math.max(chunk.getMinY(), top - 48);
+        for (int y = hi; y >= lo; y--) if (PaintRules.terrain(get(x, y, z))) return y;
+        return lo;
     }
 
     static long hash(int x, int z) {

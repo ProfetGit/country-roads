@@ -63,7 +63,7 @@ final class RoadChecks {
     }
 
     private static boolean isSurface(BlockState s) {
-        return s.is(Blocks.DIRT_PATH) || s.is(Blocks.COARSE_DIRT) || s.is(Blocks.GRAVEL) || s.is(Blocks.GRASS_BLOCK);
+        return s.is(Blocks.DIRT_PATH) || io.github.profetgit.countryroads.paint.PaintRules.solid(s);
     }
 
     /** Every painted column must carry the planned surface; adjacent road columns must not jump more than a block. */
@@ -105,9 +105,8 @@ final class RoadChecks {
                         cols[0]++;
                         BlockState surf = chunk.getBlockState(pos.set(x, top, z));
                         BlockState above = chunk.getBlockState(pos.set(x, top + 1, z));
-                        boolean ok = isSurface(surf) && (half ? above.getBlock() instanceof SlabBlock : above.isAir());
-                        for (int y = top + (half ? 2 : 1); y <= top + 2 && ok; y++)
-                            ok = chunk.getBlockState(pos.set(x, y, z)).isAir();
+                        boolean ok = isSurface(surf) && (above.getBlock() instanceof SlabBlock || above.isAir())
+                            && chunk.getBlockState(pos.set(x, top + 2, z)).isAir();
                         if (!ok) {
                             bad[0]++;
                             if (examples.size() < 6) examples.add(x + "," + top + "," + z + "=" + surf.getBlock().getDescriptionId() + "/" + above.getBlock().getDescriptionId());
@@ -169,8 +168,11 @@ final class RoadChecks {
             report(src, "CR-SHOT none");
             return 0;
         }
-        double[] best = {-1, -1, -1, -1};
-        int[][] pick = new int[4][];
+        // best sample per label: steep, curve, plain, and the middle of the longest run of each structure kind
+        String[] labels = {"steep", "curve", "plain", "bridge", "boardwalk", "tunnel"};
+        double[] best = new double[labels.length];
+        java.util.Arrays.fill(best, -1);
+        int[][] pick = new int[labels.length][];
         for (int pi = 0; pi < plans.size(); pi++) {
             EdgePlan p = plans.get(pi);
             for (int i = 20; i + 20 < p.length(); i += 3) {
@@ -178,16 +180,18 @@ final class RoadChecks {
                 double slope = Math.abs(p.y[i + 10] - p.y[i - 10]);
                 double turn = Math.abs(Math.atan2(p.z[i + 15] - p.z[i], p.x[i + 15] - p.x[i]) - Math.atan2(p.z[i] - p.z[i - 15], p.x[i] - p.x[i - 15]));
                 if (turn > Math.PI) turn = 2 * Math.PI - turn;
-                double[] score = {slope, p.kind[i] == EdgePlan.CAUSEWAY ? 1 + slope : -1, turn, 1 / (1 + slope + turn)};
-                for (int k = 0; k < 4; k++)
+                boolean ground = p.kind[i] == EdgePlan.GROUND;
+                double run = p.runPos[i] + p.runLen[i] * 0.01;
+                double[] score = {ground ? slope : -1, ground ? turn : -1, ground ? 1 / (1 + slope + turn) : -1,
+                    p.kind[i] == EdgePlan.BRIDGE ? run : -1, p.kind[i] == EdgePlan.BOARDWALK ? run : -1, p.kind[i] == EdgePlan.TUNNEL ? run : -1};
+                for (int k = 0; k < labels.length; k++)
                     if (score[k] > best[k]) {
                         best[k] = score[k];
                         pick[k] = new int[]{pi, i};
                     }
             }
         }
-        String[] labels = {"steep", "causeway", "curve", "plain"};
-        for (int k = 0; k < 4; k++) {
+        for (int k = 0; k < labels.length; k++) {
             if (pick[k] == null || best[k] < 0) continue;
             EdgePlan p = plans.get(pick[k][0]);
             int i = pick[k][1];
@@ -195,8 +199,41 @@ final class RoadChecks {
             float len = (float) Math.hypot(tx, tz);
             tx /= len;
             tz /= len;
-            double cx = p.x[i] - tx * 13 - tz * 7, cz = p.z[i] - tz * 13 + tx * 7, cy = p.y[i] + 5;
+            double back = k == 5 ? 22 : 13, side = k >= 3 ? 14 : 7, up = k == 5 ? 3 : k >= 3 ? 6 : 5;
+            double cx = p.x[i] - tx * back - tz * side, cz = p.z[i] - tz * back + tx * side, cy = p.y[i] + up;
+            if (k == 5) {
+                // look into the tunnel mouth from outside, straight along the road
+                int j = Math.max(0, i - p.runPos[i] - 1);
+                cx = p.x[j] - tx * 12;
+                cz = p.z[j] - tz * 12;
+                cy = p.y[j] + 3;
+                shot(src, cx, cy, cz, p.x[j], p.y[j] + 2, p.z[j], labels[k]);
+                continue;
+            }
             shot(src, cx, cy, cz, p.x[i] + tx * 4, p.y[i], p.z[i] + tz * 4, labels[k]);
+            if (k == 2) {
+                EdgePlan.Decor sign = null, lamp = null;
+                EdgePlan camp = null;
+                for (EdgePlan q : plans) {
+                    for (EdgePlan.Decor d : q.decor) {
+                        if (Math.abs(d.x() - at.getX()) > radius || Math.abs(d.z() - at.getZ()) > radius) continue;
+                        if (d.type() == EdgePlan.SIGN && sign == null) sign = d;
+                        if (d.type() == EdgePlan.LAMP && lamp == null) lamp = d;
+                    }
+                    if (q.campChunk != 0 && camp == null) camp = q;
+                }
+                if (sign != null) {
+                    double a = Math.toRadians(sign.rot() * 22.5);
+                    double fx = -Math.sin(a), fz = Math.cos(a);
+                    shot(src, sign.x() + 0.5 + fx * 4 - fz * 1.5, sign.y() + 2.6, sign.z() + 0.5 + fz * 4 + fx * 1.5, sign.x() + 0.5, sign.y() + 2.2, sign.z() + 0.5, "sign");
+                }
+                if (lamp != null) shot(src, lamp.x() + 6.5, lamp.y() + 4, lamp.z() + 6.5, lamp.x() + 0.5, lamp.y() + 1.5, lamp.z() + 0.5, "lamp");
+                if (camp != null && !camp.campBoxes.isEmpty()) {
+                    var b = camp.campBoxes.getFirst();
+                    double mx = (b.minX() + b.maxX()) / 2.0, mz = (b.minZ() + b.maxZ()) / 2.0, my = n.terrain.sample((int) mx, (int) mz).ground();
+                    shot(src, mx - 14, my + 9, mz - 14, mx, my, mz, "camp");
+                }
+            }
             if (k == 0) shot(src, p.x[i] - tx * 20, p.y[i] + 36, p.z[i] - tz * 20, p.x[i] + tx * 10, p.y[i], p.z[i] + tz * 10, "overhead");
         }
         return 1;
@@ -207,6 +244,110 @@ final class RoadChecks {
         double yaw = Math.toDegrees(Math.atan2(-dx, dz));
         double pitch = -Math.toDegrees(Math.atan2(dy, Math.hypot(dx, dz)));
         report(src, String.format(java.util.Locale.ROOT, "CR-SHOT %.1f %.1f %.1f %.1f %.1f %s", x, y, z, yaw, pitch, label));
+    }
+
+    /** Planned signs, lamps and camps in the area vs what the world has. */
+    static int decor(CommandSourceStack src, int radius) {
+        ServerLevel level = src.getLevel();
+        RoadNetwork n = RoadNetwork.get(level);
+        if (n == null) return 0;
+        BlockPos at = BlockPos.containing(src.getPosition());
+        DevCommands.queue(() -> {
+            int signs = 0, signsFound = 0, lamps = 0, lampsFound = 0, camps = 0, campsFound = 0;
+            Set<String> names = new LinkedHashSet<>();
+            BlockPos.MutableBlockPos pos = new BlockPos.MutableBlockPos();
+            var registry = level.registryAccess().lookupOrThrow(net.minecraft.core.registries.Registries.STRUCTURE);
+            for (EdgePlan p : n.readyPlans()) {
+                for (EdgePlan.Decor d : p.decor) {
+                    if (Math.abs(d.x() - at.getX()) > radius || Math.abs(d.z() - at.getZ()) > radius) continue;
+                    if (n.oracle.footprint(p.edge.a()).contains(d.x(), d.z(), 1) || n.oracle.footprint(p.edge.b()).contains(d.x(), d.z(), 1)) continue;
+                    ChunkAccess chunk = level.getChunkSource().getChunk(d.x() >> 4, d.z() >> 4, ChunkStatus.FULL, true);
+                    boolean found = false;
+                    for (int y = (int) d.y() - 5; y <= (int) d.y() + 6 && !found; y++) {
+                        BlockState st = chunk.getBlockState(pos.set(d.x(), y, d.z()));
+                        found = d.type() == EdgePlan.SIGN ? st.is(BlockTags.STANDING_SIGNS) : st.is(Blocks.LANTERN);
+                    }
+                    if (d.type() == EdgePlan.SIGN) {
+                        signs++;
+                        if (found) signsFound++;
+                        else report(src, "CR-MISSING sign at " + d.x() + "," + (int) d.y() + "," + d.z());
+                        names.add(d.front1());
+                    } else {
+                        lamps++;
+                        if (found) lampsFound++;
+                    }
+                }
+                if (p.campChunk != 0) {
+                    var c = net.minecraft.world.level.ChunkPos.unpack(p.campChunk);
+                    if (Math.abs((c.x() << 4) - at.getX()) > radius || Math.abs((c.z() << 4) - at.getZ()) > radius) continue;
+                    camps++;
+                    ChunkAccess chunk = level.getChunkSource().getChunk(c.x(), c.z(), ChunkStatus.FULL, true);
+                    var st = registry.get(p.camp).map(h -> chunk.getStartForStructure(h.value())).orElse(null);
+                    if (st != null && st.isValid()) campsFound++;
+                    report(src, "CR-CAMP " + p.camp + " at " + (c.x() << 4) + "," + (c.z() << 4) + (st != null && st.isValid() ? " present" : " MISSING"));
+                }
+            }
+            String verdict = signsFound == signs && campsFound == camps && lampsFound >= lamps * 0.8 ? "PASS" : "FAIL";
+            report(src, "CR-DECOR " + verdict + " signs=" + signsFound + "/" + signs + " lamps=" + lampsFound + "/" + lamps + " camps=" + campsFound + "/" + camps + " names=" + names);
+            return true;
+        });
+        return 1;
+    }
+
+    /** Saved road columns match the plan, and monsters may not spawn on them (spawner rule called directly). */
+    static int perks(CommandSourceStack src, int radius) {
+        ServerLevel level = src.getLevel();
+        RoadNetwork n = RoadNetwork.get(level);
+        if (n == null) return 0;
+        int[] a = area(src, radius);
+        DevCommands.queue(() -> {
+            long planned = 0, saved = 0, mismatch = 0, tested = 0, blocked = 0, offTested = 0, offAllowed = 0;
+            try {
+                var m = net.minecraft.world.level.NaturalSpawner.class.getDeclaredMethod("isValidSpawnPostitionForType", ServerLevel.class,
+                    net.minecraft.world.entity.MobCategory.class, net.minecraft.world.level.StructureManager.class,
+                    net.minecraft.world.level.chunk.ChunkGenerator.class, net.minecraft.world.level.biome.MobSpawnSettings.SpawnerData.class,
+                    BlockPos.MutableBlockPos.class, double.class);
+                m.setAccessible(true);
+                for (int k = 0; k < a[2] * a[2]; k++) {
+                    int cx = a[0] + k % a[2], cz = a[1] + k / a[2];
+                    ChunkMask mask = n.mask(cx, cz);
+                    if (!mask.any()) continue;
+                    var chunk = (net.minecraft.world.level.chunk.LevelChunk) level.getChunk(cx, cz);
+                    var cols = ((net.fabricmc.fabric.api.attachment.v1.AttachmentTarget) chunk).getAttached(io.github.profetgit.countryroads.world.RoadColumns.TYPE);
+                    for (int lz = 0; lz < 16; lz++)
+                        for (int lx = 0; lx < 16; lx++) {
+                            int c = ChunkMask.idx(lx, lz);
+                            boolean plan = mask.in[c] >= 0;
+                            boolean have = cols != null && cols.road(lx, lz);
+                            if (plan) planned++;
+                            if (have) saved++;
+                            if (plan != have) mismatch++;
+                            int x = (cx << 4) + lx, z = (cz << 4) + lz;
+                            int y = level.getHeight(net.minecraft.world.level.levelgen.Heightmap.Types.MOTION_BLOCKING_NO_LEAVES, x, z);
+                            var mobs = level.getChunkSource().getGenerator().getMobsAt(level, level.structureManager(), net.minecraft.world.entity.MobCategory.MONSTER, new BlockPos(x, y, z)).unwrap();
+                            var zombie = mobs.stream().map(w -> w.value()).filter(d -> d.type() == net.minecraft.world.entity.EntityTypes.ZOMBIE).findFirst().orElse(null);
+                            if (zombie == null) continue;
+                            if (have && cols.open(lx, lz) && (x + z) % 7 == 0) {
+                                tested++;
+                                if (!(boolean) m.invoke(null, level, net.minecraft.world.entity.MobCategory.MONSTER, level.structureManager(),
+                                    level.getChunkSource().getGenerator(), zombie, new BlockPos.MutableBlockPos(x, y, z), 600.0)) blocked++;
+                            } else if (!have && mask.in[c] < -3 && (x + z) % 7 == 0 && offTested < 400) {
+                                offTested++;
+                                if ((boolean) m.invoke(null, level, net.minecraft.world.entity.MobCategory.MONSTER, level.structureManager(),
+                                    level.getChunkSource().getGenerator(), zombie, new BlockPos.MutableBlockPos(x, y, z), 600.0)) offAllowed++;
+                            }
+                        }
+                }
+            } catch (ReflectiveOperationException e) {
+                report(src, "CR-PERKS FAIL " + e);
+                return true;
+            }
+            String verdict = planned > 0 && mismatch == 0 && blocked == tested && offAllowed > 0 ? "PASS" : "FAIL";
+            report(src, "CR-PERKS " + verdict + " plannedColumns=" + planned + " savedColumns=" + saved + " mismatch=" + mismatch
+                + " monsterOnRoadBlocked=" + blocked + "/" + tested + " monsterOffRoadAllowed=" + offAllowed + "/" + offTested);
+            return true;
+        });
+        return 1;
     }
 
     static int roads(CommandSourceStack src, int radius) {
