@@ -1,0 +1,11 @@
+build/
+dist/
+.gradle/
+*.hprof
+.idea/
+*.iml
+logs/
+__pycache__/
+run/
+run-server/
+dev/server/.work/

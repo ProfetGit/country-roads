@@ -1,0 +1,21 @@
+{
+  "schemaVersion": 1,
+  "id": "countryroads",
+  "version": "${version}",
+  "name": "${name}",
+  "description": "${description}",
+  "authors": ["${author}"],
+  "contact": { "homepage": "${homepage}" },
+  "license": "LicenseRef-All-Rights-Reserved",
+  "environment": "*",
+  "entrypoints": {
+    "main": ["io.github.profetgit.countryroads.CountryRoads"]
+  },
+  "mixins": ["countryroads.mixins.json"],
+  "depends": {
+    "fabricloader": ">=${fabric_loader}",
+    "minecraft": "~${mc}",
+    "fabric-api": "*",
+    "java": ">=25"
+  }
+}
