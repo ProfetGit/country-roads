@@ -63,7 +63,7 @@ public final class HousePaths {
 
     public static final Direction[] DIRS = {Direction.NORTH, Direction.EAST, Direction.SOUTH, Direction.WEST};
     static final int[] DX = {0, 1, 0, -1}, DZ = {-1, 0, 1, 0};
-    static final int TURN = 5, END_STEP = 12, START = 4, OFF = 1 << 27;
+    static final int TURN = 3, END_STEP = 12, START = 4, OFF = 1 << 27;
     static final int UNKNOWN = Integer.MIN_VALUE, CLOSED = -100000;
 
     private static long skey(int x, int z, int d) {
@@ -250,7 +250,7 @@ public final class HousePaths {
         int walkTo = wet ? ny - 100000 + 1 : ny, walkFrom = from >= 100000 ? from - 100000 + 1 : from;
         int dy = walkTo - walkFrom;
         if (Math.abs(dy) > 1) return;
-        int add = 10 + (d0 != START && d0 != d ? TURN : 0) + 8 * Math.abs(dy) + (wet ? 30 : 0);
+        int add = 10 + wobble(nx, nz) + (d0 != START && d0 != d ? TURN : 0) + 8 * Math.abs(dy) + (wet ? 30 : 0);
         if (dy < 0 && x == j.sx && z == j.sz) add += END_STEP;
         else if (dy > 0 && RoadColumns.isOpenRoad(j.level, nx, nz)) add += END_STEP;
         long ns = skey(nx, nz, d);
@@ -259,6 +259,35 @@ public final class HousePaths {
         j.cost.put(ns, cost);
         j.parent.put(ns, s);
         j.open.add(new long[]{cost, ns});
+    }
+
+    private static double lattice(long seed, int a, int b) {
+        long h = a * 0x9E3779B97F4A7C15L ^ b * 0xC2B2AE3D27D4EB4FL ^ seed;
+        h ^= h >>> 29;
+        h *= 0xBF58476D1CE4E5B9L;
+        h ^= h >>> 32;
+        return (h & 0xFFFF) / 65535.0;
+    }
+
+    private static double smooth(double t) {
+        return t * t * (3 - 2 * t);
+    }
+
+    /** Smooth 2D value noise (about 9 blocks across) as extra route cost 0..6: the path bends around dear patches instead of ruling a line. */
+    static int wobble(int x, int z) {
+        double fx = x / 9.0, fz = z / 9.0;
+        int x0 = (int) Math.floor(fx), z0 = (int) Math.floor(fz);
+        double tx = smooth(fx - x0), tz = smooth(fz - z0);
+        double a = lattice(7, x0, z0) * (1 - tx) + lattice(7, x0 + 1, z0) * tx, b = lattice(7, x0, z0 + 1) * (1 - tx) + lattice(7, x0 + 1, z0 + 1) * tx;
+        return (int) ((a * (1 - tz) + b * tz) * 6);
+    }
+
+    /** Smooth 1D value noise 0..1 along the path, period about 7 cells. */
+    static double along(long seed, int i) {
+        double f = i / 7.0;
+        int i0 = (int) Math.floor(f);
+        double t = smooth(f - i0);
+        return lattice(seed, i0, 0) * (1 - t) + lattice(seed, i0 + 1, 0) * t;
     }
 
     private static int ground(Job j, int x, int z) {
@@ -351,19 +380,24 @@ public final class HousePaths {
         Plan plan = plan(ty, wet, j.stake.getY() - 1, roadH >= 100000 ? roadH - 100000 + 1 : roadH, dir);
         List<Cell> cells = new ArrayList<>();
         int earth = 0, planks = 0;
+        long seed = key(j.sx, j.sz);
         for (int i = 0; i < n; i++) {
             cells.add(new Cell(xs[i], zs[i], plan.y[i], wet[i], false, plan.stair[i]));
             if (wet[i]) planks++;
             else earth++;
-            // width 2 on the right of travel, except the first three cells at the door and the last at the road
+            // width wanders 1-3: a right and a left shoulder that come and go along the path; none at the door or the road
             if (i >= 3 && i + 1 < n && !wet[i]) {
-                int rx = xs[i] + (-DZ[dir[i]]), rz = zs[i] + DX[dir[i]];
-                if (used.contains(key(rx, rz)) || (rx == j.sx && rz == j.sz) || RoadColumns.isRoad(j.level, rx, rz)) continue;
-                int sh = ground(j, rx, rz);
-                if (sh < -1000 || sh >= 100000 || Math.abs(sh - plan.y[i]) > 1) continue;
-                cells.add(new Cell(rx, rz, plan.y[i], false, true, plan.stair[i]));
-                used.add(key(rx, rz));
-                earth++;
+                for (int side = 0; side < 2; side++) {
+                    if (along(seed + side * 977L, i) < (side == 0 ? 0.3 : 0.62)) continue;
+                    int sgn = side == 0 ? 1 : -1;
+                    int rx = xs[i] + sgn * (-DZ[dir[i]]), rz = zs[i] + sgn * DX[dir[i]];
+                    if (used.contains(key(rx, rz)) || (rx == j.sx && rz == j.sz) || RoadColumns.isRoad(j.level, rx, rz)) continue;
+                    int sh = ground(j, rx, rz);
+                    if (sh < -1000 || sh >= 100000 || Math.abs(sh - plan.y[i]) > 1) continue;
+                    cells.add(new Cell(rx, rz, plan.y[i], false, true, plan.stair[i]));
+                    used.add(key(rx, rz));
+                    earth++;
+                }
             }
         }
         Survey sv = new Survey(cells, (earth + 1) / 2, planks);
@@ -406,7 +440,7 @@ public final class HousePaths {
             if (!PaintRules.solid(level.getBlockState(at.below()))) change(level, be, at.below(), Blocks.DIRT.defaultBlockState());
             surface = c.stair >= 0
                 ? Palette.houseStair(biome).setValue(StairBlock.FACING, DIRS[c.stair])
-                : Palette.housePath(biome, c.edge ? 0.3f : 1f, h, natural);
+                : c.edge ? Palette.houseEdge(biome, h, natural) : Palette.housePath(biome, 1f, h, natural);
         }
         change(level, be, at, surface);
         for (int dy = 1; dy <= 2; dy++) {

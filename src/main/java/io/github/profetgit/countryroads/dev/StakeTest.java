@@ -65,11 +65,15 @@ final class StakeTest {
                         // leave it built and print a camera shot: behind the stake, looking down the path
                         var cs = cells[0];
                         var far = cs.get(Math.min(cs.size() - 1, 14));
-                        for (int i = 4; i < cs.size(); i++)
-                            if (cs.get(i).stair() >= 0 && !cs.get(i).edge()) {
+                        int bestN = -1;
+                        for (int i = 4; i < cs.size(); i++) {
+                            int cnt = 0;
+                            for (int k = Math.max(0, i - 5); k <= Math.min(cs.size() - 1, i + 5); k++) if (cs.get(k).stair() >= 0 && !cs.get(k).edge()) cnt++;
+                            if (cnt > bestN && !cs.get(i).edge()) {
+                                bestN = cnt;
                                 far = cs.get(i);
-                                break;
                             }
+                        }
                         var prevCell = cs.get(Math.max(0, cs.indexOf(far) - 6));
                         double dx = far.x() - prevCell.x(), dz = far.z() - prevCell.z(), l = Math.max(1, Math.hypot(dx, dz));
                         double cx = far.x() + 0.5 - dx / l * 7, cz = far.z() + 0.5 - dz / l * 7, cy = far.y() + 5;
@@ -128,7 +132,8 @@ final class StakeTest {
                 prev = c;
             }
         }
-        CountryRoads.LOG.info("CR-STAKE-WALK " + (bad == 0 ? "PASS" : "FAIL") + " cells=" + cells.size() + " flat=" + flat + " steps=" + steps + " stairs=" + stairs + " bad=" + bad);
+        CountryRoads.LOG.info("CR-STAKE-WALK " + (bad == 0 ? "PASS" : "FAIL") + " cells=" + cells.size() + " flat=" + flat + " steps=" + steps + " stairs=" + stairs + " bad=" + bad
+            + " palette=" + io.github.profetgit.countryroads.paint.Palette.surface(level.getBiome(stake)).name() + " at=" + stake.toShortString());
     }
 
     private static int fail(int n, String what, BlockPos at, net.minecraft.world.level.block.state.BlockState s) {

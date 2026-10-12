@@ -128,6 +128,13 @@ public final class Palette {
         return surface(surface(biome), in, h, natural, true);
     }
 
+    /** A shoulder column of a house path: often the natural top block stays, so the path frays into the verge. */
+    public static BlockState houseEdge(Holder<Biome> biome, long h, BlockState natural) {
+        Surface pal = surface(biome);
+        if (keepable(pal, natural) && ((h >>> 8) & 1023) < 480) return natural;
+        return pal.pick(pal.edge(), pal.edgeW(), (int) ((h >>> 24) & 1023));
+    }
+
     public static BlockState houseStair(Holder<Biome> biome) {
         Block slab = surface(biome).step().getBlock();
         if (slab == Blocks.MUD_BRICK_SLAB) return Blocks.MUD_BRICK_STAIRS.defaultBlockState();
