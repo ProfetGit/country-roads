@@ -79,7 +79,8 @@ public final class GenContext {
         int i = ChunkMask.idx(pos.getX() & 15, pos.getZ() & 15);
         if (m.in[i] < -0.6f) return false;
         int top = (int) Math.floor(m.surface(i));
-        return pos.getY() >= top && pos.getY() <= top + 5;
+        // head room only: a canopy may arch over the road from four blocks up
+        return pos.getY() >= top && pos.getY() <= top + 3;
     }
 
     /** Big features (trees, boulders, lakes, mushrooms) whose origin is this close to the road are not placed. */
@@ -91,7 +92,11 @@ public final class GenContext {
                 int x = origin.getX() + dx, z = origin.getZ() + dz;
                 ChunkMask m = c.maskAt(x, z);
                 if (m == null || !m.any()) continue;
-                if (m.in[ChunkMask.idx(x & 15, z & 15)] >= -EdgePlan.REACH) return true;
+                int i = ChunkMask.idx(x & 15, z & 15);
+                // trees may stand at the shoulder where the road lies on the ground; where it cuts or fills, the
+                // ground there will be reshaped, so they keep their distance
+                float clearance = radius == 0 && m.kind[i] == EdgePlan.GROUND && m.earth[i] <= 1 ? 1.5f : EdgePlan.REACH;
+                if (m.in[i] >= -clearance) return true;
             }
         }
         return false;

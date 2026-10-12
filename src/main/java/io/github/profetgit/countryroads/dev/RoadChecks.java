@@ -273,7 +273,14 @@ final class RoadChecks {
                     double fx = lamp.toRoad().getStepX(), fz = lamp.toRoad().getStepZ(), ax = lamp.along().getStepX(), az = lamp.along().getStepZ();
                     shot(src, lamp.x() + 0.5 + fx * 6 + ax * 4, lamp.y() + 3.5, lamp.z() + 0.5 + fz * 6 + az * 4, lamp.x() + 0.5, lamp.y() + 3, lamp.z() + 0.5, "lamp");
                 }
-                for (byte type = 0; type <= 1; type++) {
+                for (EdgePlan q : plans)
+                    for (EdgePlan.Decor d : q.decor)
+                        if (d.type() == EdgePlan.ORCHARD && Math.abs(d.x() - at.getX()) <= radius && Math.abs(d.z() - at.getZ()) <= radius) {
+                            double fx = d.toRoad().getStepX(), fz = d.toRoad().getStepZ(), ax = d.along().getStepX(), az = d.along().getStepZ();
+                            shot(src, d.x() + 0.5 + fx * 7 - ax * 6, d.y() + 4, d.z() + 0.5 + fz * 7 - az * 6, d.x() + 0.5 + ax * 4, d.y() + 2, d.z() + 0.5 + az * 4, "orchard");
+                            break;
+                        }
+                for (byte type = 0; type <= 2; type++) {
                     for (EdgePlan q : plans) {
                         EdgePlan.Run hit = null;
                         for (EdgePlan.Run r : q.runs) {
@@ -287,7 +294,7 @@ final class RoadChecks {
                         double rx = -uz / ul * sd, rz = ux / ul * sd, off = q.hw[mid] + 1.5;
                         // from the far edge of the road, behind the run, looking along the wall line
                         shot(src, q.x[b] - rx * 1.5, q.y[b] + 2.6, q.z[b] - rz * 1.5, q.x[mid] + rx * off, q.y[mid] + 0.6, q.z[mid] + rz * off,
-                            type == 0 ? "stonewall" : "fence");
+                            type == 0 ? "stonewall" : type == 1 ? "fence" : "hedge");
                         break;
                     }
                 }
@@ -321,7 +328,7 @@ final class RoadChecks {
         if (n == null) return 0;
         BlockPos at = BlockPos.containing(src.getPosition());
         DevCommands.queue(() -> {
-            int signs = 0, signsFound = 0, lamps = 0, lampsFound = 0, camps = 0, campsFound = 0;
+            int signs = 0, signsFound = 0, lamps = 0, lampsFound = 0, camps = 0, campsFound = 0, orchards = 0, orchardsFound = 0;
             Set<String> names = new LinkedHashSet<>();
             BlockPos.MutableBlockPos pos = new BlockPos.MutableBlockPos();
             var registry = level.registryAccess().lookupOrThrow(net.minecraft.core.registries.Registries.STRUCTURE);
@@ -337,9 +344,12 @@ final class RoadChecks {
                         int y = (int) d.y() - 5 + k % 13;
                         var nb = k / 13 == 0 ? net.minecraft.core.BlockPos.ZERO : net.minecraft.core.Direction.from2DDataValue(k / 13 - 1).getUnitVec3i();
                         BlockState st = chunk.getBlockState(pos.set(d.x() + nb.getX(), y, d.z() + nb.getZ()));
-                        found = d.type() == EdgePlan.SIGN ? st.is(BlockTags.ALL_SIGNS) : st.is(Blocks.LANTERN);
+                        found = d.type() == EdgePlan.SIGN ? st.is(BlockTags.ALL_SIGNS) : d.type() == EdgePlan.ORCHARD ? st.is(Blocks.OAK_LOG) : st.is(Blocks.LANTERN);
                     }
-                    if (d.type() == EdgePlan.SIGN) {
+                    if (d.type() == EdgePlan.ORCHARD) {
+                        orchards++;
+                        if (found) orchardsFound++;
+                    } else if (d.type() == EdgePlan.SIGN) {
                         signs++;
                         if (found) signsFound++;
                         else report(src, "CR-MISSING sign at " + d.x() + "," + (int) d.y() + "," + d.z());
@@ -376,7 +386,7 @@ final class RoadChecks {
                             boolean hit = false;
                             for (int y = (int) p.y[i] - 2; y <= (int) p.y[i] + 3 && !hit; y++) {
                                 BlockState st = chunk.getBlockState(pos.set(x, y, z));
-                                hit = st.is(BlockTags.FENCES) || st.is(BlockTags.WALLS) || st.is(BlockTags.SLABS) || st.is(BlockTags.STAIRS)
+                                hit = st.is(BlockTags.FENCES) || st.is(BlockTags.LEAVES) || st.is(BlockTags.WALLS) || st.is(BlockTags.SLABS) || st.is(BlockTags.STAIRS)
                                     || st.is(Blocks.COBBLESTONE) || st.is(Blocks.MOSSY_COBBLESTONE) || st.is(Blocks.ANDESITE) || st.is(Blocks.STONE);
                             }
                             if (hit) runHit++;
@@ -386,7 +396,7 @@ final class RoadChecks {
             }
             report(src, "CR-RUNS runs=" + runs + " columnsWithWallOrFence=" + runHit + "/" + runCols);
             String verdict = signsFound == signs && campsFound == camps && lampsFound >= lamps * 0.8 ? "PASS" : "FAIL";
-            report(src, "CR-DECOR " + verdict + " signs=" + signsFound + "/" + signs + " lamps=" + lampsFound + "/" + lamps + " camps=" + campsFound + "/" + camps + " names=" + names);
+            report(src, "CR-DECOR " + verdict + " signs=" + signsFound + "/" + signs + " lamps=" + lampsFound + "/" + lamps + " camps=" + campsFound + "/" + camps + " orchardTrees=" + orchardsFound + "/" + orchards + " names=" + names);
             return true;
         });
         return 1;

@@ -88,6 +88,10 @@ public final class RoadPainter {
     private void decor(EdgePlan.Decor d, ChunkMask m) {
         int i = ChunkMask.idx(d.x() & 15, d.z() & 15);
         if (m.in[i] >= 0) return;
+        if (d.type() == EdgePlan.ORCHARD) {
+            orchardTree(d, m);
+            return;
+        }
         int top = (int) Math.floor(Math.round(d.y() * 2) / 2.0);
         int x = d.x(), z = d.z();
         int g = groundAt(x, z, top);
@@ -110,6 +114,54 @@ public final class RoadPainter {
             exact(ax, g + 4, az, fence.setValue(net.minecraft.world.level.block.CrossCollisionBlock.PROPERTY_BY_DIRECTION.get(toRoad.getOpposite()), true));
             if (d.type() == EdgePlan.SIGN) hangingSign(wood, ax, g + 3, az, d);
             else exact(ax, g + 3, az, Blocks.LANTERN.defaultBlockState().setValue(LanternBlock.HANGING, true));
+        }
+    }
+
+    /** A small blossoming fruit tree with flowers in the grass around it, now and then a hay bale. */
+    private void orchardTree(EdgePlan.Decor d, ChunkMask m) {
+        int x = d.x(), z = d.z(), top = (int) Math.floor(Math.round(d.y() * 2) / 2.0);
+        int g = groundAt(x, z, top);
+        if (Math.abs(g - top) > 2 || !PaintRules.terrain(get(x, g, z)) || !get(x, g + 1, z).isAir() && !get(x, g + 1, z).canBeReplaced()) return;
+        long h = hash(x, z);
+        int cx = m.cx, cz = m.cz;
+        for (int y = g + 1; y <= g + 3; y++) set(x, y, z, Blocks.OAK_LOG.defaultBlockState());
+        for (int dy = 3; dy <= 5; dy++) {
+            int r = dy == 5 ? 1 : 2;
+            for (int dx = -r; dx <= r; dx++)
+                for (int dz = -r; dz <= r; dz++) {
+                    if (Math.abs(dx) == r && Math.abs(dz) == r && (r == 2 || ((h >>> (dx + dz + 8)) & 1) == 0)) continue;
+                    if (dx == 0 && dz == 0 && dy == 3) continue;
+                    int lx = x + dx, lz = z + dz;
+                    if (lx >> 4 != cx || lz >> 4 != cz) continue;
+                    BlockState here = get(lx, g + dy, lz);
+                    if (!here.isAir() && !here.canBeReplaced()) continue;
+                    long hh = hash(lx * 7 + dy, lz * 13 - dy);
+                    BlockState leaf = (((hh >>> 20) & 7) < 3 ? Blocks.FLOWERING_AZALEA_LEAVES : Blocks.OAK_LEAVES).defaultBlockState()
+                        .setValue(net.minecraft.world.level.block.LeavesBlock.PERSISTENT, true);
+                    set(lx, g + dy, lz, leaf);
+                }
+        }
+        BlockState[] flowers = {Blocks.POPPY.defaultBlockState(), Blocks.DANDELION.defaultBlockState(), Blocks.OXEYE_DAISY.defaultBlockState(),
+            Blocks.CORNFLOWER.defaultBlockState(), Blocks.AZURE_BLUET.defaultBlockState()};
+        for (int dx = -3; dx <= 3; dx++)
+            for (int dz = -3; dz <= 3; dz++) {
+                int lx = x + dx, lz = z + dz;
+                if ((dx == 0 && dz == 0) || lx >> 4 != cx || lz >> 4 != cz) continue;
+                long hh = hash(lx * 31 + 5, lz * 17 + 3);
+                if (((hh >>> 12) & 7) > 1) continue;
+                int idx = ChunkMask.idx(lx & 15, lz & 15);
+                if (m.in[idx] >= -0.5f) continue;
+                int gg = groundAt(lx, lz, g + 2);
+                if (!get(lx, gg, lz).is(Blocks.GRASS_BLOCK) || !get(lx, gg + 1, lz).isAir()) continue;
+                set(lx, gg + 1, lz, flowers[(int) Math.floorMod(hh >>> 20, (long) flowers.length)]);
+            }
+        if (((h >>> 30) & 3) == 0) {
+            int lx = x + 2, lz = z;
+            if (lx >> 4 == cx) {
+                int gg = groundAt(lx, lz, g + 2);
+                if (PaintRules.terrain(get(lx, gg, lz)) && get(lx, gg + 1, lz).isAir() && m.in[ChunkMask.idx(lx & 15, lz & 15)] < -0.5f)
+                    set(lx, gg + 1, lz, Blocks.HAY_BLOCK.defaultBlockState());
+            }
         }
     }
 
@@ -137,6 +189,33 @@ public final class RoadPainter {
         chunk.blockEntity(be);
     }
 
+    /** A hedgerow along the verge, one to two leaves high with gaps, wildflowers along its foot on the road side. */
+    private void hedge(int x, int z, int top, float d, int g, ChunkMask m, int i, int s, long h) {
+        if (g != top) return;
+        if (d >= 0.6f && d < 1.0f) {
+            if (((h >>> 22) & 7) == 0 && get(x, g, z).is(Blocks.GRASS_BLOCK) && get(x, g + 1, z).isAir()) {
+                BlockState[] f = {Blocks.POPPY.defaultBlockState(), Blocks.DANDELION.defaultBlockState(), Blocks.CORNFLOWER.defaultBlockState(), Blocks.OXEYE_DAISY.defaultBlockState()};
+                set(x, g + 1, z, f[(int) Math.floorMod(h >>> 40, 4L)]);
+            }
+            return;
+        }
+        if (d < 1.0f || d >= 2.1f || Math.floorMod(s, 19) == 0) return;
+        BlockState leaf = hedgeLeaves(m.wood[i], h).setValue(net.minecraft.world.level.block.LeavesBlock.PERSISTENT, true);
+        clear(x, g + 1, g + 2, z);
+        set(x, g + 1, z, leaf);
+        if (((h >>> 18) & 7) < 5) set(x, g + 2, z, leaf);
+    }
+
+    private static BlockState hedgeLeaves(int wood, long h) {
+        return switch (wood) {
+            case 0 -> Blocks.SPRUCE_LEAVES.defaultBlockState();
+            case 2 -> Blocks.MANGROVE_LEAVES.defaultBlockState();
+            case 3 -> Blocks.DARK_OAK_LEAVES.defaultBlockState();
+            case 4 -> Blocks.JUNGLE_LEAVES.defaultBlockState();
+            default -> (((h >>> 26) & 7) == 0 ? Blocks.FLOWERING_AZALEA_LEAVES : ((h >>> 26) & 7) < 3 ? Blocks.AZALEA_LEAVES : Blocks.OAK_LEAVES).defaultBlockState();
+        };
+    }
+
     /** Dry-stone wall or split-rail fence on the shoulder, where a run says so and the shoulder is level with the road. */
     private void wallOrFence(int x, int z, int top, float d, ChunkMask m, int i) {
         if (m.run[i] < 0 || m.kind[i] != EdgePlan.GROUND) return;
@@ -149,6 +228,10 @@ public final class RoadPainter {
             clear(x, g + 1, g + 2, z);
             set(x, g + 1, z, ((h >>> 54) & 3) == 0 ? Palette.wallBody(h) : Palette.wallCap(h >>> 3) == null ? Blocks.COBBLESTONE_SLAB.defaultBlockState()
                 : Palette.wallCap(h >>> 3).hasProperty(net.minecraft.world.level.block.StairBlock.FACING) ? Blocks.MOSSY_COBBLESTONE_SLAB.defaultBlockState() : Palette.wallCap(h >>> 3));
+            return;
+        }
+        if (m.run[i] == EdgePlan.HEDGE) {
+            hedge(x, z, top, d, g, m, i, s, h);
             return;
         }
         if (d < 1.0f || d >= 2.1f) return;
@@ -264,7 +347,7 @@ public final class RoadPainter {
                     from++;
                 }
                 // everything above the road goes, up to the plants that stood on the old ground
-                clear(x, from, Math.max(top + 4, ground + 2), z);
+                clear(x, from, Math.max(top + 3, ground + 2), z);
                 if (ground > top + 1) clearLeaves(x, ground + 1, ground + 10, z);
             }
         }
@@ -332,6 +415,8 @@ public final class RoadPainter {
     }
 
     private void shoulder(int x, int z, int top, float d, int ground, BlockState natural, long h, float roadY) {
+        // a tree standing here keeps its ground (they are only allowed this close where the road lies on the ground)
+        if (get(x, ground + 1, z).is(BlockTags.LOGS)) return;
         if (ground == top + 1 && d < 1.5f) {
             // flush shoulder: no one-block lip along the road
             clear(x, top + 1, top + 3, z);

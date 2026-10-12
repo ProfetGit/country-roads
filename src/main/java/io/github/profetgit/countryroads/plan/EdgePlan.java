@@ -33,7 +33,9 @@ public final class EdgePlan {
     public java.util.List<net.minecraft.world.level.levelgen.structure.BoundingBox> campBoxes = java.util.List.of();
     public String nameA = "", nameB = "";
 
-    public static final byte SIGN = 0, LAMP = 1;
+    public static final byte SIGN = 0, LAMP = 1, ORCHARD = 2;
+    /** Earthworks per sample: the largest cut or fill (blocks) within 6 samples; 99 on bridges, boardwalks, tunnels. */
+    public byte[] earth;
 
     /**
      * A post beside the road at (x, z). toRoad: horizontal direction from the post to the road (its arm or main sign
@@ -47,7 +49,7 @@ public final class EdgePlan {
         }
     }
 
-    public static final byte STONE_WALL = 0, FENCE = 1;
+    public static final byte STONE_WALL = 0, FENCE = 1, HEDGE = 2;
 
     /** A countryside wall or fence beside the road from sample s0 to s1; side +1 right, -1 left (of a to b), 0 both. */
     public record Run(int s0, int s1, byte side, byte type) {}

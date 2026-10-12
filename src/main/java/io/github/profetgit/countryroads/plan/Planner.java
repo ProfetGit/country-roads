@@ -205,6 +205,13 @@ public final class Planner {
         double p1 = (seed & 0xffff) / 65536.0 * Math.PI * 2, p2 = ((seed >> 16) & 0xffff) / 65536.0 * Math.PI * 2;
         for (int i = 0; i < n; i++) hw[i] = (float) (1.75 + 0.35 * Math.sin(i * 0.045 + p1) + 0.18 * Math.sin(i * 0.13 + p2));
         EdgePlan plan = new EdgePlan(e, x, z, y, hw, kind, wood, System.nanoTime() - t0);
+        plan.earth = new byte[n];
+        for (int i = 0; i < n; i++) {
+            int worst = 0;
+            for (int k = Math.max(0, i - 6); k <= Math.min(n - 1, i + 6); k++)
+                worst = Math.max(worst, kind[k] != EdgePlan.GROUND ? 99 : Math.round(Math.abs(y[k] - ground[k])));
+            plan.earth[i] = (byte) Math.min(99, worst);
+        }
         plan.nameA = NameGen.name(e.a().key(), Palette.surface(terrain.biome(e.a().pos().getX(), e.a().pos().getY(), e.a().pos().getZ())));
         plan.nameB = NameGen.name(e.b().key(), Palette.surface(terrain.biome(e.b().pos().getX(), e.b().pos().getY(), e.b().pos().getZ())));
         decorate(plan);
@@ -233,6 +240,17 @@ public final class Planner {
             post(p, 10 * k, 1, k % 2 == 0 ? 1 : -1, EdgePlan.LAMP, "", "", "");
             post(p, n - 1 - 10 * k, -1, k % 2 == 0 ? 1 : -1, EdgePlan.LAMP, "", "", "");
         }
+        // orchard verge: a few blossoming fruit trees on one side of the last stretch into each village
+        long oh = p.edge.seed() ^ 0x0C4A2DL;
+        for (int end = 0; end < 2; end++) {
+            int side = ((oh >>> (end + 5)) & 1) == 0 ? 1 : -1;
+            for (int k = 0; k < 4; k++) {
+                int i = 14 + 9 * k + (int) ((oh >>> (8 + k * 4 + end * 16)) & 3);
+                if (i >= n / 2) break;
+                if (end == 0) post(p, i, 1, side, EdgePlan.ORCHARD, "", "", "", 4.5f, 2);
+                else post(p, n - 1 - i, -1, side, EdgePlan.ORCHARD, "", "", "", 4.5f, 2);
+            }
+        }
         runs(p);
     }
 
@@ -257,7 +275,8 @@ public final class Planner {
             if (ok) {
                 int r = (int) Math.floorMod(h >>> 17, 10L);
                 byte side = (byte) (r < 2 ? 0 : r < 6 ? 1 : -1);
-                byte type = Math.floorMod(h >>> 41, 10L) < 6 ? EdgePlan.STONE_WALL : EdgePlan.FENCE;
+                long t = Math.floorMod(h >>> 41, 20L);
+                byte type = t < 9 ? EdgePlan.STONE_WALL : t < 15 ? EdgePlan.FENCE : EdgePlan.HEDGE;
                 p.runs.add(new EdgePlan.Run(s, e, side, type));
             }
             s = e + 80 + (int) Math.floorMod(h >>> 25, 180L);
@@ -302,6 +321,11 @@ public final class Planner {
      * it) must sit inside one chunk, so posts near a chunk edge slide along the road a little.
      */
     private static void post(EdgePlan p, int i0, int dir, int sideSign, byte type, String f1, String f2, String back) {
+        post(p, i0, dir, sideSign, type, f1, f2, back, 1.5f, 1);
+    }
+
+    /** extra: distance outside the road edge; margin: columns the footprint needs on every side inside the chunk. */
+    private static void post(EdgePlan p, int i0, int dir, int sideSign, byte type, String f1, String f2, String back, float extra, int margin) {
         for (int shift = 0; shift <= 6; shift++) {
             int i = i0 + (shift % 2 == 0 ? shift / 2 : -(shift / 2 + 1)) * dir;
             if (i < 3 || i >= p.length() - 3 || p.kind[i] != EdgePlan.GROUND) continue;
@@ -311,10 +335,11 @@ public final class Planner {
             tx /= len;
             tz /= len;
             float rx = -tz * sideSign, rz = tx * sideSign;
-            float off = p.hw[i] + 1.5f;
+            if (type == EdgePlan.ORCHARD && p.earth != null && p.earth[i] > 1) continue;
+            float off = p.hw[i] + extra;
             int x = (int) Math.floor(p.x[i] + rx * off), z = (int) Math.floor(p.z[i] + rz * off);
             int lx = x & 15, lz = z & 15;
-            if (lx == 0 || lx == 15 || lz == 0 || lz == 15) continue;
+            if (lx < margin || lx > 15 - margin || lz < margin || lz > 15 - margin) continue;
             Direction toRoad = Direction.getApproximateNearest(-rx, 0, -rz);
             Direction along = Direction.getApproximateNearest(tx, 0, tz);
             if (along.getAxis() == toRoad.getAxis()) along = sideSign > 0 ? toRoad.getCounterClockWise() : toRoad.getClockWise();
