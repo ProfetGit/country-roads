@@ -292,16 +292,16 @@ public final class Palette {
     }
 
     /**
-     * Bridge details (comma list): trim (darker posts and beams, posts above the rail), stone (cobble footings), lantern
+     * Bridge details (comma list): trim (darker stripped beams, posts above the rail), stone (cobble footings), trapdoor (on the beams' outer faces, trim wood), lantern
      * (on the end posts). User pick 2026-10-13: all three.
      */
-    static final java.util.Set<String> BRIDGE = java.util.Set.of(System.getProperty("countryroads.bridge", "trim,stone,lantern").split(","));
+    static final java.util.Set<String> BRIDGE = java.util.Set.of(System.getProperty("countryroads.bridge", "trim,stone,lantern,trapdoor").split(","));
 
     public static boolean bridgeDetail(String what) {
         return BRIDGE.contains(what);
     }
 
-    /** Posts and beams of a bridge: the deck's own wood, or with "trim" a darker one beside it. */
+    /** Bridge beams: the deck's own wood, or with "trim" a darker stripped log (posts stay in the deck's own log). */
     public static Wood bridgeFrame(Holder<Biome> biome) {
         int w = wood(biome);
         if (!bridgeDetail("trim")) return wood(w);

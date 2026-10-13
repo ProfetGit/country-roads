@@ -619,8 +619,9 @@ public final class HousePaths {
     private static void rail(ServerLevel level, StakeBlockEntity be, Cell c) {
         BlockPos at = new BlockPos(c.x, c.y, c.z);
         var biome = level.getBiome(at);
+        // posts in the deck's own log, beams stripped in the darker trim wood (user, 2026-10-13: no spruce posts on oak)
         Palette.Wood frame = Palette.bridgeFrame(biome);
-        BlockState log = frame.log().defaultBlockState();
+        BlockState log = Palette.woodLog(biome);
         // the beam sits at the deck block's height, the fence on it (an odd arch half: on the deck's slab level)
         int beamY = c.y + c.arch / 2, fenceY = c.y + (c.arch + 2) / 2;
         if (c.tidx >= 1) {
@@ -637,6 +638,18 @@ public final class HousePaths {
             Direction.Axis axis = DX[c.dir] != 0 ? Direction.Axis.X : Direction.Axis.Z;
             change(level, be, at.atY(beamY), frame.strippedLog().defaultBlockState().setValue(net.minecraft.world.level.block.RotatedPillarBlock.AXIS, axis));
             archUnderside(level, be, c, at.atY(beamY), frame.planks());
+            // an open trapdoor flat on the beam's outer face (the inner side is the deck)
+            if (Palette.bridgeDetail("trapdoor"))
+                for (int s = -1; s <= 1; s += 2) {
+                    int ox = -DZ[c.dir] * s, oz = DX[c.dir] * s;
+                    BlockState in = level.getBlockState(at.atY(beamY).offset(-ox, 0, -oz));
+                    if (!in.is(BlockTags.PLANKS) && !in.is(BlockTags.WOODEN_SLABS) && !in.is(BlockTags.WOODEN_STAIRS)) continue;
+                    BlockPos out = at.atY(beamY).offset(ox, 0, oz);
+                    if (level.getBlockState(out).isAir() || level.getBlockState(out).is(frame.trapdoor()))
+                        change(level, be, out, frame.trapdoor().defaultBlockState().setValue(net.minecraft.world.level.block.TrapDoorBlock.FACING, DIRS[PathPlan.dirOf(ox, oz)])
+                            .setValue(net.minecraft.world.level.block.TrapDoorBlock.OPEN, true));
+                    break;
+                }
             BlockState fence = Palette.woodFence(biome);
             change(level, be, at.atY(fenceY), Block.updateFromNeighbourShapes(fence, level, at.atY(fenceY)));
         }

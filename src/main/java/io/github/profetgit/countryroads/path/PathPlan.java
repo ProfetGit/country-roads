@@ -346,7 +346,7 @@ final class PathPlan {
                 bands.get(i).add(new HousePaths.Cell(qx, qz, y, true, true, -1, dir[i], false, -1, end ? 2 : post ? 1 : 0, false, false, true, arch[i]));
                 used.add(col);
                 // a beam and a fence (4 + 2 planks), a post about three logs; the arch's underside stairs
-                planks += post ? 12 : 6;
+                planks += post ? 12 : 6 + (Palette.bridgeDetail("trapdoor") ? 3 : 0);
                 if (post && Palette.bridgeDetail("stone")) stoneExtra += 2;
                 if (end && Palette.bridgeDetail("lantern")) lanterns++;
             }
