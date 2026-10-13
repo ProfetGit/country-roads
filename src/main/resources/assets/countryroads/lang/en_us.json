@@ -1,8 +1,8 @@
 {
   "block.countryroads.surveyors_stake": "Surveyor's Stake",
   "countryroads.stake.surveying": "Surveying a path to the nearest road...",
-  "countryroads.stake.preview": "Path to the road: %s blocks (%s through rock). Needs %s path material (dirt, gravel, sand, packed mud, cobblestone...), %s planks and %s torches. Right-click the stake to build it, break the stake to cancel.",
-  "countryroads.stake.missing": "Not enough materials: %s more path material, %s more planks and %s more torches (your inventory and chests within 8 blocks count).",
+  "countryroads.stake.preview": "Path to the road: %s blocks (%s through rock). Needs %s path material (dirt, gravel, sand, packed mud, cobblestone...), %s stone for the steps (cobblestone, stone, andesite, sandstone...), %s planks and %s torches. Right-click the stake to build it, break the stake to cancel.",
+  "countryroads.stake.missing": "Not enough materials: %s more path material, %s more stone, %s more planks and %s more torches (your inventory and chests within 8 blocks count).",
   "countryroads.stake.waypoint": "Waypoint %s set: the path will pass here. Right-click the first stake to build, break a waypoint to remove it. (Sneak while placing a stake to start a separate path.)",
   "countryroads.stake.no_waypoint": "No route to waypoint %s.",
   "countryroads.stake.building": "Laying %s blocks of path...",

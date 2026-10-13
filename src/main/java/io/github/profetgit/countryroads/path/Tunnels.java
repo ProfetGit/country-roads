@@ -65,8 +65,8 @@ final class Tunnels {
         BlockPos at = new BlockPos(c.x(), y, c.z());
         long h = c.x() * 0x2545F4914F6CDD1DL ^ c.z() * 0x9E3779B97F4A7C15L;
         var biome = level.getBiome(at);
-        BlockState floor = c.stair() >= 0
-            ? Palette.deckStair(biome).setValue(StairBlock.FACING, HousePaths.DIRS[c.stair()])
+        BlockState floor = c.stair() >= 0 ? Palette.houseStep(biome, h, false).setValue(StairBlock.FACING, HousePaths.DIRS[c.stair()])
+            : c.slab() ? Palette.houseStep(biome, h, true)
             : Palette.tunnelFloor(biome, h, c.edge());
         BlockPos under = at.below();
         if (!PaintRules.solid(level.getBlockState(under))) HousePaths.change(level, be, under, Blocks.STONE.defaultBlockState());
@@ -79,7 +79,7 @@ final class Tunnels {
         BlockPos roof = at.above(HousePaths.TUNNEL_ROOF);
         if (!PaintRules.solid(level.getBlockState(roof))) HousePaths.change(level, be, roof, Blocks.STONE.defaultBlockState());
         if (c.edge()) {
-            if (c.stair() < 0 && ((h >>> 20) & 7) == 0 && level.getBlockState(at.above()).isAir()) HousePaths.change(level, be, at.above(), Blocks.MOSS_CARPET.defaultBlockState());
+            if (c.stair() < 0 && !c.slab() && ((h >>> 20) & 7) == 0 && level.getBlockState(at.above()).isAir()) HousePaths.change(level, be, at.above(), Blocks.MOSS_CARPET.defaultBlockState());
             return;
         }
         int rx = -DZ[c.dir()], rz = DX[c.dir()];

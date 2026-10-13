@@ -219,6 +219,41 @@ public final class Palette {
         return Blocks.COBBLESTONE_STAIRS.defaultBlockState();
     }
 
+    /** House path step style: mix (fieldstone), mud (mud brick) or cobble; dry country uses its sandstone in every style. */
+    static final String STEP = System.getProperty("countryroads.step", "mix");
+    private static final Block[] COBBLE_SET = {Blocks.COBBLESTONE_SLAB, Blocks.COBBLESTONE_STAIRS}, MOSSY_SET = {Blocks.MOSSY_COBBLESTONE_SLAB, Blocks.MOSSY_COBBLESTONE_STAIRS},
+        STONE_SET = {Blocks.STONE_SLAB, Blocks.STONE_STAIRS}, ANDESITE_SET = {Blocks.ANDESITE_SLAB, Blocks.ANDESITE_STAIRS},
+        MUD_SET = {Blocks.MUD_BRICK_SLAB, Blocks.MUD_BRICK_STAIRS}, SAND_SET = {Blocks.SANDSTONE_SLAB, Blocks.SANDSTONE_STAIRS},
+        SMOOTH_SAND_SET = {Blocks.SMOOTH_SANDSTONE_SLAB, Blocks.SMOOTH_SANDSTONE_STAIRS}, RED_SET = {Blocks.RED_SANDSTONE_SLAB, Blocks.RED_SANDSTONE_STAIRS},
+        SMOOTH_RED_SET = {Blocks.SMOOTH_RED_SANDSTONE_SLAB, Blocks.SMOOTH_RED_SANDSTONE_STAIRS};
+
+    /**
+     * A step of a house path on land: a bottom slab (half step) or a stair, unrotated. Fieldstone: cobblestone, mossy
+     * cobblestone, stone and andesite mixed block by block, weighted per biome (more moss where it is wet, none in snow
+     * or dry country); sandstone in deserts, red sandstone in badlands.
+     */
+    public static BlockState houseStep(Holder<Biome> biome, long h, boolean slab) {
+        Surface pal = surface(biome);
+        int r = (int) ((h >>> 28) & 1023);
+        Block[] set;
+        if (pal == DESERT) set = r < 600 ? SAND_SET : SMOOTH_SAND_SET;
+        else if (pal == BADLANDS) set = r < 600 ? RED_SET : SMOOTH_RED_SET;
+        else if (STEP.equals("mud")) set = MUD_SET;
+        else if (STEP.equals("cobble")) {
+            int moss = pal == SNOWY || pal == SAVANNA ? 0 : pal == JUNGLE || pal == SWAMP ? 520 : 260;
+            set = r < moss ? MOSSY_SET : COBBLE_SET;
+        } else {
+            // cobble, mossy, stone, andesite thresholds of 1024
+            int[] w = pal == SNOWY || pal == SAVANNA ? new int[]{400, 400, 700}
+                : pal == JUNGLE || pal == SWAMP ? new int[]{300, 860, 960}
+                : pal == TAIGA ? new int[]{340, 700, 820}
+                : pal == STONY ? new int[]{300, 360, 700}
+                : new int[]{360, 620, 820};
+            set = r < w[0] ? COBBLE_SET : r < w[1] ? MOSSY_SET : r < w[2] ? STONE_SET : ANDESITE_SET;
+        }
+        return set[slab ? 0 : 1].defaultBlockState();
+    }
+
     /** Floor of a tunnel: path blocks worn between gravel, packed mud and the odd cobble; the sides stonier. */
     public static BlockState tunnelFloor(Holder<Biome> biome, long h, boolean edge) {
         int r = (int) ((h >>> 8) & 1023);

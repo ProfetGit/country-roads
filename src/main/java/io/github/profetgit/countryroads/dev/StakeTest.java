@@ -39,6 +39,7 @@ final class StakeTest {
         java.util.Map<BlockPos, net.minecraft.world.level.block.state.BlockState>[] beforeStates = new java.util.Map[1];
         @SuppressWarnings("unchecked")
         java.util.List<HousePaths.Cell>[] cells = new java.util.List[1];
+        java.util.Map<Long, String>[] skips = new java.util.Map[1];
         DevCommands.queue(() -> {
             if (phase[0] == -2) {
                 // tickets only once this test's turn comes: tests run one after another and may share chunks
@@ -96,6 +97,7 @@ final class StakeTest {
                     }
                     built[0] = be.survey.cells().size();
                     cells[0] = be.survey.cells();
+                    skips[0] = be.survey.skipped();
                     before[0] = snapshot(level, cells[0]);
                     beforeStates[0] = states(level, cells[0]);
                     HousePaths.use(level, stake, null);
@@ -103,7 +105,7 @@ final class StakeTest {
                 }
                 case 1 -> {
                     built[1] = be.journal.size();
-                    walk(level, cells[0], stake);
+                    walk(level, cells[0], stake, skips[0]);
                     map(level, cells[0]);
                     sim(level, cells[0]);
                     if (keep) {
@@ -137,6 +139,23 @@ final class StakeTest {
                         }
                         shot(cx, cy, cz, far.x() + 0.5, far.y() + 1, far.z() + 0.5, "housepath");
                         shot(far.x() + 0.5, far.y() + 45, far.z() + 0.51, far.x() + 0.5, far.y(), far.z() + 0.5, "hptop");
+                        // and where the half steps are densest, from behind at walking height
+                        HousePaths.Cell sl = null;
+                        int slabN = 0;
+                        for (int i = 6; i < cs.size(); i++) {
+                            if (cs.get(i).edge()) continue;
+                            int cnt = 0;
+                            for (int k = Math.max(0, i - 8); k <= Math.min(cs.size() - 1, i + 8); k++) if (cs.get(k).slab() && !cs.get(k).edge()) cnt++;
+                            if (cnt > slabN) {
+                                slabN = cnt;
+                                sl = cs.get(i);
+                            }
+                        }
+                        if (sl != null) {
+                            var back = cs.get(Math.max(0, cs.indexOf(sl) - 30));
+                            double bx = sl.x() - back.x(), bz = sl.z() - back.z(), bl = Math.max(1, Math.hypot(bx, bz));
+                            shot(sl.x() + 0.5 - bx / bl * 9, sl.y() + 4, sl.z() + 0.5 - bz / bl * 9, sl.x() + 0.5, sl.y() + 1, sl.z() + 0.5, "hpslab");
+                        }
                         var ahead = cs.get(Math.min(cs.size() - 1, cs.indexOf(far) + 9));
                         shot(ahead.x() + 0.5, ahead.y() + 5, ahead.z() + 0.5, far.x() + 0.5, far.y() + 1, far.z() + 0.5, "hpback");
                         CountryRoads.LOG.info("CR-STAKE KEPT cells=" + built[0] + " journal=" + built[1]);
@@ -379,8 +398,9 @@ final class StakeTest {
      * Walks the built path: centre cells must touch along a side, differ by at most one block, every rise must be a
      * stair facing up the slope in its upper cell, and two blocks of headroom must be free. Prints CR-STAKE-WALK.
      */
-    private static void walk(ServerLevel level, java.util.List<HousePaths.Cell> cells, BlockPos stake) {
-        int bad = 0, stairs = 0, steps = 0, flat = 0;
+    private static void walk(ServerLevel level, java.util.List<HousePaths.Cell> cells, BlockPos stake, java.util.Map<Long, String> skipped) {
+        int bad = 0, stairs = 0, steps = 0, flat = 0, slabs = 0;
+        int[] halfSteps = {0}, stairSteps = {0};
         HousePaths.Cell prev = null;
         int banks = 0, cutFill = 0;
         for (HousePaths.Cell c : cells) {
@@ -397,7 +417,11 @@ final class StakeTest {
             if (isStair) stairs++;
             if (isStair != (c.stair() >= 0)) bad = fail(++bad, "stair mismatch", at, state);
             if (isStair && state.getValue(net.minecraft.world.level.block.StairBlock.FACING) != HousePaths.DIRS[c.stair()]) bad = fail(++bad, "stair facing", at, state);
-            if (!isStair && !state.isSolid() && !c.water()) bad = fail(++bad, "surface not solid", at, state);
+            boolean isSlab = state.getBlock() instanceof net.minecraft.world.level.block.SlabBlock
+                && state.getValue(net.minecraft.world.level.block.SlabBlock.TYPE) == net.minecraft.world.level.block.state.properties.SlabType.BOTTOM;
+            if (isSlab) slabs++;
+            if (isSlab != c.slab()) bad = fail(++bad, "slab mismatch", at, state);
+            if (!isStair && !isSlab && !state.isSolid() && !c.water()) bad = fail(++bad, "surface not solid", at, state);
             for (int dy = 1; dy <= 2; dy++)
                 if (!level.getBlockState(at.above(dy)).getCollisionShape(level, at.above(dy)).isEmpty() && !level.getBlockState(at.above(dy)).is(net.minecraft.world.level.block.Blocks.MOSS_CARPET)) bad = fail(++bad, "headroom", at.above(dy), level.getBlockState(at.above(dy)));
             if (!c.edge()) {
@@ -408,7 +432,8 @@ final class StakeTest {
                     if (dy == 0) flat++;
                     else steps++;
                     var upper = dy > 0 ? c : prev;
-                    if (Math.abs(dy) == 1 && upper.stair() < 0) bad = fail(++bad, "step without stair", new BlockPos(upper.x(), upper.y(), upper.z()), state);
+                    if (Math.abs(dy) == 1 && upper.stair() < 0 && !upper.slab()) bad = fail(++bad, "step without stair or slab", new BlockPos(upper.x(), upper.y(), upper.z()), state);
+                    if (Math.abs(dy) == 1 && !c.edge()) (upper.slab() ? halfSteps : stairSteps)[0]++;
                 }
                 prev = c;
             }
@@ -498,17 +523,51 @@ final class StakeTest {
         // width: centre cells whose two side columns (across the direction of travel) are path at the same height
         java.util.Map<Long, HousePaths.Cell> at = new java.util.HashMap<>();
         for (HousePaths.Cell c : cells) if (!c.bank()) at.put(net.minecraft.world.level.ChunkPos.pack(c.x(), c.z()), c);
-        int wide = 0, open = 0;
+        // a side counts when it is path (not a fringe straggler) within half a block of the cell: a slab beside a full block still walks
+        // at a bend the cell's side is the path itself going on (or coming in): that side is path, not narrowing
+        java.util.Map<Long, Integer> lineAt = new java.util.HashMap<>();
+        java.util.List<HousePaths.Cell> lineCells = new java.util.ArrayList<>();
+        for (HousePaths.Cell c : cells)
+            if (!c.edge() && !c.bank()) {
+                lineAt.put(net.minecraft.world.level.ChunkPos.pack(c.x(), c.z()), lineCells.size());
+                lineCells.add(c);
+            }
+        int wide = 0, open = 0, two = 0, one = 0;
+        java.util.Map<String, Integer> why = new java.util.TreeMap<>();
         for (HousePaths.Cell c : cells) {
             if (c.edge() || c.tun() >= 0) continue;
             open++;
             int rx = -HousePaths.DIRS[c.dir()].getStepZ(), rz = HousePaths.DIRS[c.dir()].getStepX();
-            HousePaths.Cell a = at.get(net.minecraft.world.level.ChunkPos.pack(c.x() + rx, c.z() + rz)), b = at.get(net.minecraft.world.level.ChunkPos.pack(c.x() - rx, c.z() - rz));
-            if (a != null && b != null && a.y() == c.y() && b.y() == c.y()) wide++;
+            int sides = 0;
+            for (int s = -1; s <= 1; s += 2) {
+                long k = net.minecraft.world.level.ChunkPos.pack(c.x() + s * rx, c.z() + s * rz);
+                HousePaths.Cell a = at.get(k);
+                Integer li = lineAt.get(k), ci = lineAt.get(net.minecraft.world.level.ChunkPos.pack(c.x(), c.z()));
+                if (a != null && !a.fringe() && (Math.abs(stand(a) - stand(c)) <= 0.5 || li != null && ci != null && Math.abs(li - ci) == 1)) {
+                    sides++;
+                    continue;
+                }
+                String r = a != null ? (a.fringe() ? "fringe" : "height" + (a.y() - c.y())) : skipped != null && skipped.containsKey(k) ? skipped.get(k) : "none";
+                if (r.startsWith("bedMax")) r = "bedMax";
+                why.merge(r, 1, Integer::sum);
+                if (why.get(r) <= 4) {
+                    int g = level.getHeight(net.minecraft.world.level.levelgen.Heightmap.Types.MOTION_BLOCKING_NO_LEAVES, c.x() + s * rx, c.z() + s * rz) - 1;
+                    CountryRoads.LOG.info("CR-STAKE-NARROW " + r + " beside " + c.x() + "," + c.y() + "," + c.z() + " #" + ci + (li != null ? " side #" + li : a != null ? " side bed" : "") + (c.stair() >= 0 ? " stair" : "") + (c.slab() ? " slab" : "") + " side top now y" + g + " " + level.getBlockState(new BlockPos(c.x() + s * rx, g, c.z() + s * rz)).getBlock().getDescriptionId().replace("block.minecraft.", ""));
+                }
+            }
+            if (sides == 2) wide++;
+            else if (sides == 1) two++;
+            else if (++one <= 8) CountryRoads.LOG.info("CR-STAKE-ONEWIDE at " + c.x() + "," + c.y() + "," + c.z());
         }
-        CountryRoads.LOG.info("CR-STAKE-WIDTH three wide " + wide + "/" + open + " (" + (open == 0 ? 0 : wide * 100 / open) + "%) banks=" + banks);
-        CountryRoads.LOG.info("CR-STAKE-WALK " + (bad == 0 ? "PASS" : "FAIL") + " cells=" + cells.size() + " flat=" + flat + " steps=" + steps + " stairs=" + stairs + " bad=" + bad
+        int pct = open == 0 ? 100 : wide * 100 / open;
+        CountryRoads.LOG.info("CR-STAKE-WIDTH " + (pct >= 95 && one == 0 ? "PASS" : "FAIL") + " three wide " + wide + "/" + open + " (" + pct + "%) two=" + two + " one=" + one + " banks=" + banks + " why=" + why);
+        CountryRoads.LOG.info("CR-STAKE-WALK " + (bad == 0 ? "PASS" : "FAIL") + " cells=" + cells.size() + " flat=" + flat + " steps=" + steps + " (half " + halfSteps[0] + ", stair " + stairSteps[0] + ") stairs=" + stairs + " slabs=" + slabs + " bad=" + bad
             + " palette=" + io.github.profetgit.countryroads.paint.Palette.surface(level.getBiome(stake)).name() + " at=" + stake.toShortString());
+    }
+
+    /** Feet height on a path cell: a bottom slab is half a block lower than a full block or a stair's top. */
+    private static double stand(HousePaths.Cell c) {
+        return c.y() + (c.slab() ? 0.5 : 1);
     }
 
     private static int fail(int n, String what, BlockPos at, net.minecraft.world.level.block.state.BlockState s) {

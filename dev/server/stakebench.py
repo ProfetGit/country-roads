@@ -60,8 +60,10 @@ def parse(out: str) -> dict:
             r["logs"] = int(m[1])
         elif m := re.search(r"CR-STAKE (PASS|FAIL) cells=(\d+).*notRestored=(\d+)", line):
             r["restore"], r["notRestored"] = m[1], int(m[3])
-        elif m := re.search(r"CR-STAKE-WIDTH three wide \d+/\d+ \((\d+)%\)", line):
-            r["width"] = int(m[1])
+        elif m := re.search(r"CR-STAKE-WIDTH (?:(\w+) )?three wide \d+/\d+ \((\d+)%\)(?: two=(\d+) one=(\d+))?", line):
+            r["width"] = int(m[2])
+            if m[1]:
+                r["widthOk"], r["one"] = m[1], int(m[4])
         elif m := re.search(r"CR-STAKE-WALLS centre cells with a 2-high wall beside: (\d+)/", line):
             r["walls"] = int(m[1])
         elif m := re.search(r"CR-STAKE-ABOVE-TOTAL (\d+)", line):
@@ -106,7 +108,7 @@ def main() -> int:
     merged.update(res)
     path.write_text(json.dumps(merged, indent=1))
     old = json.loads((HERE / "bench" / f"{a.compare}.json").read_text()) if a.compare else {}
-    cols = ("outcome", "wallMs", "waits", "waitMs", "mainMsSum", "mainMsMax", "chunksReq", "chunksSync", "expansions", "allocMB", "costDirect", "length", "walk", "sim", "restore", "logs", "tunnelCells", "width", "walls", "above")
+    cols = ("outcome", "wallMs", "waits", "waitMs", "mainMsSum", "mainMsMax", "chunksReq", "chunksSync", "expansions", "allocMB", "costDirect", "length", "walk", "sim", "restore", "logs", "tunnelCells", "width", "widthOk", "one", "walls", "above")
     print("spot     " + " ".join(f"{c:>10.10}" for c in cols))
     for k, r in res.items():
         print(f"{k:8} " + " ".join(f"{str(r.get(c, '')):>10.10}" for c in cols))

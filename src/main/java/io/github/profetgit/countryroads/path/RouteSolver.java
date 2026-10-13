@@ -24,6 +24,12 @@ final class RouteSolver {
     static final int TURN = 1, END_STEP = 12, START = 4, BEND_ON_SLOPE = 200, WOBBLE = 18, JITTER = 5;
     /** The path is a bed three wide: per block of cut or fill the columns either side need, and for a side that cannot be bed. */
     static final int SIDE = 4, SIDE_CLOSED = 12;
+    /**
+     * A switchback whose legs pass within two columns of each other shares its bed columns (one leg two wide, or one
+     * wide when they sit at different heights): per column that close to the route's own earlier stretch. Five cells
+     * back is the nearest an unfolded line comes within two (a diagonal staircase is two off after four).
+     */
+    static final int CLOSE_LEG = 40, CLOSE_BACK_MIN = 5, CLOSE_BACK_MAX = 400;
     static final int MAX_VIAS = 40;
     /** Predicted goals are road centrelines; the painted road is wider, so the estimate gives this many blocks back. */
     static final int GOAL_SLACK = 3;
@@ -114,6 +120,10 @@ final class RouteSolver {
     private boolean bores;
     private LongSet forbidden;
     private int[] penalty;
+    private List<long[]> prefix = List.of();
+    /** Cells of the last routeCost'ed chain that ran within two of its own earlier stretch (closeLeg). */
+    int lastFolds;
+    long firstFold;
 
     RouteSolver(ColumnSnapshot.View t, Host host, int sx, int sz) {
         this.t = t;
@@ -138,6 +148,10 @@ final class RouteSolver {
 
     int idx(int x, int z) {
         return (x - x0) * w + (z - z0);
+    }
+
+    boolean inWindow(int x, int z) {
+        return x >= x0 && x < x0 + w && z >= z0 && z < z0 + w;
     }
 
     int ix(int idx) {
@@ -467,7 +481,8 @@ final class RouteSolver {
             if (prevLevel(k) != walkFrom || walkTo != walkFrom) bend = BEND_ON_SLOPE;
         }
         int add = 10 + bend + (int) (lattice(31, nx * 7 + d, nz) * JITTER) + (dy != 0 ? climbPenalty(k) : 0) + treeCost(ni, nx, nz, walkTo)
-            + wobble(nx, nz) + (d0 != START && d0 != d ? TURN : 0) + 8 * Math.abs(dy) + (wet ? 30 : 0) + sideCost(nx, nz, d, walkTo);
+            + wobble(nx, nz) + (d0 != START && d0 != d ? TURN : 0) + 8 * Math.abs(dy) + (wet ? 30 : 0) + sideCost(nx, nz, d, walkTo)
+            + closeLeg(k, nx, nz);
         if (dy < 0 && x == sx && z == sz) add += END_STEP;
         else if (dy > 0 && t.openRoad(nx, nz)) add += END_STEP;
         if (penalty != null) add += penalty[ni];
@@ -486,9 +501,44 @@ final class RouteSolver {
         for (int s = -1; s <= 1; s += 2) {
             int g = ground(x + s * rx, z + s * rz);
             if (!Terrain.usable(g)) c += SIDE_CLOSED;
-            else if (g < Terrain.WET) c += SIDE * Math.min(3, Math.abs(Terrain.level(g) - y));
+            else if (g < Terrain.WET) {
+                int off = Math.abs(Terrain.level(g) - y);
+                c += off > PathPlan.BED_MAX ? SIDE_CLOSED : SIDE * off;
+            }
         }
         return c;
+    }
+
+    /**
+     * CLOSE_LEG when (x, z) is within two columns of the route's own cell CLOSE_BACK_MIN..CLOSE_BACK_MAX cells back
+     * (the cells inside a bore count one by one: a stair climbing out beside its own tunnel is a close leg too).
+     */
+    private int closeLeg(int k, int x, int z) {
+        return closeLeg(k, x, z, 1);
+    }
+
+    /** closeLeg for a column `first` cells past k (the cells of a bore being dug from k). */
+    private int closeLeg(int k, int x, int z, int first) {
+        int back = first;
+        for (int a = k; a >= 0; a = parent[a]) {
+            if (back > CLOSE_BACK_MAX) return 0;
+            if (back >= CLOSE_BACK_MIN && Math.abs(ix(a) - x) <= 2 && Math.abs(iz(a) - z) <= 2) return CLOSE_LEG;
+            int len = bore[a];
+            for (int m = 1; m < len; m++)
+                if (back + m >= CLOSE_BACK_MIN && Math.abs(ix(a) - DX[arrive[a]] * m - x) <= 2 && Math.abs(iz(a) - DZ[arrive[a]] * m - z) <= 2) return CLOSE_LEG;
+            back += Math.max(1, len);
+        }
+        // the legs before this one (their last cell is this leg's start, already counted)
+        for (int i = prefix.size() - 2; i >= 0 && back <= CLOSE_BACK_MAX; i--, back++) {
+            long c = prefix.get(i)[0];
+            if (back >= CLOSE_BACK_MIN && Math.abs(ChunkPos.getX(c) - x) <= 2 && Math.abs(ChunkPos.getZ(c) - z) <= 2) return CLOSE_LEG;
+        }
+        return 0;
+    }
+
+    /** Cells of the route's earlier legs (door end first), or null: closeLeg looks back through them too. */
+    void prefix(List<long[]> cells) {
+        prefix = cells == null ? List.of() : cells;
     }
 
     /**
@@ -532,7 +582,12 @@ final class RouteSolver {
             if (a == startIdx) break;
         }
         int bend = d0 != START && d0 != d ? (prevLevel(k) != y ? BEND_ON_SLOPE : TURN) : 0;
-        int total = c + bend + borePerUsed * exit + boreFixedUsed;
+        int close = 0;
+        for (int m = 1; m <= exit; m++) {
+            int cx = x + DX[d] * m, cz = z + DZ[d] * m;
+            close += closeLeg(k, cx, cz, m) + (penalty != null ? penalty[idx(cx, cz)] : 0);
+        }
+        int total = c + bend + borePerUsed * exit + boreFixedUsed + close;
         if (total >= cost[ei]) return;
         cost[ei] = total;
         parent[ei] = k;
@@ -656,6 +711,7 @@ final class RouteSolver {
      * candidates are compared by it. Path-dependent terms restart at the door only, so legs make it approximate.
      */
     long routeCost(List<long[]> chain, long endKey) {
+        lastFolds = 0;
         List<long[]> cells = new ArrayList<>(chain);
         if (cells.isEmpty() || cells.get(cells.size() - 1)[0] != endKey) cells.add(new long[]{endKey, 0, 0});
         List<Long> nodes = new ArrayList<>();
@@ -690,6 +746,11 @@ final class RouteSolver {
             if (boreLen.get(j) > 0) {
                 int y = lv[j - 1];
                 total += (d0 != START && d0 != d ? (prev != y ? BEND_ON_SLOPE : TURN) : 0) + (long) borePerUsed * boreLen.get(j) + boreFixedUsed;
+                for (int m = 1; m <= boreLen.get(j); m++) {
+                    int cl = closeLeg(nodes, boreLen, j - 1, x + DX[d] * m, z + DZ[d] * m, m);
+                    total += cl;
+                    if (cl > 0 && lastFolds++ == 0) firstFold = key(x + DX[d] * m, z + DZ[d] * m);
+                }
                 d0 = d;
                 continue;
             }
@@ -700,12 +761,37 @@ final class RouteSolver {
             if (dy != 0) for (int q = 0; q < 4 && j - 2 - q >= 0; q++) if (lv[j - 1 - q] != lv[j - 2 - q]) climb += 6;
             long add = 10 + bend + (int) (lattice(31, nx * 7 + d, nz) * JITTER) + climb + t.treeCost(nx, nz, lv[j]) + wobble(nx, nz)
                 + (d0 != START && d0 != d ? TURN : 0) + 8L * Math.abs(dy) + (wet ? 30 : 0) + sideCost(nx, nz, d, lv[j]);
+            int cl = closeLeg(nodes, boreLen, j - 1, nx, nz);
+            add += cl;
+            if (cl > 0 && lastFolds++ == 0) firstFold = key(nx, nz);
             if (dy < 0 && x == sx && z == sz) add += END_STEP;
             else if (dy > 0 && j == n - 1) add += END_STEP;
             total += add;
             d0 = d;
         }
         return total;
+    }
+
+    /** closeLeg over a finished chain of nodes (bore exits carry their bore length): the cost the search charged. */
+    private static int closeLeg(List<Long> nodes, List<Integer> boreLen, int k, int x, int z) {
+        return closeLeg(nodes, boreLen, k, x, z, 1);
+    }
+
+    private static int closeLeg(List<Long> nodes, List<Integer> boreLen, int k, int x, int z, int first) {
+        int back = first;
+        for (int a = k; a >= 0 && back <= CLOSE_BACK_MAX; a--) {
+            int ax = ChunkPos.getX(nodes.get(a)), az = ChunkPos.getZ(nodes.get(a));
+            if (back >= CLOSE_BACK_MIN && Math.abs(ax - x) <= 2 && Math.abs(az - z) <= 2) return CLOSE_LEG;
+            int len = boreLen.get(a);
+            if (len > 0 && a > 0) {
+                int px = ChunkPos.getX(nodes.get(a - 1)), pz = ChunkPos.getZ(nodes.get(a - 1));
+                int ddx = Integer.signum(ax - px), ddz = Integer.signum(az - pz);
+                for (int m = 1; m < len; m++)
+                    if (back + m >= CLOSE_BACK_MIN && Math.abs(ax - ddx * m - x) <= 2 && Math.abs(az - ddz * m - z) <= 2) return CLOSE_LEG;
+            }
+            back += Math.max(1, len);
+        }
+        return 0;
     }
 
     /**

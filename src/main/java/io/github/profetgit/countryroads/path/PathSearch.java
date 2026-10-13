@@ -438,6 +438,8 @@ final class PathSearch implements RouteSolver.Host, Runnable {
             forbidden = new LongOpenHashSet(unsafe);
         }
         List<RouteSolver.Bore> directBores = new ArrayList<>();
+        // each leg sees the legs before it as the rest of its own chain (a switchback must not fold onto them)
+        s.prefix(acc);
         for (int i = 0; i < waypoints.size(); i++) {
             RouteSolver.Route r = solve(s, start, inDir, inLevel, used, RouteSolver.Goal.column(waypoints.get(i)), true, forbidden, null);
             if (r == null) {
@@ -539,8 +541,10 @@ final class PathSearch implements RouteSolver.Host, Runnable {
         // ---- the wandering pass: bends off the straight stretches, the player's waypoints between them
         List<long[]> chain = direct;
         long end = win.route.endKey();
-        List<Long> vias = s.meander(direct, waypoints, usedBefore);
-        if (!vias.isEmpty()) {
+        List<Long> vias = new ArrayList<>(s.meander(direct, waypoints, usedBefore));
+        s.routeCost(direct, win.route.endKey());
+        int directFolds = s.lastFolds;
+        for (int attempt = 0; attempt < 6 && !vias.isEmpty(); attempt++) {
             boolean[] used2 = s.newUsed();
             used2[s.doorIdx] = true;
             List<long[]> acc2 = new ArrayList<>();
@@ -548,6 +552,7 @@ final class PathSearch implements RouteSolver.Host, Runnable {
             long st = doorKey;
             int dir = RouteSolver.START, lvl = inLevel;
             boolean ok = true;
+            s.prefix(acc2);
             for (long v : vias) {
                 RouteSolver.Route r = solve(s, st, dir, lvl, used2, RouteSolver.Goal.column(v), true, forbidden, null);
                 if (r == null) {
@@ -562,13 +567,34 @@ final class PathSearch implements RouteSolver.Host, Runnable {
                 st = r.endKey();
             }
             RouteSolver.Route last = ok ? solve(s, st, dir, lvl, used2, RouteSolver.Goal.roads(all, -1), true, forbidden, null) : null;
-            if (last != null) {
-                acc2.addAll(last.part());
-                bores2.addAll(last.bores());
+            s.prefix(null);
+            if (last == null) break;
+            acc2.addAll(last.part());
+            bores2.addAll(last.bores());
+            // a bend point can force a leg to fold back beside the one before (a hairpin with its legs side by side,
+            // sharing the bed): that bend goes (the nearest to the first fold; the player's waypoints stay) and the
+            // pass runs again
+            s.routeCost(acc2, last.endKey());
+            if (s.lastFolds <= directFolds) {
                 chain = acc2;
                 end = last.endKey();
                 bores = bores2;
+                break;
             }
+            long fold = s.firstFold, drop = Long.MIN_VALUE;
+            int bestD = Integer.MAX_VALUE;
+            for (long v : vias) {
+                if (waypoints.contains(v)) continue;
+                int d = Math.max(Math.abs(ChunkPos.getX(v) - ChunkPos.getX(fold)), Math.abs(ChunkPos.getZ(v) - ChunkPos.getZ(fold)));
+                if (d < bestD) {
+                    bestD = d;
+                    drop = v;
+                }
+            }
+            stats.candLines.add("CR-STAKE-FOLDS the wandering route folds onto itself at " + s.lastFolds + " cells (direct " + directFolds + ")"
+                + (drop == Long.MIN_VALUE ? ": kept the direct route" : ": bend " + ChunkPos.getX(drop) + "," + ChunkPos.getZ(drop) + " dropped"));
+            if (drop == Long.MIN_VALUE) break;
+            vias.remove(drop);
         }
         if (chain != direct && crossing(chain, view) != Long.MIN_VALUE) {
             // the wandering version passes over its own tunnel too low: the direct route does not need the bends
@@ -663,7 +689,7 @@ final class PathSearch implements RouteSolver.Host, Runnable {
     /** What the plan adds to the route cost when candidates are compared: stairs, the longest flight, the bill. */
     private static long score(HousePaths.Survey sv) {
         int[] st = stairs(sv);
-        return 6L * st[0] + 15L * st[1] + sv.earth() + 2L * sv.planks() + 8L * sv.torches();
+        return 6L * st[0] + 15L * st[1] + sv.earth() + sv.stone() + 2L * sv.planks() + 8L * sv.torches();
     }
 
     /** {stair cells, longest run of stair cells} along the walked line. */

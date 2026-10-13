@@ -54,6 +54,9 @@ public final class HousePaths {
     static final int EXACT = Block.UPDATE_CLIENTS | Block.UPDATE_KNOWN_SHAPE;
     static final Set<Item> EARTH = Set.of(Items.DIRT, Items.COARSE_DIRT, Items.GRAVEL, Items.SAND, Items.RED_SAND, Items.PACKED_MUD,
         Items.MUD, Items.ROOTED_DIRT, Items.COBBLESTONE, Items.DIRT_PATH);
+    /** What the stone steps are paid with (they can be mined, so they are never free). */
+    static final Set<Item> STONE = Set.of(Items.COBBLESTONE, Items.MOSSY_COBBLESTONE, Items.STONE, Items.ANDESITE, Items.DIORITE, Items.GRANITE,
+        Items.COBBLED_DEEPSLATE, Items.TUFF, Items.SANDSTONE, Items.RED_SANDSTONE, Items.MUD_BRICKS);
 
     /**
      * One path cell: column, surface block Y, deck over water, a column beside the walked line (bed, fringe or bank), the
@@ -61,10 +64,10 @@ public final class HousePaths {
      * block in the verge, the tunnel part (-1 none, 0 open cut, 1 inside the rock, 2 portal) with the index along the
      * roofed run, and whether it is a bank: no path there, only the ground cut or filled to height y.
      */
-    public record Cell(int x, int z, int y, boolean water, boolean edge, int stair, int dir, boolean fringe, int tun, int tidx, boolean bank) {}
+    public record Cell(int x, int z, int y, boolean water, boolean edge, int stair, int dir, boolean fringe, int tun, int tidx, boolean bank, boolean slab) {}
 
     /** A finished survey: cells from the door to the road, the bill, and what the route is made of. */
-    public record Survey(List<Cell> cells, int earth, int planks, int torches, int tunnelCells, int length) {}
+    public record Survey(List<Cell> cells, int earth, int stone, int planks, int torches, int tunnelCells, int length, Map<Long, String> skipped) {}
 
     public static final Direction[] DIRS = {Direction.NORTH, Direction.EAST, Direction.SOUTH, Direction.WEST};
     static final int[] DX = {0, 1, 0, -1}, DZ = {-1, 0, 1, 0};
@@ -294,14 +297,22 @@ public final class HousePaths {
         List<ItemStack> paid = new ArrayList<>();
         if (player != null && !player.getAbilities().instabuild) {
             List<Container> sources = sources(level, stake, player);
-            int earthHave = count(sources, st -> EARTH.contains(st.getItem())), planksHave = count(sources, st -> st.is(ItemTags.PLANKS));
-            int torchesHave = count(sources, st -> st.is(Items.TORCH));
-            if (earthHave < s.earth || planksHave < s.planks || torchesHave < s.torches) {
-                tell(player, Component.translatable("countryroads.stake.missing", Math.max(0, s.earth - earthHave),
+            // cobblestone counts for both lines: each line takes its own items first and shares what is left
+            Predicate<ItemStack> earthOnly = st -> EARTH.contains(st.getItem()) && !STONE.contains(st.getItem()),
+                stoneOnly = st -> STONE.contains(st.getItem()) && !EARTH.contains(st.getItem()), both = st -> EARTH.contains(st.getItem()) && STONE.contains(st.getItem());
+            int eo = count(sources, earthOnly), so = count(sources, stoneOnly), sh = count(sources, both);
+            int earthShort = Math.max(0, s.earth - eo), stoneShort = Math.max(0, s.stone - so), over = Math.max(0, earthShort + stoneShort - sh);
+            int planksHave = count(sources, st -> st.is(ItemTags.PLANKS)), torchesHave = count(sources, st -> st.is(Items.TORCH));
+            if (over > 0 || planksHave < s.planks || torchesHave < s.torches) {
+                int earthMiss = Math.max(0, earthShort - Math.max(0, sh - stoneShort)), stoneMiss = Math.max(0, over - earthMiss);
+                tell(player, Component.translatable("countryroads.stake.missing", earthMiss, stoneMiss,
                     Math.max(0, s.planks - planksHave), Math.max(0, s.torches - torchesHave)).withStyle(ChatFormatting.RED), false);
                 return;
             }
-            paid.addAll(take(sources, st -> EARTH.contains(st.getItem()), s.earth));
+            paid.addAll(take(sources, stoneOnly, s.stone));
+            paid.addAll(take(sources, both, stoneShort));
+            paid.addAll(take(sources, earthOnly, s.earth));
+            paid.addAll(take(sources, both, earthShort));
             paid.addAll(take(sources, st -> st.is(ItemTags.PLANKS), s.planks));
             paid.addAll(take(sources, st -> st.is(Items.TORCH), s.torches));
         }
@@ -439,7 +450,7 @@ public final class HousePaths {
             be.status = StakeBlockEntity.PREVIEW;
             be.survey = sv;
             if (j.player != null) PREVIEWS.put(j.stake, new Preview(j.level, j.stake, j.player, sv.cells, j.level.getGameTime() + PREVIEW_TICKS));
-            tell(j.player, Component.translatable("countryroads.stake.preview", sv.length, sv.tunnelCells, sv.earth, sv.planks, sv.torches).withStyle(ChatFormatting.YELLOW), false);
+            tell(j.player, Component.translatable("countryroads.stake.preview", sv.length, sv.tunnelCells, sv.earth, sv.stone, sv.planks, sv.torches).withStyle(ChatFormatting.YELLOW), false);
         }
     }
 
@@ -499,15 +510,15 @@ public final class HousePaths {
             BlockState natural = level.getBlockState(at);
             BlockState under = level.getBlockState(at.below());
             if (under.is(Blocks.GRASS_BLOCK) || under.is(Blocks.PODZOL) || under.is(Blocks.MYCELIUM)) change(level, be, at.below(), Blocks.DIRT.defaultBlockState());
+            // filled down to solid ground: air under a fill, and shallow water beside a path on the shore
             for (int yy = y - 1; yy >= y - 8; yy--) {
                 BlockPos q = at.atY(yy);
                 BlockState s = level.getBlockState(q);
                 if (PaintRules.solid(s) && s.getFluidState().isEmpty()) break;
-                if (!s.getFluidState().isEmpty()) break;
                 change(level, be, q, Blocks.DIRT.defaultBlockState());
             }
-            surface = c.stair >= 0
-                ? Palette.deckStair(biome).setValue(StairBlock.FACING, DIRS[c.stair])
+            surface = c.stair >= 0 ? Palette.houseStep(biome, h, false).setValue(StairBlock.FACING, DIRS[c.stair])
+                : c.slab ? Palette.houseStep(biome, h, true)
                 : c.fringe ? Palette.houseFringe(natural, h) : c.edge ? Palette.houseEdge(biome, h, natural) : Palette.housePath(biome, 1f, h, natural);
         }
         // a column cut deeper than the headroom is cleared to its old ground, so no lip of earth hangs over the path
