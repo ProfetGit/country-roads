@@ -125,14 +125,20 @@ public final class Palette {
 
     /** House path surface: the biome's road look (edge mix for the outer column). */
     public static BlockState housePath(Holder<Biome> biome, float in, long h, BlockState natural) {
-        return surface(surface(biome), in, h, natural, true);
+        return flat(surface(surface(biome), in, h, natural, true));
+    }
+
+    /** House paths never put full cubes of coarse dirt, moss, podzol or rooted dirt among the path blocks: they read as stray blocks on the path. */
+    private static BlockState flat(BlockState s) {
+        if (s.is(Blocks.COARSE_DIRT) || s.is(Blocks.ROOTED_DIRT) || s.is(Blocks.MOSS_BLOCK) || s.is(Blocks.PODZOL)) return Blocks.DIRT_PATH.defaultBlockState();
+        return s;
     }
 
     /** A shoulder column of a house path: often the natural top block stays, so the path frays into the verge. */
     public static BlockState houseEdge(Holder<Biome> biome, long h, BlockState natural) {
         Surface pal = surface(biome);
         if (keepable(pal, natural) && ((h >>> 8) & 1023) < 480) return natural;
-        return pal.pick(pal.edge(), pal.edgeW(), (int) ((h >>> 24) & 1023));
+        return flat(pal.pick(pal.edge(), pal.edgeW(), (int) ((h >>> 24) & 1023)));
     }
 
     public static BlockState houseStair(Holder<Biome> biome) {
@@ -142,6 +148,15 @@ public final class Palette {
         if (slab == Blocks.SMOOTH_RED_SANDSTONE_SLAB) return Blocks.SMOOTH_RED_SANDSTONE_STAIRS.defaultBlockState();
         if (slab == Blocks.MOSSY_COBBLESTONE_SLAB) return Blocks.MOSSY_COBBLESTONE_STAIRS.defaultBlockState();
         return Blocks.COBBLESTONE_STAIRS.defaultBlockState();
+    }
+
+    public static BlockState deckStair(Holder<Biome> biome) {
+        Block planks = wood(wood(biome)).planks();
+        if (planks == Blocks.SPRUCE_PLANKS) return Blocks.SPRUCE_STAIRS.defaultBlockState();
+        if (planks == Blocks.MANGROVE_PLANKS) return Blocks.MANGROVE_STAIRS.defaultBlockState();
+        if (planks == Blocks.DARK_OAK_PLANKS) return Blocks.DARK_OAK_STAIRS.defaultBlockState();
+        if (planks == Blocks.JUNGLE_PLANKS) return Blocks.JUNGLE_STAIRS.defaultBlockState();
+        return Blocks.OAK_STAIRS.defaultBlockState();
     }
 
     public static BlockState deck(Holder<Biome> biome) {

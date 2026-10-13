@@ -61,6 +61,7 @@ final class StakeTest {
                 case 1 -> {
                     built[1] = be.journal.size();
                     walk(level, cells[0], stake);
+                    sim(level, cells[0]);
                     if (keep) {
                         // leave it built and print a camera shot: behind the stake, looking down the path
                         var cs = cells[0];
@@ -78,8 +79,11 @@ final class StakeTest {
                         double dx = far.x() - prevCell.x(), dz = far.z() - prevCell.z(), l = Math.max(1, Math.hypot(dx, dz));
                         double cx = far.x() + 0.5 - dx / l * 7, cz = far.z() + 0.5 - dz / l * 7, cy = far.y() + 5;
                         double lx = far.x() + 0.5 - cx, ly = far.y() + 1 - cy, lz = far.z() + 0.5 - cz;
-                        CountryRoads.LOG.info(String.format(java.util.Locale.ROOT, "CR-SHOT %.1f %.1f %.1f %.1f %.1f housepath", cx, cy, cz,
-                            Math.toDegrees(Math.atan2(-lx, lz)), -Math.toDegrees(Math.atan2(ly, Math.hypot(lx, lz)))));
+                        map(level, cs);
+                        shot(cx, cy, cz, far.x() + 0.5, far.y() + 1, far.z() + 0.5, "housepath");
+                        shot(far.x() + 0.5, far.y() + 26, far.z() + 0.51, far.x() + 0.5, far.y(), far.z() + 0.5, "hptop");
+                        var ahead = cs.get(Math.min(cs.size() - 1, cs.indexOf(far) + 9));
+                        shot(ahead.x() + 0.5, ahead.y() + 5, ahead.z() + 0.5, far.x() + 0.5, far.y() + 1, far.z() + 0.5, "hpback");
                         CountryRoads.LOG.info("CR-STAKE KEPT cells=" + built[0] + " journal=" + built[1]);
                         return true;
                     }
@@ -103,6 +107,126 @@ final class StakeTest {
     }
 
     /**
+     * Moves a player-sized box (0.6 wide, 1.8 tall, step height 0.6) along the centre line of the built path, cell
+     * centre to cell centre in 0.1 blocks, against the real collision shapes. Prints CR-STAKE-SIM and each place the
+     * walker is stopped (a wall in its way, no room overhead, or ground lost).
+     */
+    private static void sim(ServerLevel level, java.util.List<HousePaths.Cell> cells) {
+        java.util.List<HousePaths.Cell> line = new java.util.ArrayList<>();
+        for (HousePaths.Cell c : cells) if (!c.edge()) line.add(c);
+        double stand = line.get(0).y() + 1;
+        int stops = 0;
+        for (int i = 0; i + 1 < line.size() && stops < 12; i++) {
+            HousePaths.Cell a = line.get(i), b = line.get(i + 1);
+            for (int k = 1; k <= 10; k++) {
+                double px = a.x() + 0.5 + (b.x() - a.x()) * k / 10.0, pz = a.z() + 0.5 + (b.z() - a.z()) * k / 10.0;
+                double[] r = footprint(level, px, pz, stand);
+                if (r[1] != 0) {
+                    CountryRoads.LOG.info(String.format(java.util.Locale.ROOT, "CR-STAKE-SIM STOP cell %d (%d,%d,%d)->(%d,%d,%d) at %.1f,%.1f stand=%.2f %s", i, a.x(), a.y(), a.z(), b.x(), b.y(), b.z(), px, pz, stand, r[1] == 1 ? "blocked" : "ground lost"));
+                    stops++;
+                    stand = Math.floor(stand) + 0;
+                    if (r[1] == 1) CountryRoads.LOG.info("CR-STAKE-SIM BLOCKER " + lastBlocker);
+                    for (int dz = -1; dz <= 1; dz++) {
+                        StringBuilder sb = new StringBuilder("CR-STAKE-SIM SLICE z+" + dz + " x=" + a.x() + ".." + (b.x() + 1) + ":");
+                        for (int yy = a.y() + 3; yy >= a.y() - 1; yy--) {
+                            sb.append(" y").append(yy).append('=');
+                            for (int xx = a.x() - 1; xx <= b.x() + 1; xx++) {
+                                var st = level.getBlockState(new BlockPos(xx, yy, a.z() + dz));
+                                sb.append(st.isAir() ? '.' : st.getBlock() instanceof net.minecraft.world.level.block.StairBlock ? "SNEW".charAt(st.getValue(net.minecraft.world.level.block.StairBlock.FACING).get2DDataValue()) : st.is(net.minecraft.world.level.block.Blocks.GRASS_BLOCK) ? 'G' : '#');
+                            }
+                        }
+                        CountryRoads.LOG.info(sb.toString());
+                    }
+                    return;
+                }
+                stand = r[0];
+            }
+        }
+        CountryRoads.LOG.info("CR-STAKE-SIM " + (stops == 0 ? "PASS" : "FAIL") + " cells=" + line.size());
+    }
+
+    private static String lastBlocker = "";
+
+    /** {new stand height, 0 ok / 1 blocked / 2 ground lost} for a 0.6 x 1.8 box with its feet at stand, centred at (px, pz). */
+    private static double[] footprint(ServerLevel level, double px, double pz, double stand) {
+        double x0 = px - 0.3, x1 = px + 0.3, z0 = pz - 0.3, z1 = pz + 0.3, eps = 1e-7;
+        java.util.List<double[]> boxes = new java.util.ArrayList<>();
+        for (int bx = (int) Math.floor(x0); bx <= (int) Math.floor(x1 - eps); bx++)
+            for (int bz = (int) Math.floor(z0); bz <= (int) Math.floor(z1 - eps); bz++)
+                for (int by = (int) Math.floor(stand) - 5; by <= (int) Math.floor(stand) + 3; by++) {
+                    BlockPos pos = new BlockPos(bx, by, bz);
+                    for (var bb : level.getBlockState(pos).getCollisionShape(level, pos).toAabbs()) {
+                        double ax0 = bx + bb.minX, ax1 = bx + bb.maxX, az0 = bz + bb.minZ, az1 = bz + bb.maxZ;
+                        if (ax1 > x0 + eps && ax0 < x1 - eps && az1 > z0 + eps && az0 < z1 - eps) boxes.add(new double[]{by + bb.minY, by + bb.maxY});
+                    }
+                }
+        double top = stand;
+        for (double[] b : boxes) if (b[1] > top + eps && b[1] <= stand + 0.6 + eps) top = Math.max(top, b[1]);
+        for (double[] b : boxes) if (b[1] > top + eps && b[0] < top + 1.8 - eps) {
+            lastBlocker = String.format(java.util.Locale.ROOT, "box y %.2f..%.2f top=%.2f at %.2f,%.2f", b[0], b[1], top, px, pz);
+            return new double[]{top, 1};
+        }
+        double ground = Double.NEGATIVE_INFINITY;
+        for (double[] b : boxes) if (b[1] <= top + eps) ground = Math.max(ground, b[1]);
+        if (ground < top - 3) return new double[]{top, 2};
+        return new double[]{ground, 0};
+    }
+
+    /** ASCII top view of the built path: arrows are stairs (facing up the slope), o/e flat centre/edge cells, other columns the terrain height mod 36. */
+    private static void map(ServerLevel level, java.util.List<HousePaths.Cell> cells) {
+        int x0 = Integer.MAX_VALUE, x1 = Integer.MIN_VALUE, z0 = Integer.MAX_VALUE, z1 = Integer.MIN_VALUE, base = Integer.MAX_VALUE;
+        java.util.Map<Long, HousePaths.Cell> at = new java.util.HashMap<>();
+        for (HousePaths.Cell c : cells) {
+            x0 = Math.min(x0, c.x());
+            x1 = Math.max(x1, c.x());
+            z0 = Math.min(z0, c.z());
+            z1 = Math.max(z1, c.z());
+            base = Math.min(base, c.y());
+            at.put(net.minecraft.world.level.ChunkPos.pack(c.x(), c.z()), c);
+        }
+        base -= 4;
+        CountryRoads.LOG.info("CR-MAP x " + (x0 - 3) + ".." + (x1 + 3) + " z " + (z0 - 3) + ".." + (z1 + 3) + " base " + base + " (digits = height - base, base36)");
+        for (int z = z0 - 3; z <= z1 + 3; z++) {
+            StringBuilder sb = new StringBuilder();
+            for (int x = x0 - 3; x <= x1 + 3; x++) {
+                var c = at.get(net.minecraft.world.level.ChunkPos.pack(x, z));
+                if (c != null) sb.append(c.stair() >= 0 ? "^>v<".charAt(c.stair()) : c.edge() ? 'e' : 'o');
+                else {
+                    int h = level.getHeight(Heightmap.Types.MOTION_BLOCKING_NO_LEAVES, x, z) - 1 - base;
+                    sb.append(h < 0 ? '-' : Character.forDigit(h % 36, 36));
+                }
+            }
+            CountryRoads.LOG.info("CR-MAP " + sb);
+        }
+    }
+
+    /** Plan views of the blocks around a cell, layer by layer from one below to five above, to see what stands on and beside the path. */
+    private static void layers(ServerLevel level, HousePaths.Cell mid) {
+        for (int y = mid.y() + 5; y >= mid.y() - 1; y--) {
+            CountryRoads.LOG.info("CR-LAYER y=" + y + " (path y of mid cell " + mid.y() + ") x " + (mid.x() - 8) + ".." + (mid.x() + 8) + " z " + (mid.z() - 6) + ".." + (mid.z() + 6));
+            for (int z = mid.z() - 6; z <= mid.z() + 6; z++) {
+                StringBuilder sb = new StringBuilder();
+                for (int x = mid.x() - 8; x <= mid.x() + 8; x++) {
+                    var st = level.getBlockState(new BlockPos(x, y, z));
+                    char ch = st.isAir() ? '.' : st.getBlock() instanceof net.minecraft.world.level.block.StairBlock
+                        ? "v<^>".charAt(st.getValue(net.minecraft.world.level.block.StairBlock.FACING).get2DDataValue())
+                        : st.is(net.minecraft.world.level.block.Blocks.GRASS_BLOCK) ? 'G' : st.is(net.minecraft.world.level.block.Blocks.DIRT) ? 'D'
+                        : st.is(net.minecraft.world.level.block.Blocks.DIRT_PATH) || st.is(net.minecraft.world.level.block.Blocks.COARSE_DIRT) || st.is(net.minecraft.world.level.block.Blocks.PACKED_MUD) || st.is(net.minecraft.world.level.block.Blocks.GRAVEL) ? 'p'
+                        : st.is(net.minecraft.tags.BlockTags.LEAVES) ? 'L' : st.is(net.minecraft.tags.BlockTags.LOGS) ? 'T' : st.getCollisionShape(level, new BlockPos(x, y, z)).isEmpty() ? ',' : '#';
+                    sb.append(ch);
+                }
+                CountryRoads.LOG.info("CR-LAYER " + sb);
+            }
+        }
+    }
+
+    private static void shot(double cx, double cy, double cz, double tx, double ty, double tz, String label) {
+        double lx = tx - cx, ly = ty - cy, lz = tz - cz;
+        CountryRoads.LOG.info(String.format(java.util.Locale.ROOT, "CR-SHOT %.1f %.1f %.1f %.1f %.1f %s", cx, cy, cz,
+            Math.toDegrees(Math.atan2(-lx, lz)), -Math.toDegrees(Math.atan2(ly, Math.hypot(lx, lz))), label));
+    }
+
+    /**
      * Walks the built path: centre cells must touch along a side, differ by at most one block, every rise must be a
      * stair facing up the slope in its upper cell, and two blocks of headroom must be free. Prints CR-STAKE-WALK.
      */
@@ -114,7 +238,7 @@ final class StakeTest {
             var state = level.getBlockState(at);
             boolean isStair = state.getBlock() instanceof net.minecraft.world.level.block.StairBlock;
             if (isStair) stairs++;
-            if (isStair != (c.stair() >= 0) && !c.water()) bad = fail(++bad, "stair mismatch", at, state);
+            if (isStair != (c.stair() >= 0)) bad = fail(++bad, "stair mismatch", at, state);
             if (isStair && state.getValue(net.minecraft.world.level.block.StairBlock.FACING) != HousePaths.DIRS[c.stair()]) bad = fail(++bad, "stair facing", at, state);
             if (!isStair && !state.isSolid() && !c.water()) bad = fail(++bad, "surface not solid", at, state);
             for (int dy = 1; dy <= 2; dy++)
@@ -127,11 +251,50 @@ final class StakeTest {
                     if (dy == 0) flat++;
                     else steps++;
                     var upper = dy > 0 ? c : prev;
-                    if (Math.abs(dy) == 1 && upper.stair() < 0 && !upper.water()) bad = fail(++bad, "step without stair", new BlockPos(upper.x(), upper.y(), upper.z()), state);
+                    if (Math.abs(dy) == 1 && upper.stair() < 0) bad = fail(++bad, "step without stair", new BlockPos(upper.x(), upper.y(), upper.z()), state);
                 }
                 prev = c;
             }
         }
+        java.util.Set<Long> have = new java.util.HashSet<>();
+        for (HousePaths.Cell c : cells) have.add(net.minecraft.world.level.ChunkPos.pack(c.x(), c.z()));
+        int deadEnds = 0;
+        for (HousePaths.Cell c : cells) {
+            if (c.stair() < 0) continue;
+            var d = HousePaths.DIRS[c.stair()];
+            if (!have.contains(net.minecraft.world.level.ChunkPos.pack(c.x() + d.getStepX(), c.z() + d.getStepZ())) && !c.edge()
+                && !io.github.profetgit.countryroads.world.RoadColumns.isRoad(level, c.x() + d.getStepX(), c.z() + d.getStepZ())) {
+                if (++deadEnds <= 6) CountryRoads.LOG.info("CR-STAKE-DEADEND stair at " + c.x() + "," + c.y() + "," + c.z() + " faces " + d + " into terrain");
+            }
+        }
+        CountryRoads.LOG.info("CR-STAKE-DEADENDS " + deadEnds);
+        int above = 0;
+        for (HousePaths.Cell c : cells)
+            for (int dy = 1; dy <= 8; dy++) {
+                BlockPos q = new BlockPos(c.x(), c.y() + dy, c.z());
+                var st = level.getBlockState(q);
+                if (!st.isAir() && !st.getCollisionShape(level, q).isEmpty() || st.is(net.minecraft.tags.BlockTags.LEAVES)) {
+                    if (++above <= 10) CountryRoads.LOG.info("CR-STAKE-ABOVE " + st.getBlock().getDescriptionId() + " " + dy + " above cell " + c.x() + "," + c.y() + "," + c.z() + (c.edge() ? " edge" : "") + (c.stair() >= 0 ? " stair" : ""));
+                }
+            }
+        CountryRoads.LOG.info("CR-STAKE-ABOVE-TOTAL " + above);
+        int walled = 0, centreN = 0, stairWalled = 0, stairN = 0;
+        for (HousePaths.Cell c : cells) {
+            if (c.edge()) continue;
+            centreN++;
+            boolean w = false;
+            for (var d : HousePaths.DIRS) {
+                if (have.contains(net.minecraft.world.level.ChunkPos.pack(c.x() + d.getStepX(), c.z() + d.getStepZ()))) continue;
+                BlockPos q = new BlockPos(c.x() + d.getStepX(), c.y() + 1, c.z() + d.getStepZ());
+                if (!level.getBlockState(q).getCollisionShape(level, q).isEmpty() && !level.getBlockState(q.above()).getCollisionShape(level, q.above()).isEmpty()) w = true;
+            }
+            if (w) walled++;
+            if (c.stair() >= 0) {
+                stairN++;
+                if (w) stairWalled++;
+            }
+        }
+        CountryRoads.LOG.info("CR-STAKE-WALLS centre cells with a 2-high wall beside: " + walled + "/" + centreN + ", stair cells: " + stairWalled + "/" + stairN);
         CountryRoads.LOG.info("CR-STAKE-WALK " + (bad == 0 ? "PASS" : "FAIL") + " cells=" + cells.size() + " flat=" + flat + " steps=" + steps + " stairs=" + stairs + " bad=" + bad
             + " palette=" + io.github.profetgit.countryroads.paint.Palette.surface(level.getBiome(stake)).name() + " at=" + stake.toShortString());
     }

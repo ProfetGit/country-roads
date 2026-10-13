@@ -63,24 +63,8 @@ public final class HousePaths {
 
     public static final Direction[] DIRS = {Direction.NORTH, Direction.EAST, Direction.SOUTH, Direction.WEST};
     static final int[] DX = {0, 1, 0, -1}, DZ = {-1, 0, 1, 0};
-    static final int TURN = 3, END_STEP = 12, START = 4, OFF = 1 << 27;
+    static final int TURN = 3, END_STEP = 12, START = 4, BEND_ON_SLOPE = 200;
     static final int UNKNOWN = Integer.MIN_VALUE, CLOSED = -100000;
-
-    private static long skey(int x, int z, int d) {
-        return ((long) (x + OFF) << 31) | ((long) (z + OFF) << 3) | d;
-    }
-
-    private static int sx(long s) {
-        return (int) (s >>> 31) - OFF;
-    }
-
-    private static int sz(long s) {
-        return (int) ((s >>> 3) & 0x0FFFFFFF) - OFF;
-    }
-
-    private static int sd(long s) {
-        return (int) (s & 7);
-    }
 
     private static final class Job {
         final ServerLevel level;
@@ -91,6 +75,8 @@ public final class HousePaths {
         final Long2LongOpenHashMap parent = new Long2LongOpenHashMap();
         final Long2IntOpenHashMap cost = new Long2IntOpenHashMap();
         final Long2IntOpenHashMap ground = new Long2IntOpenHashMap();
+        /** Direction each column was entered by (START at the door). */
+        final Long2IntOpenHashMap arrive = new Long2IntOpenHashMap();
         int expansions;
 
         Job(ServerLevel level, BlockPos stake, ServerPlayer player) {
@@ -131,11 +117,21 @@ public final class HousePaths {
     public static void survey(ServerLevel level, BlockPos stake, ServerPlayer player) {
         SURVEYS.removeIf(j -> j.stake.equals(stake));
         Job j = new Job(level, stake, player);
-        long k = skey(stake.getX(), stake.getZ(), START);
-        j.cost.put(k, 0);
-        j.open.add(new long[]{0, k});
+        startSearch(j);
         SURVEYS.add(j);
         tell(player, Component.translatable("countryroads.stake.surveying").withStyle(ChatFormatting.GRAY), true);
+    }
+
+    private static void startSearch(Job j) {
+        long k = key(j.sx, j.sz);
+        j.open.clear();
+        j.parent.clear();
+        j.cost.clear();
+        j.arrive.clear();
+        j.expansions = 0;
+        j.cost.put(k, 0);
+        j.arrive.put(k, START);
+        j.open.add(new long[]{0, k});
     }
 
     public static void use(ServerLevel level, BlockPos stake, ServerPlayer player) {
@@ -222,17 +218,17 @@ public final class HousePaths {
         while (!j.open.isEmpty()) {
             if (System.nanoTime() > until) return false;
             long[] n = j.open.poll();
-            long s = n[1];
+            long k = n[1];
             int c = (int) n[0];
-            if (c != j.cost.get(s)) continue;
-            int x = sx(s), z = sz(s), d0 = sd(s);
+            if (c != j.cost.get(k)) continue;
+            int x = ChunkPos.getX(k), z = ChunkPos.getZ(k), d0 = j.arrive.get(k);
             if (!(x == j.sx && z == j.sz) && RoadColumns.isOpenRoad(level, x, z)) {
-                finish(j, s);
+                finish(j, k);
                 return true;
             }
             if (++j.expansions > MAX_EXPANSIONS) break;
             for (int d = 0; d < 4; d++)
-                if (d0 == START || d != ((d0 + 2) & 3)) expand(j, s, x, z, d0, c, d);
+                if (d0 == START || d != ((d0 + 2) & 3)) expand(j, k, x, z, d0, c, d);
         }
         io.github.profetgit.countryroads.CountryRoads.LOG.debug("Survey from {} found no road after {} columns", j.stake, j.expansions);
         if (j.player == null) io.github.profetgit.countryroads.CountryRoads.LOG.info("CR-STAKE-DEBUG expansions=" + j.expansions);
@@ -240,7 +236,7 @@ public final class HousePaths {
         return true;
     }
 
-    private static void expand(Job j, long s, int x, int z, int d0, int c, int d) {
+    private static void expand(Job j, long k, int x, int z, int d0, int c, int d) {
         int nx = x + DX[d], nz = z + DZ[d];
         if (Math.max(Math.abs(nx - j.sx), Math.abs(nz - j.sz)) > RADIUS || (nx == j.sx && nz == j.sz)) return;
         int ny = ground(j, nx, nz);
@@ -250,15 +246,24 @@ public final class HousePaths {
         int walkTo = wet ? ny - 100000 + 1 : ny, walkFrom = from >= 100000 ? from - 100000 + 1 : from;
         int dy = walkTo - walkFrom;
         if (Math.abs(dy) > 1) return;
-        int add = 10 + wobble(nx, nz) + (d0 != START && d0 != d ? TURN : 0) + 8 * Math.abs(dy) + (wet ? 30 : 0);
+        int bend = 0;
+        if (d0 != START && d0 != d) {
+            // a corner belongs on level ground: a stair at a bend would end in a wall
+            long pk = j.parent.get(k);
+            int pg = ground(j, ChunkPos.getX(pk), ChunkPos.getZ(pk));
+            int prevWalk = pg >= 100000 ? pg - 100000 + 1 : pg;
+            if (prevWalk != walkFrom || walkTo != walkFrom) bend = BEND_ON_SLOPE;
+        }
+        int add = 10 + bend + wobble(nx, nz) + (d0 != START && d0 != d ? TURN : 0) + 8 * Math.abs(dy) + (wet ? 30 : 0);
         if (dy < 0 && x == j.sx && z == j.sz) add += END_STEP;
         else if (dy > 0 && RoadColumns.isOpenRoad(j.level, nx, nz)) add += END_STEP;
-        long ns = skey(nx, nz, d);
+        long nk = key(nx, nz);
         int cost = c + add;
-        if (cost >= j.cost.get(ns)) return;
-        j.cost.put(ns, cost);
-        j.parent.put(ns, s);
-        j.open.add(new long[]{cost, ns});
+        if (cost >= j.cost.get(nk)) return;
+        j.cost.put(nk, cost);
+        j.parent.put(nk, k);
+        j.arrive.put(nk, d);
+        j.open.add(new long[]{cost, nk});
     }
 
     private static double lattice(long seed, int a, int b) {
@@ -319,6 +324,11 @@ public final class HousePaths {
         return top;
     }
 
+    private static int dirOf(int dx, int dz) {
+        for (int d = 0; d < 4; d++) if (DX[d] == dx && DZ[d] == dz) return d;
+        return 0;
+    }
+
     /** The planned surface and stair facing of every centre cell. */
     record Plan(int[] y, int[] stair) {}
 
@@ -340,7 +350,6 @@ public final class HousePaths {
             }
         for (int i = 0; i < n; i++) {
             stair[i] = -1;
-            if (wet[i]) continue;
             int p = i == 0 ? startY : y[i - 1], q = i == n - 1 ? roadY : y[i + 1];
             if (y[i] == p + 1) stair[i] = dir[i];
             else if (y[i] == q + 1) stair[i] = (dir[i + 1] + 2) & 3;
@@ -348,11 +357,11 @@ public final class HousePaths {
         return new Plan(y, stair);
     }
 
-    private static void finish(Job j, long endState) {
-        long startState = skey(j.sx, j.sz, START);
+    private static void finish(Job j, long endKey) {
+        long startKey = key(j.sx, j.sz);
         List<Long> chain = new ArrayList<>();
-        long s = j.parent.get(endState);
-        while (s != startState) {
+        long s = j.parent.get(endKey);
+        while (s != startKey) {
             chain.add(s);
             s = j.parent.get(s);
         }
@@ -365,18 +374,21 @@ public final class HousePaths {
         int[] xs = new int[n], zs = new int[n], ty = new int[n], dir = new int[n + 1];
         boolean[] wet = new boolean[n];
         java.util.HashSet<Long> used = new java.util.HashSet<>();
+        int px = j.sx, pz = j.sz;
         for (int i = 0; i < n; i++) {
             long st = chain.get(i);
-            xs[i] = sx(st);
-            zs[i] = sz(st);
-            dir[i] = sd(st);
+            xs[i] = ChunkPos.getX(st);
+            zs[i] = ChunkPos.getZ(st);
+            dir[i] = dirOf(xs[i] - px, zs[i] - pz);
+            px = xs[i];
+            pz = zs[i];
             int h = ground(j, xs[i], zs[i]);
             wet[i] = h >= 100000;
             ty[i] = wet[i] ? h - 100000 + 1 : h;
             used.add(key(xs[i], zs[i]));
         }
-        dir[n] = sd(endState);
-        int roadH = ground(j, sx(endState), sz(endState));
+        dir[n] = dirOf(ChunkPos.getX(endKey) - px, ChunkPos.getZ(endKey) - pz);
+        int roadH = ground(j, ChunkPos.getX(endKey), ChunkPos.getZ(endKey));
         Plan plan = plan(ty, wet, j.stake.getY() - 1, roadH >= 100000 ? roadH - 100000 + 1 : roadH, dir);
         List<Cell> cells = new ArrayList<>();
         int earth = 0, planks = 0;
@@ -409,49 +421,71 @@ public final class HousePaths {
         }
     }
 
-    /** Lays a few cells per tick, nearest the door first, so the path rolls out over about three seconds. */
+    /**
+     * Lays a few cells per tick, nearest the door first, so the path rolls out over about three seconds. A cell whose
+     * chunk is not loaded waits. When every cell is down a second pass lays them all again (quietly): it repairs
+     * anything the first pass or the game's own updates left behind and clears whatever still stands above the path.
+     */
     private static boolean roll(Rollout r) {
+        if (!r.level.hasChunkAt(r.stake)) return false;
         if (!(r.level.getBlockEntity(r.stake) instanceof StakeBlockEntity be)) return true;
         int per = Math.max(1, r.cells.size() / 60);
         for (int k = 0; k < per && r.next[0] < r.cells.size(); k++) {
-            Cell c = r.cells.get(r.next[0]++);
-            lay(r.level, be, c);
+            Cell c = r.cells.get(r.next[0]);
+            if (!r.level.hasChunkAt(new BlockPos(c.x, c.y, c.z))) break;
+            r.next[0]++;
+            lay(r.level, be, c, false);
+        }
+        if (r.next[0] >= r.cells.size()) {
+            for (int pass = 0; pass < 2; pass++)
+                for (Cell c : r.cells)
+                    if (r.level.hasChunkAt(new BlockPos(c.x, c.y, c.z))) lay(r.level, be, c, true);
+            be.setChanged();
+            return true;
         }
         be.setChanged();
-        return r.next[0] >= r.cells.size();
+        return false;
     }
 
-    private static void lay(ServerLevel level, StakeBlockEntity be, Cell c) {
+    /** Blocks above a path cell that must go: everything natural up to HEADROOM, and tree leaves above that. */
+    static final int HEADROOM = 5, CANOPY = 9;
+
+    private static void lay(ServerLevel level, StakeBlockEntity be, Cell c, boolean quiet) {
         int y = c.y;
-        BlockPos.MutableBlockPos p = new BlockPos.MutableBlockPos();
         long h = c.x * 0x2545F4914F6CDD1DL ^ c.z * 0x9E3779B97F4A7C15L;
         BlockPos at = new BlockPos(c.x, y, c.z);
         var biome = level.getBiome(at);
         BlockState surface;
         if (c.water) {
-            surface = Palette.deck(biome);
+            surface = c.stair >= 0 ? Palette.deckStair(biome).setValue(StairBlock.FACING, DIRS[c.stair]) : Palette.deck(biome);
         } else {
-            int t = level.getHeight(Heightmap.Types.MOTION_BLOCKING_NO_LEAVES, c.x, c.z) - 1;
-            BlockState natural = level.getBlockState(p.set(c.x, t, c.z));
-            for (int yy = t; yy > y; yy--)
-                if (!level.getBlockState(p.set(c.x, yy, c.z)).isAir()) change(level, be, p.immutable(), Blocks.AIR.defaultBlockState());
-            for (int yy = t + 1; yy < y; yy++)
-                if (!PaintRules.solid(level.getBlockState(p.set(c.x, yy, c.z)))) change(level, be, p.immutable(), Blocks.DIRT.defaultBlockState());
-            if (!PaintRules.solid(level.getBlockState(at.below()))) change(level, be, at.below(), Blocks.DIRT.defaultBlockState());
+            BlockState natural = level.getBlockState(at);
+            BlockState under = level.getBlockState(at.below());
+            if (under.is(Blocks.GRASS_BLOCK) || under.is(Blocks.PODZOL) || under.is(Blocks.MYCELIUM)) change(level, be, at.below(), Blocks.DIRT.defaultBlockState());
+            for (int yy = y - 1; yy >= y - 8; yy--) {
+                BlockPos q = at.atY(yy);
+                BlockState s = level.getBlockState(q);
+                if (PaintRules.solid(s) && s.getFluidState().isEmpty()) break;
+                if (!s.getFluidState().isEmpty()) break;
+                change(level, be, q, Blocks.DIRT.defaultBlockState());
+            }
             surface = c.stair >= 0
                 ? Palette.houseStair(biome).setValue(StairBlock.FACING, DIRS[c.stair])
                 : c.edge ? Palette.houseEdge(biome, h, natural) : Palette.housePath(biome, 1f, h, natural);
         }
         change(level, be, at, surface);
-        for (int dy = 1; dy <= 2; dy++) {
+        for (int dy = 1; dy <= CANOPY; dy++) {
             BlockPos q = at.above(dy);
             BlockState s = level.getBlockState(q);
-            if (!s.isAir() && (s.canBeReplaced() || s.is(Blocks.SNOW) || s.is(BlockTags.LEAVES))) change(level, be, q, Blocks.AIR.defaultBlockState());
+            if (s.isAir()) continue;
+            boolean leaves = s.is(BlockTags.LEAVES);
+            if (dy <= HEADROOM ? !(Retrofit.isCrafted(s) && !leaves) : leaves) change(level, be, q, Blocks.AIR.defaultBlockState());
         }
         if (!RoadColumns.isRoad(level, c.x, c.z)) {
             RoadColumns.mark(level, c.x, c.z, true);
             be.columns.add(key(c.x, c.z));
         }
+        if (quiet) return;
         level.sendParticles(new BlockParticleOption(ParticleTypes.BLOCK, surface), c.x + 0.5, y + 1.05, c.z + 0.5, 6, 0.3, 0.05, 0.3, 0);
         if (((c.x + c.z) & 3) == 0)
             level.playSound(null, at, surface.getSoundType().getPlaceSound(), SoundSource.BLOCKS, 0.5f, 0.9f + ((h >>> 40) & 7) * 0.03f);
