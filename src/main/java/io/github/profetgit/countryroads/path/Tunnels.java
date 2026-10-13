@@ -65,8 +65,8 @@ final class Tunnels {
         BlockPos at = new BlockPos(c.x(), y, c.z());
         long h = c.x() * 0x2545F4914F6CDD1DL ^ c.z() * 0x9E3779B97F4A7C15L;
         var biome = level.getBiome(at);
-        BlockState floor = c.stair() >= 0 ? Palette.houseStep(biome, h, false).setValue(StairBlock.FACING, HousePaths.DIRS[c.stair()])
-            : c.slab() ? Palette.houseStep(biome, h, true)
+        BlockState floor = c.stair() >= 0 ? Palette.houseStep(biome, h, false, true).setValue(StairBlock.FACING, HousePaths.DIRS[c.stair()])
+            : c.slab() ? Palette.houseStep(biome, h, true, true)
             : Palette.tunnelFloor(biome, h, c.edge());
         BlockPos under = at.below();
         if (!PaintRules.solid(level.getBlockState(under))) HousePaths.change(level, be, under, Blocks.STONE.defaultBlockState());

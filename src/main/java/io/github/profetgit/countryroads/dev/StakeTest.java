@@ -139,6 +139,27 @@ final class StakeTest {
                         }
                         shot(cx, cy, cz, far.x() + 0.5, far.y() + 1, far.z() + 0.5, "housepath");
                         shot(far.x() + 0.5, far.y() + 45, far.z() + 0.51, far.x() + 0.5, far.y(), far.z() + 0.5, "hptop");
+                        // and where the fieldstone steps (rocky ground) are densest
+                        HousePaths.Cell rk = null;
+                        int rockN = 0;
+                        for (int i = 6; i < cs.size(); i++) {
+                            if (cs.get(i).edge()) continue;
+                            int cnt = 0;
+                            for (int k = Math.max(0, i - 10); k <= Math.min(cs.size() - 1, i + 10); k++) {
+                                var q = cs.get(k);
+                                var st = level.getBlockState(new BlockPos(q.x(), q.y(), q.z()));
+                                if ((q.slab() || q.stair() >= 0) && !q.water() && !st.is(net.minecraft.world.level.block.Blocks.MUD_BRICK_SLAB) && !st.is(net.minecraft.world.level.block.Blocks.MUD_BRICK_STAIRS)) cnt++;
+                            }
+                            if (cnt > rockN) {
+                                rockN = cnt;
+                                rk = cs.get(i);
+                            }
+                        }
+                        if (rk != null) {
+                            var back = cs.get(Math.max(0, cs.indexOf(rk) - 30));
+                            double bx = rk.x() - back.x(), bz = rk.z() - back.z(), bl = Math.max(1, Math.hypot(bx, bz));
+                            shot(rk.x() + 0.5 - bx / bl * 8, rk.y() + 6, rk.z() + 0.5 - bz / bl * 8, rk.x() + 0.5, rk.y() + 1, rk.z() + 0.5, "hprock");
+                        }
                         // and where the half steps are densest, from behind at walking height
                         HousePaths.Cell sl = null;
                         int slabN = 0;
@@ -399,7 +420,7 @@ final class StakeTest {
      * stair facing up the slope in its upper cell, and two blocks of headroom must be free. Prints CR-STAKE-WALK.
      */
     private static void walk(ServerLevel level, java.util.List<HousePaths.Cell> cells, BlockPos stake, java.util.Map<Long, String> skipped) {
-        int bad = 0, stairs = 0, steps = 0, flat = 0, slabs = 0;
+        int bad = 0, stairs = 0, steps = 0, flat = 0, slabs = 0, mudSteps = 0, stoneSteps = 0;
         int[] halfSteps = {0}, stairSteps = {0};
         HousePaths.Cell prev = null;
         int banks = 0, cutFill = 0;
@@ -420,6 +441,10 @@ final class StakeTest {
             boolean isSlab = state.getBlock() instanceof net.minecraft.world.level.block.SlabBlock
                 && state.getValue(net.minecraft.world.level.block.SlabBlock.TYPE) == net.minecraft.world.level.block.state.properties.SlabType.BOTTOM;
             if (isSlab) slabs++;
+            if ((isSlab || isStair) && !c.water()) {
+                if (state.is(net.minecraft.world.level.block.Blocks.MUD_BRICK_SLAB) || state.is(net.minecraft.world.level.block.Blocks.MUD_BRICK_STAIRS)) mudSteps++;
+                else stoneSteps++;
+            }
             if (isSlab != c.slab()) bad = fail(++bad, "slab mismatch", at, state);
             if (!isStair && !isSlab && !state.isSolid() && !c.water()) bad = fail(++bad, "surface not solid", at, state);
             for (int dy = 1; dy <= 2; dy++)
@@ -561,7 +586,7 @@ final class StakeTest {
         }
         int pct = open == 0 ? 100 : wide * 100 / open;
         CountryRoads.LOG.info("CR-STAKE-WIDTH " + (pct >= 95 && one == 0 ? "PASS" : "FAIL") + " three wide " + wide + "/" + open + " (" + pct + "%) two=" + two + " one=" + one + " banks=" + banks + " why=" + why);
-        CountryRoads.LOG.info("CR-STAKE-WALK " + (bad == 0 ? "PASS" : "FAIL") + " cells=" + cells.size() + " flat=" + flat + " steps=" + steps + " (half " + halfSteps[0] + ", stair " + stairSteps[0] + ") stairs=" + stairs + " slabs=" + slabs + " bad=" + bad
+        CountryRoads.LOG.info("CR-STAKE-WALK " + (bad == 0 ? "PASS" : "FAIL") + " cells=" + cells.size() + " flat=" + flat + " steps=" + steps + " (half " + halfSteps[0] + ", stair " + stairSteps[0] + ") stairs=" + stairs + " slabs=" + slabs + " (mud " + mudSteps + ", other " + stoneSteps + ") bad=" + bad
             + " palette=" + io.github.profetgit.countryroads.paint.Palette.surface(level.getBiome(stake)).name() + " at=" + stake.toShortString());
     }
 

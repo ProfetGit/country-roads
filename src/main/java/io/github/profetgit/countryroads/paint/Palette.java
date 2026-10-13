@@ -219,8 +219,11 @@ public final class Palette {
         return Blocks.COBBLESTONE_STAIRS.defaultBlockState();
     }
 
-    /** House path step style: mix (fieldstone), mud (mud brick) or cobble; dry country uses its sandstone in every style. */
-    static final String STEP = System.getProperty("countryroads.step", "mix");
+    /**
+     * House path step style: auto (mud brick, fieldstone on rocky ground; user pick 2026-10-13), mix (fieldstone
+     * everywhere), mud or cobble; dry country uses its sandstone in every style.
+     */
+    static final String STEP = System.getProperty("countryroads.step", "auto");
     private static final Block[] COBBLE_SET = {Blocks.COBBLESTONE_SLAB, Blocks.COBBLESTONE_STAIRS}, MOSSY_SET = {Blocks.MOSSY_COBBLESTONE_SLAB, Blocks.MOSSY_COBBLESTONE_STAIRS},
         STONE_SET = {Blocks.STONE_SLAB, Blocks.STONE_STAIRS}, ANDESITE_SET = {Blocks.ANDESITE_SLAB, Blocks.ANDESITE_STAIRS},
         MUD_SET = {Blocks.MUD_BRICK_SLAB, Blocks.MUD_BRICK_STAIRS}, SAND_SET = {Blocks.SANDSTONE_SLAB, Blocks.SANDSTONE_STAIRS},
@@ -228,17 +231,18 @@ public final class Palette {
         SMOOTH_RED_SET = {Blocks.SMOOTH_RED_SANDSTONE_SLAB, Blocks.SMOOTH_RED_SANDSTONE_STAIRS};
 
     /**
-     * A step of a house path on land: a bottom slab (half step) or a stair, unrotated. Fieldstone: cobblestone, mossy
-     * cobblestone, stone and andesite mixed block by block, weighted per biome (more moss where it is wet, none in snow
-     * or dry country); sandstone in deserts, red sandstone in badlands.
+     * A step of a house path on land: a bottom slab (half step) or a stair, unrotated. Mud brick, softer against the
+     * dirt path; on rocky ground (and in tunnels) fieldstone: cobblestone, mossy cobblestone, stone and andesite mixed
+     * block by block, weighted per biome (more moss where it is wet, none in snow or dry country). Sandstone in
+     * deserts, red sandstone in badlands.
      */
-    public static BlockState houseStep(Holder<Biome> biome, long h, boolean slab) {
+    public static BlockState houseStep(Holder<Biome> biome, long h, boolean slab, boolean rocky) {
         Surface pal = surface(biome);
         int r = (int) ((h >>> 28) & 1023);
         Block[] set;
         if (pal == DESERT) set = r < 600 ? SAND_SET : SMOOTH_SAND_SET;
         else if (pal == BADLANDS) set = r < 600 ? RED_SET : SMOOTH_RED_SET;
-        else if (STEP.equals("mud")) set = MUD_SET;
+        else if (STEP.equals("mud") || STEP.equals("auto") && !rocky) set = MUD_SET;
         else if (STEP.equals("cobble")) {
             int moss = pal == SNOWY || pal == SAVANNA ? 0 : pal == JUNGLE || pal == SWAMP ? 520 : 260;
             set = r < moss ? MOSSY_SET : COBBLE_SET;

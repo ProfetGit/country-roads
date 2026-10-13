@@ -72,7 +72,7 @@ public final class HousePaths {
     public static final Direction[] DIRS = {Direction.NORTH, Direction.EAST, Direction.SOUTH, Direction.WEST};
     static final int[] DX = {0, 1, 0, -1}, DZ = {-1, 0, 1, 0};
 
-    private record Rollout(ServerLevel level, BlockPos stake, List<Cell> cells, int[] next, java.util.Set<Long> chunks, int[] age, java.util.Set<Long> cols) {}
+    private record Rollout(ServerLevel level, BlockPos stake, List<Cell> cells, int[] next, java.util.Set<Long> chunks, int[] age, java.util.Set<Long> cols, java.util.Set<Long> rocky) {}
 
     private record Preview(ServerLevel level, BlockPos stake, ServerPlayer player, List<Cell> cells, long until) {}
 
@@ -328,7 +328,7 @@ public final class HousePaths {
             chunks.add(ChunkPos.pack(c.x >> 4, c.z >> 4));
             if (!c.bank) cols.add(key(c.x, c.z));
         }
-        ROLLOUTS.add(new Rollout(level, stake, s.cells, new int[]{0}, chunks, new int[]{0}, cols));
+        ROLLOUTS.add(new Rollout(level, stake, s.cells, new int[]{0}, chunks, new int[]{0}, cols, rocky(level, s.cells)));
         tell(player, Component.translatable("countryroads.stake.building", s.cells.size()), true);
     }
 
@@ -469,12 +469,12 @@ public final class HousePaths {
             Cell c = r.cells.get(r.next[0]);
             if (!r.level.hasChunkAt(new BlockPos(c.x, c.y, c.z))) break;
             r.next[0]++;
-            lay(r.level, be, c, false, r.cols);
+            lay(r.level, be, c, false, r.cols, r.rocky);
         }
         if (r.next[0] >= r.cells.size()) {
             for (int pass = 0; pass < 2; pass++)
                 for (Cell c : r.cells)
-                    if (r.level.hasChunkAt(new BlockPos(c.x, c.y, c.z))) lay(r.level, be, c, true, r.cols);
+                    if (r.level.hasChunkAt(new BlockPos(c.x, c.y, c.z))) lay(r.level, be, c, true, r.cols, r.rocky);
             // the waypoints did their job: they come back as items
             for (BlockPos w : new ArrayList<>(be.waypoints)) if (r.level.getBlockState(w).is(Stake.BLOCK)) r.level.destroyBlock(w, true);
             be.waypoints.clear();
@@ -488,7 +488,32 @@ public final class HousePaths {
     /** Above a path cell: natural ground and plants go up to HEADROOM, leaves only up to LEAF_ROOM; trees are never cut (logs stay, canopy stays). */
     public static final int HEADROOM = 5, LEAF_ROOM = 3, TUNNEL_ROOF = Tunnels.ROOF, CUT_MAX = 12;
 
-    private static void lay(ServerLevel level, StakeBlockEntity be, Cell c, boolean quiet, java.util.Set<Long> cols) {
+    /** Share of bare rock (stone, andesite, gravel...) among the ground tops around a step that makes it fieldstone. */
+    static final int ROCK_RADIUS = 3, ROCK_SHARE = 35;
+
+    /**
+     * The step cells that lie on rocky ground (user, 2026-10-13: mud-brick steps, mixed stone up where the ground is
+     * stone). Read before anything is laid, from the natural tops within ROCK_RADIUS, so both passes agree.
+     */
+    private static java.util.Set<Long> rocky(ServerLevel level, List<Cell> cells) {
+        java.util.Set<Long> out = new java.util.HashSet<>();
+        for (Cell c : cells) {
+            if (c.water || c.bank || c.tun >= 1 || c.stair < 0 && !c.slab) continue;
+            int rock = 0, all = 0;
+            for (int dx = -ROCK_RADIUS; dx <= ROCK_RADIUS; dx++)
+                for (int dz = -ROCK_RADIUS; dz <= ROCK_RADIUS; dz++) {
+                    int x = c.x + dx, z = c.z + dz;
+                    if (!level.hasChunkAt(new BlockPos(x, c.y, z))) continue;
+                    BlockState s = level.getBlockState(new BlockPos(x, level.getHeight(Heightmap.Types.MOTION_BLOCKING_NO_LEAVES, x, z) - 1, z));
+                    all++;
+                    if (s.is(BlockTags.BASE_STONE_OVERWORLD) || s.is(Blocks.GRAVEL) || s.is(Blocks.COBBLESTONE) || s.is(Blocks.MOSSY_COBBLESTONE)) rock++;
+                }
+            if (all > 0 && rock * 100 >= all * ROCK_SHARE) out.add(key(c.x, c.z));
+        }
+        return out;
+    }
+
+    private static void lay(ServerLevel level, StakeBlockEntity be, Cell c, boolean quiet, java.util.Set<Long> cols, java.util.Set<Long> rocky) {
         int y = c.y;
         long h = c.x * 0x2545F4914F6CDD1DL ^ c.z * 0x9E3779B97F4A7C15L;
         BlockPos at = new BlockPos(c.x, y, c.z);
@@ -517,8 +542,9 @@ public final class HousePaths {
                 if (PaintRules.solid(s) && s.getFluidState().isEmpty()) break;
                 change(level, be, q, Blocks.DIRT.defaultBlockState());
             }
-            surface = c.stair >= 0 ? Palette.houseStep(biome, h, false).setValue(StairBlock.FACING, DIRS[c.stair])
-                : c.slab ? Palette.houseStep(biome, h, true)
+            boolean rock = rocky.contains(key(c.x, c.z));
+            surface = c.stair >= 0 ? Palette.houseStep(biome, h, false, rock).setValue(StairBlock.FACING, DIRS[c.stair])
+                : c.slab ? Palette.houseStep(biome, h, true, rock)
                 : c.fringe ? Palette.houseFringe(natural, h) : c.edge ? Palette.houseEdge(biome, h, natural) : Palette.housePath(biome, 1f, h, natural);
         }
         // a column cut deeper than the headroom is cleared to its old ground, so no lip of earth hangs over the path
