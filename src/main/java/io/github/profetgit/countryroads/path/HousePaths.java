@@ -483,6 +483,7 @@ public final class HousePaths {
         BlockPos at = new BlockPos(c.x, y, c.z);
         if (c.bank) {
             bank(level, be, c);
+            plant(level, be, c.x, c.z, BANK_PLANTS);
             return;
         }
         var biome = level.getBiome(at);
@@ -519,6 +520,12 @@ public final class HousePaths {
             if (s.is(BlockTags.LEAVES) ? dy <= LEAF_ROOM : !Retrofit.isCrafted(s)) change(level, be, q, Blocks.AIR.defaultBlockState());
         }
         markPath(level, be, c.x, c.z);
+        if (c.edge && !c.water && c.tun < 0) {
+            // the verge just outside the bed gets its plants
+            int rx = -DZ[c.dir], rz = DX[c.dir];
+            for (int s = -1; s <= 1; s += 2)
+                if (!cols.contains(key(c.x + s * rx, c.z + s * rz))) plant(level, be, c.x + s * rx, c.z + s * rz, VERGE_PLANTS);
+        }
         if (quiet) return;
         level.sendParticles(new BlockParticleOption(ParticleTypes.BLOCK, surface), c.x + 0.5, y + 1.05, c.z + 0.5, 6, 0.3, 0.05, 0.3, 0);
         if (((c.x + c.z) & 3) == 0)
@@ -546,6 +553,27 @@ public final class HousePaths {
         }
         for (int yy = top; yy < c.y; yy++) change(level, be, new BlockPos(c.x, yy, c.z), Blocks.DIRT.defaultBlockState());
         change(level, be, new BlockPos(c.x, c.y, c.z), cover);
+    }
+
+    /** Chance (of 1024, times a smooth patch density) of a plant beside the bed and on a bank. */
+    static final int VERGE_PLANTS = 330, BANK_PLANTS = 260;
+
+    /** A verge plant on the ground of (x, z) (journaled like every other change, so taking the path up removes it). */
+    private static void plant(ServerLevel level, StakeBlockEntity be, int x, int z, int chance) {
+        long h = x * 0x2545F4914F6CDD1DL ^ z * 0x9E3779B97F4A7C15L ^ 0x5DEECE66DL;
+        h ^= h >>> 31;
+        if ((int) (h & 1023) >= chance * io.github.profetgit.countryroads.paint.RoadPainter.clump(x, z) / 512) return;
+        BlockPos g = new BlockPos(x, level.getHeight(Heightmap.Types.MOTION_BLOCKING_NO_LEAVES, x, z) - 1, z);
+        if (!level.getBlockState(g.above()).isAir() || level.getBlockState(g).is(Stake.BLOCK)) return;
+        BlockState plant = Palette.vergePlant(level.getBiome(g.above()), (int) ((h >>> 20) & 1023));
+        if (plant == null || !Palette.plantable(plant, level.getBlockState(g))) return;
+        BlockState upper = Palette.upperHalf(plant);
+        if (upper != null && !level.getBlockState(g.above(2)).isAir()) {
+            plant = Blocks.SHORT_GRASS.defaultBlockState();
+            upper = null;
+        }
+        change(level, be, g.above(), plant);
+        if (upper != null) change(level, be, g.above(2), upper);
     }
 
     /** A path column joins the road columns (other stakes can connect to it) and the index surveys read. */

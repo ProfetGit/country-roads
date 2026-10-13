@@ -33,7 +33,9 @@ import io.github.profetgit.countryroads.mixin.SignBlockEntityAccessor;
 public final class RoadPainter {
     private static final BlockState AIR = Blocks.AIR.defaultBlockState();
     static final int MAX_FILL = 4, MAX_BANK = 5;
-    static final float BANK_REACH = 5f;
+    static final float BANK_REACH = 5f, VERGE_REACH = 4f;
+    /** Chance (of 1024) of a pebble on a stony road column near the edge, and in the middle. */
+    static final int PEBBLE_EDGE = 28, PEBBLE_MIDDLE = 8;
 
     private final Canvas chunk;
     private final BlockPos.MutableBlockPos pos = new BlockPos.MutableBlockPos();
@@ -349,6 +351,9 @@ public final class RoadPainter {
                 // everything above the road goes, up to the plants that stood on the old ground
                 clear(x, from, Math.max(top + 3, ground + 2), z);
                 if (ground > top + 1) clearLeaves(x, ground + 1, ground + 10, z);
+                // a pebble now and then on stony stretches, mostly toward the edges where wheels do not run
+                if (!half && Palette.pebbly(get(x, top, z)) && (int) ((h >>> 50) & 1023) < (in < 1f ? PEBBLE_EDGE : PEBBLE_MIDDLE))
+                    set(x, top + 1, z, Palette.pebble((int) (h >>> 12)));
             }
         }
     }
@@ -412,6 +417,38 @@ public final class RoadPainter {
         BlockState natural = PaintRules.surfaceOf(get(x, ground, z));
         shoulder(x, z, top, d, ground, natural, h, m.y[i]);
         wallOrFence(x, z, top, d, m, i);
+        verge(x, z, top, d);
+    }
+
+    /**
+     * Plants on the verge: short grass most, then tall grass, the biome's flowers and the odd bush, in loose clumps (a
+     * smooth density field about 6 blocks across), only on bare soil with room above (never on walls, fences, hedges).
+     */
+    private void verge(int x, int z, int top, float d) {
+        if (d < 0.6f || d >= VERGE_REACH) return;
+        long h = hash(x * 31 + 7, z * 17 - 3);
+        int chance = (d < 1.5f ? 230 : 330) * clump(x, z) / 512;
+        if ((int) (h & 1023) >= chance) return;
+        int g = groundAt(x, z, top + 6);
+        if (!get(x, g + 1, z).isAir()) return;
+        BlockState plant = Palette.vergePlant(chunk.biome(x, g + 1, z), (int) ((h >>> 20) & 1023));
+        if (plant == null || !Palette.plantable(plant, get(x, g, z))) return;
+        BlockState upper = Palette.upperHalf(plant);
+        if (upper != null && !get(x, g + 2, z).isAir()) {
+            plant = Blocks.SHORT_GRASS.defaultBlockState();
+            upper = null;
+        }
+        set(x, g + 1, z, plant);
+        if (upper != null) set(x, g + 2, z, upper);
+    }
+
+    /** Smooth 0..1024 density, bilinear over 6-block cells: plants come in patches, not evenly sprinkled. */
+    public static int clump(int x, int z) {
+        int cx = Math.floorDiv(x, 6), cz = Math.floorDiv(z, 6);
+        float tx = (x - cx * 6) / 6f, tz = (z - cz * 6) / 6f;
+        float a = (hash(cx, cz) & 1023) * (1 - tx) + (hash(cx + 1, cz) & 1023) * tx;
+        float b = (hash(cx, cz + 1) & 1023) * (1 - tx) + (hash(cx + 1, cz + 1) & 1023) * tx;
+        return (int) (a * (1 - tz) + b * tz);
     }
 
     private void shoulder(int x, int z, int top, float d, int ground, BlockState natural, long h, float roadY) {

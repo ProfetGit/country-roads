@@ -60,12 +60,12 @@ public final class Palette {
     }
 
     static final Surface TEMPERATE = new Surface("temperate",
-        new BlockState[]{b(Blocks.DIRT_PATH), b(Blocks.COARSE_DIRT), b(Blocks.GRAVEL), b(Blocks.PACKED_MUD)}, new int[]{90, 40, 110},
-        new BlockState[]{b(Blocks.DIRT_PATH), b(Blocks.COARSE_DIRT), b(Blocks.GRAVEL), b(Blocks.PACKED_MUD)}, new int[]{330, 60, 90},
+        new BlockState[]{b(Blocks.DIRT_PATH), b(Blocks.COARSE_DIRT), b(Blocks.ROOTED_DIRT), b(Blocks.PACKED_MUD)}, new int[]{90, 60, 110},
+        new BlockState[]{b(Blocks.DIRT_PATH), b(Blocks.COARSE_DIRT), b(Blocks.MOSS_BLOCK), b(Blocks.PACKED_MUD)}, new int[]{240, 160, 80},
         b(Blocks.MUD_BRICK_SLAB), 120);
     static final Surface TAIGA = new Surface("taiga",
-        new BlockState[]{b(Blocks.DIRT_PATH), b(Blocks.COARSE_DIRT), b(Blocks.GRAVEL), b(Blocks.PODZOL), b(Blocks.PACKED_MUD)}, new int[]{110, 90, 20, 90},
-        new BlockState[]{b(Blocks.DIRT_PATH), b(Blocks.PODZOL), b(Blocks.COARSE_DIRT), b(Blocks.GRAVEL)}, new int[]{260, 200, 80},
+        new BlockState[]{b(Blocks.DIRT_PATH), b(Blocks.COARSE_DIRT), b(Blocks.ROOTED_DIRT), b(Blocks.PODZOL), b(Blocks.PACKED_MUD)}, new int[]{110, 50, 20, 90},
+        new BlockState[]{b(Blocks.DIRT_PATH), b(Blocks.PODZOL), b(Blocks.COARSE_DIRT), b(Blocks.MOSS_BLOCK)}, new int[]{240, 180, 140},
         b(Blocks.MUD_BRICK_SLAB), 140);
     static final Surface SNOWY = new Surface("snowy",
         new BlockState[]{b(Blocks.DIRT_PATH), b(Blocks.GRAVEL), b(Blocks.COARSE_DIRT)}, new int[]{140, 60},
@@ -138,12 +138,15 @@ public final class Palette {
     public static BlockState houseEdge(Holder<Biome> biome, long h, BlockState natural) {
         Surface pal = surface(biome);
         if (keepable(pal, natural) && ((h >>> 8) & 1023) < 200) return natural;
+        // coarse dirt at the edge of the bed (not on the walked line: a full cube beside path blocks reads as a worn verge there)
+        if (pal != SNOWY && pal != DESERT && pal != BADLANDS && ((h >>> 40) & 1023) < 260) return Blocks.COARSE_DIRT.defaultBlockState();
         return flat(pal.pick(pal.edge(), pal.edgeW(), (int) ((h >>> 24) & 1023)));
     }
 
     /** A straggler beside the worn band: a lone path block on grass, so the trail frays instead of ending on a line. */
     public static BlockState houseFringe(BlockState natural, long h) {
-        if (natural.is(Blocks.GRASS_BLOCK) || natural.is(Blocks.DIRT) || natural.is(Blocks.PODZOL) || natural.is(Blocks.COARSE_DIRT)) return Blocks.DIRT_PATH.defaultBlockState();
+        if (natural.is(Blocks.GRASS_BLOCK) || natural.is(Blocks.DIRT) || natural.is(Blocks.PODZOL) || natural.is(Blocks.COARSE_DIRT))
+            return ((h >>> 36) & 3) == 0 ? Blocks.COARSE_DIRT.defaultBlockState() : Blocks.DIRT_PATH.defaultBlockState();
         return natural;
     }
 
@@ -201,6 +204,69 @@ public final class Palette {
 
     public static BlockState deck(Holder<Biome> biome) {
         return wood(wood(biome)).planks().defaultBlockState();
+    }
+
+    /**
+     * A plant for the verge of a road or path in this biome, or null (r: 0..1023, decides which). Mostly short grass,
+     * then tall grass, the biome's own flowers and the odd bush; dry plants on sand and terracotta, none in snow. For
+     * tall grass this is the lower half; the caller adds the upper one (see upperHalf).
+     */
+    public static BlockState vergePlant(Holder<Biome> biome, int r) {
+        Surface pal = surface(biome);
+        if (pal == SNOWY) return null;
+        if (pal == DESERT || pal == BADLANDS) return b(r < 560 ? Blocks.SHORT_DRY_GRASS : Blocks.DEAD_BUSH);
+        Block[] flowers;
+        int grass, tall, flower;
+        if (pal == TAIGA) {
+            flowers = new Block[]{Blocks.FERN, Blocks.FERN, Blocks.POPPY, Blocks.DANDELION, Blocks.LILY_OF_THE_VALLEY};
+            grass = 420; tall = 520; flower = 860;
+        } else if (pal == SWAMP) {
+            flowers = new Block[]{Blocks.BLUE_ORCHID, Blocks.FERN, Blocks.BLUE_ORCHID};
+            grass = 480; tall = 560; flower = 820;
+        } else if (pal == JUNGLE) {
+            flowers = new Block[]{Blocks.FERN, Blocks.FERN, Blocks.POPPY};
+            grass = 400; tall = 520; flower = 760;
+        } else if (pal == SAVANNA) {
+            flowers = new Block[]{Blocks.DANDELION, Blocks.POPPY};
+            grass = 460; tall = 760; flower = 860;
+        } else if (pal == STONY) {
+            flowers = new Block[]{Blocks.DANDELION, Blocks.POPPY, Blocks.AZURE_BLUET};
+            grass = 640; tall = 760; flower = 900;
+        } else {
+            flowers = new Block[]{Blocks.DANDELION, Blocks.POPPY, Blocks.OXEYE_DAISY, Blocks.CORNFLOWER, Blocks.AZURE_BLUET, Blocks.WILDFLOWERS};
+            grass = 480; tall = 640; flower = 900;
+        }
+        if (r < grass) return b(Blocks.SHORT_GRASS);
+        if (r < tall) return b(Blocks.TALL_GRASS);
+        if (r < flower) return b(flowers[(r * 7 + 3) % flowers.length]);
+        return b(r % 9 == 0 ? Blocks.FIREFLY_BUSH : Blocks.BUSH);
+    }
+
+    /** The upper half of a two-block plant, or null for a one-block one. */
+    public static BlockState upperHalf(BlockState plant) {
+        if (!(plant.getBlock() instanceof net.minecraft.world.level.block.DoublePlantBlock)) return null;
+        return plant.setValue(net.minecraft.world.level.block.DoublePlantBlock.HALF, net.minecraft.world.level.block.state.properties.DoubleBlockHalf.UPPER);
+    }
+
+    /** Whether this plant can stand on that ground (green plants on soil, dry ones on sand and terracotta). */
+    public static boolean plantable(BlockState plant, BlockState ground) {
+        if (plant.is(Blocks.DEAD_BUSH) || plant.is(Blocks.SHORT_DRY_GRASS))
+            return ground.is(net.minecraft.tags.BlockTags.SAND) || ground.is(net.minecraft.tags.BlockTags.TERRACOTTA) || ground.is(Blocks.COARSE_DIRT);
+        return ground.is(Blocks.GRASS_BLOCK) || ground.is(Blocks.PODZOL) || ground.is(Blocks.DIRT) || ground.is(Blocks.COARSE_DIRT)
+            || ground.is(Blocks.MOSS_BLOCK) || ground.is(Blocks.ROOTED_DIRT) || ground.is(Blocks.MYCELIUM);
+    }
+
+    /** Stony road surfaces that get the odd pebble (a stone button) on top. */
+    public static boolean pebbly(BlockState surface) {
+        return surface.is(Blocks.GRAVEL) || surface.is(Blocks.COBBLESTONE) || surface.is(Blocks.MOSSY_COBBLESTONE) || surface.is(Blocks.ANDESITE)
+            || surface.is(Blocks.STONE) || surface.is(Blocks.TUFF);
+    }
+
+    /** A pebble lying on the road: a stone button, turned by r. */
+    public static BlockState pebble(int r) {
+        return Blocks.STONE_BUTTON.defaultBlockState()
+            .setValue(net.minecraft.world.level.block.FaceAttachedHorizontalDirectionalBlock.FACE, net.minecraft.world.level.block.state.properties.AttachFace.FLOOR)
+            .setValue(net.minecraft.world.level.block.HorizontalDirectionalBlock.FACING, net.minecraft.core.Direction.from2DDataValue(r & 3));
     }
 
     /** Which natural top blocks may stay as patches on the road edge (never bare grass in snow, never stray sand). */
