@@ -21,7 +21,7 @@ final class PathPlan {
     /** Most a bed column or a bank column is cut or filled; banks reach this many columns beyond the bed. */
     static final int BED_MAX = 3, BANK_MAX = 4, BANK_REACH = 3;
     /** Bridge rail posts every this many cells (and at both ends). */
-    static final int BRIDGE_POST = 4;
+    static final int BRIDGE_POST = 4, BRIDGE_GAP = 3;
     /** Crossings at least ARCH_MIN cells long arch by one block, from ARCH_HIGH by ARCH_MAX half blocks. */
     static final int ARCH_MIN = 6, ARCH_HIGH = 16, ARCH_MAX = 4;
     /**
@@ -139,6 +139,7 @@ final class PathPlan {
                 fixed[i] = true;
             } else {
                 int g = t.ground(xs[i], zs[i]);
+                if (Terrain.deep(g)) g = g - Terrain.DEEP + Terrain.WET;
                 wet[i] = g >= Terrain.WET;
                 ty[i] = Terrain.level(g);
                 lastLevel = ty[i];
@@ -147,6 +148,24 @@ final class PathPlan {
             used.add(col);
         }
         dir[n] = dirOf(ChunkPos.getX(endKey) - px, ChunkPos.getZ(endKey) - pz);
+        // a sandbar of up to BRIDGE_GAP cells between two stretches of water is bridged over too: one bridge, not two
+        // with a jog between them (user, 0.1.11)
+        for (int i = 1; i < n; i++) {
+            if (wet[i] || !wet[i - 1] || tm[i] > 0) continue;
+            int e = i;
+            while (e < n && !wet[e] && tm[e] <= 0 && e - i < BRIDGE_GAP) e++;
+            if (e >= n || !wet[e] || tm[e] > 0) continue;
+            int deckY = Math.max(ty[i - 1], ty[e]);
+            boolean low = true;
+            for (int q = i; q < e; q++) if (ty[q] > deckY) low = false;
+            if (!low) continue;
+            for (int q = i; q < e; q++) {
+                wet[q] = true;
+                fixed[q] = true;
+                ty[q] = deckY;
+            }
+            i = e;
+        }
         // a crossing is one bridge: its deck at one height (the highest water level under it), numbered from the shore
         // for the posts
         int[] bidx = new int[n], blen = new int[n];
@@ -444,7 +463,7 @@ final class PathPlan {
         long col = ChunkPos.pack(qx, qz), inner = ChunkPos.pack(xs[i] + s * rx, zs[i] + s * rz);
         if (used.contains(col) || col == doorKey || t.road(qx, qz) || !used.contains(inner) || height.get(inner) != py[i]) return false;
         int g = t.ground(qx, qz);
-        return Terrain.deep(g) || Terrain.usable(g) && (g >= Terrain.WET || Terrain.level(g) < py[i]);
+        return Terrain.deep(g) || Terrain.usable(g) && (g >= Terrain.WET || Terrain.level(g) <= py[i]);
     }
 
     /** Past the end of a rail run: land (the bridge reaches the shore there), or the walked line itself leaves the water. */

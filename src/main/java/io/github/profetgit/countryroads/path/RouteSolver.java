@@ -27,7 +27,9 @@ final class RouteSolver {
     /** Both sides closed (a trunk and deep water, two trunks): the path would be one wide there. */
     static final int BOTH_CLOSED = 120;
     /** A bend on the water: bridges cross straight (user saw a staircase deck over a diagonal river). */
-    static final int WET_TURN = 2000;
+    static final int WET_TURN = 2000, APPROACH = 3, APPROACH_TURN = 300;
+    /** Longest bridge (cells of water in a row), deep water included. */
+    static final int MAX_BRIDGE = 64;
     /**
      * A switchback whose legs pass within two columns of each other shares its bed columns (one leg two wide, or one
      * wide when they sit at different heights): per column that close to the route's own earlier stretch. Five cells
@@ -448,8 +450,17 @@ final class RouteSolver {
         return t.known(x, z) && (allowed == null || allowed.contains(ChunkPos.pack(x >> 4, z >> 4)));
     }
 
+    /** The ground as the search walks it: deep water is crossed on a bridge like shallow water (user: longer bridges). */
     private int ground(int x, int z) {
-        return t.ground(x, z);
+        int g = t.ground(x, z);
+        return Terrain.deep(g) ? g - Terrain.DEEP + Terrain.WET : g;
+    }
+
+    /** Cells of water in a row up to k (the bridge being walked), counted up to MAX_BRIDGE. */
+    private int bridgeRun(int k) {
+        int run = 0;
+        for (int a = k; a >= 0 && run < MAX_BRIDGE && ground(ix(a), iz(a)) >= Terrain.WET; a = parent[a]) run++;
+        return run;
     }
 
     private int treeCost(int i, int x, int z, int walkY) {
@@ -476,6 +487,7 @@ final class RouteSolver {
         if (bores && Terrain.usable(ny) && ny < Terrain.WET && !fromWet && ny - walkFrom >= 1) tryBore(k, x, z, d0, c, d, walkFrom);
         if (!Terrain.usable(ny)) return;
         boolean wet = ny >= Terrain.WET;
+        if (wet && fromWet && bridgeRun(k) >= MAX_BRIDGE) return;
         int walkTo = Terrain.level(ny);
         int dy = walkTo - walkFrom;
         if (Math.abs(dy) > 1) return;
@@ -486,7 +498,7 @@ final class RouteSolver {
         }
         int add = 10 + bend + (int) (lattice(31, nx * 7 + d, nz) * JITTER) + (dy != 0 ? climbPenalty(k) : 0) + treeCost(ni, nx, nz, walkTo)
             + wobble(nx, nz) + (d0 != START && d0 != d ? TURN : 0) + 8 * Math.abs(dy) + (wet ? 30 : 0) + sideCost(nx, nz, d, walkTo)
-            + closeLeg(k, nx, nz) + (d0 != START && d0 != d && (wet || fromWet) ? WET_TURN : 0);
+            + closeLeg(k, nx, nz) + (d0 != START && d0 != d && (wet || fromWet) ? WET_TURN : 0) + approach(k, d, wet, fromWet);
         if (dy < 0 && x == sx && z == sz) add += END_STEP;
         else if (dy > 0 && t.openRoad(nx, nz)) add += END_STEP;
         if (penalty != null) add += penalty[ni];
@@ -649,6 +661,26 @@ final class RouteSolver {
     }
 
     /** Climbing several of the last few cells in a row is dear: on a slope the route zigzags across it with flat stretches between the rises. */
+    /**
+     * A bridge wants a straight run at both ends: stepping onto the water after a bend within APPROACH cells, or
+     * bending within APPROACH cells after leaving it, costs APPROACH_TURN (a sandbar jog made a Z-shaped bridge).
+     */
+    private int approach(int k, int d, boolean wet, boolean fromWet) {
+        if (wet && !fromWet) {
+            int dir = d;
+            for (int a = k, q = 0; a >= 0 && q < APPROACH; a = parent[a], q++) {
+                if (parent[a] < 0) break;
+                if (arrive[a] != dir) return APPROACH_TURN;
+            }
+            return 0;
+        }
+        if (!wet && arrive[k] != d && parent[k] >= 0) {
+            for (int a = k, q = 0; a >= 0 && q <= APPROACH; a = parent[a], q++)
+                if (ground(ix(a), iz(a)) >= Terrain.WET) return APPROACH_TURN;
+        }
+        return 0;
+    }
+
     private int climbPenalty(int k) {
         int cnt = 0;
         int a = k;

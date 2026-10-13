@@ -626,7 +626,7 @@ public final class HousePaths {
         int beamY = c.y + c.arch / 2, fenceY = c.y + (c.arch + 2) / 2;
         if (c.tidx >= 1) {
             boolean stone = Palette.bridgeDetail("stone");
-            for (int yy = fenceY + (Palette.bridgeDetail("trim") ? 1 : 0); yy >= c.y - 10; yy--) {
+            for (int yy = fenceY + (Palette.bridgeDetail("trim") ? 1 : 0); yy >= c.y - 24; yy--) {
                 BlockPos q = at.atY(yy);
                 BlockState s = level.getBlockState(q);
                 if (yy < c.y && PaintRules.solid(s) && s.getFluidState().isEmpty()) break;

@@ -525,6 +525,21 @@ final class StakeTest {
         }
         CountryRoads.LOG.info("CR-STAKE-DEADENDS " + deadEnds);
         {
+            // bridges must be straight: no bend on a deck cell or right before one
+            int bends = 0, run = 0, longest = 0;
+            HousePaths.Cell pc = null;
+            for (HousePaths.Cell c : cells) {
+                if (c.edge() || c.bank()) continue;
+                run = c.water() ? run + 1 : 0;
+                longest = Math.max(longest, run);
+                if (pc != null && pc.dir() != c.dir() && (pc.water() || c.water())) {
+                    if (++bends <= 4) CountryRoads.LOG.info("CR-STAKE-BRIDGE-BEND at " + c.x() + "," + c.y() + "," + c.z());
+                }
+                pc = c;
+            }
+            CountryRoads.LOG.info("CR-STAKE-BRIDGE " + (bends == 0 ? "PASS" : "FAIL") + " bends=" + bends + " longest=" + longest);
+        }
+        {
             int runs = 0, longest = 0, len = 0, pdx = 9, pdz = 9, over10 = 0;
             HousePaths.Cell pc = null;
             for (HousePaths.Cell c : cells) {
