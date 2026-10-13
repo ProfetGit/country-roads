@@ -26,8 +26,8 @@ final class RouteSolver {
     static final int SIDE = 4, SIDE_CLOSED = 12;
     /** Both sides closed (a trunk and deep water, two trunks): the path would be one wide there. */
     static final int BOTH_CLOSED = 120;
-    /** A bend on the water: bridges cross straight. */
-    static final int WET_TURN = 80;
+    /** A bend on the water: bridges cross straight (user saw a staircase deck over a diagonal river). */
+    static final int WET_TURN = 2000;
     /**
      * A switchback whose legs pass within two columns of each other shares its bed columns (one leg two wide, or one
      * wide when they sit at different heights): per column that close to the route's own earlier stretch. Five cells
@@ -820,7 +820,11 @@ final class RouteSolver {
             long[] e = chain.get(i);
             long col = e[0];
             boolean near = false;
-            for (int q = Math.max(0, i - 4); q <= Math.min(n - 1, i + 4); q++) if (chain.get(q)[1] > 0 || waypointCols.contains(chain.get(q)[0])) near = true;
+            // no bend next to a tunnel, a waypoint or a crossing (a bend there would bend the bridge)
+            for (int q = Math.max(0, i - 6); q <= Math.min(n - 1, i + 6); q++) {
+                long cq = chain.get(q)[0];
+                if (chain.get(q)[1] > 0 || waypointCols.contains(cq) || ground(ChunkPos.getX(cq), ChunkPos.getZ(cq)) >= Terrain.WET) near = true;
+            }
             if (!near) {
                 int px = ChunkPos.getX(chain.get(i - 1)[0]), pz = ChunkPos.getZ(chain.get(i - 1)[0]);
                 int qx = ChunkPos.getX(chain.get(i + 1)[0]), qz = ChunkPos.getZ(chain.get(i + 1)[0]);

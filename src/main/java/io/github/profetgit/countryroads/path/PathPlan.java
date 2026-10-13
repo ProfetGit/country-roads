@@ -293,7 +293,7 @@ final class PathPlan {
             }
             int g = t.ground(cx, cz);
             // deep water beside a path on the shore: a deck at path height when the water lies just under it
-            boolean deckDeep = Terrain.deep(g) && !wet[i] && Math.abs(y - (g - Terrain.DEEP + 1)) <= 1;
+            boolean deckDeep = Terrain.deep(g) && Math.abs(y - (g - Terrain.DEEP + 1)) <= 1;
             if (deckDeep) g = y - 1 + Terrain.WET;
             if (!Terrain.usable(g)) {
                 skipped.put(col, Terrain.deep(g) ? "deep" + (g - Terrain.DEEP - y) : "closed");
@@ -330,25 +330,36 @@ final class PathPlan {
             }
         }
 
-        // bridge rails: two out from the walked line over the water, a stripped-log beam with a fence on it, and a log
-        // post down to the bed at both ends and every BRIDGE_POST cells; only where the deck beside is laid and the
-        // column is water or lower ground
-        for (int i = 0; i < n; i++) {
-            if (!wet[i] || tm[i] > 0 || tun[i] >= 0) continue;
-            int rx = -DZ[dir[i]], rz = DX[dir[i]], y = plan.y[i];
-            boolean end = bidx[i] == 0 || bidx[i] == blen[i] - 1, post = end || bidx[i] % BRIDGE_POST == 0;
-            for (int s = -1; s <= 1; s += 2) {
-                int qx = xs[i] + 2 * s * rx, qz = zs[i] + 2 * s * rz;
-                long col = ChunkPos.pack(qx, qz), inner = ChunkPos.pack(xs[i] + s * rx, zs[i] + s * rz);
-                if (used.contains(col) || col == doorKey || t.road(qx, qz) || !used.contains(inner) || height.get(inner) != y) continue;
-                int g = t.ground(qx, qz);
-                if (!Terrain.usable(g) || g < Terrain.WET && Terrain.level(g) >= y) continue;
-                bands.get(i).add(new HousePaths.Cell(qx, qz, y, true, true, -1, dir[i], false, -1, end ? 2 : post ? 1 : 0, false, false, true, arch[i]));
-                used.add(col);
-                // a beam and a fence (4 + 2 planks), a post about three logs; the arch's underside stairs
-                planks += post ? 12 : 6 + (Palette.bridgeDetail("trapdoor") ? 3 : 0);
-                if (post && Palette.bridgeDetail("stone")) stoneExtra += 2;
-                if (end && Palette.bridgeDetail("lantern")) lanterns++;
+        // bridge rails: two out from the walked line over the water, a stripped-log beam with a fence on it, where the
+        // deck beside is laid and the column is water or lower ground. Planned per side as runs along a straight
+        // stretch: a log post down to the bed at both ends of a run and every BRIDGE_POST cells, a lantern on the
+        // posts where the run meets the shore; a run of one is just a post (no stub of beam)
+        for (int s = -1; s <= 1; s += 2) {
+            for (int i = 0; i < n; ) {
+                if (!railable(t, i, s, wet, tm, tun, dir, xs, zs, plan.y, used, height, doorKey)) {
+                    i++;
+                    continue;
+                }
+                int a = i;
+                i++;
+                while (i < n && dir[i] == dir[i - 1] && railable(t, i, s, wet, tm, tun, dir, xs, zs, plan.y, used, height, doorKey)) i++;
+                int len = i - a;
+                for (int k = a; k < i; k++) {
+                    int rx = -DZ[dir[k]], rz = DX[dir[k]];
+                    int qx = xs[k] + 2 * s * rx, qz = zs[k] + 2 * s * rz;
+                    boolean endPost = k == a || k == i - 1, post = endPost || (k - a) % BRIDGE_POST == 0 && i - 1 - k >= 2;
+                    // the end of a run where it meets land (not where a corner or something built cut it short)
+                    boolean shore = endPost && (k == a ? shoreAt(t, xs[k] - DX[dir[k]] + 2 * s * rx, zs[k] - DZ[dir[k]] + 2 * s * rz, plan.y[k], k == 0 || !wet[k - 1])
+                        : shoreAt(t, xs[k] + DX[dir[k]] + 2 * s * rx, zs[k] + DZ[dir[k]] + 2 * s * rz, plan.y[k], k == n - 1 || !wet[k + 1]));
+                    boolean lantern = shore && Palette.bridgeDetail("lantern");
+                    bands.get(k).add(new HousePaths.Cell(qx, qz, plan.y[k], true, true, -1, dir[k], false, -1, lantern ? 2 : post ? 1 : 0, false, false, true, arch[k]));
+                    used.add(ChunkPos.pack(qx, qz));
+                    // a beam, a fence and a trapdoor (4 + 2 + 3 planks), a post about three logs
+                    planks += post ? 12 : 6 + (Palette.bridgeDetail("trapdoor") ? 3 : 0);
+                    if (post && Palette.bridgeDetail("stone")) stoneExtra += 2;
+                    if (lantern) lanterns++;
+                }
+                if (len == 0) i++;
             }
         }
 
@@ -422,6 +433,24 @@ final class PathPlan {
             if (i > 0 && arch[i] / 2 > arch[i - 1] / 2 || i < n - 1 && arch[i] / 2 > arch[i + 1] / 2) planks += 10;
         }
         return new HousePaths.Survey(cells, earth, stone, planks, torches, lanterns, tunnelCells, n, skipped);
+    }
+
+    /** Can cell i of the walked line have a bridge rail on side s: a wet cell, its deck beside laid, the column open water or low ground. */
+    private static boolean railable(Terrain t, int i, int s, boolean[] wet, int[] tm, int[] tun, int[] dir, int[] xs, int[] zs, int[] py,
+                                    Set<Long> used, Long2IntOpenHashMap height, long doorKey) {
+        if (!wet[i] || tm[i] > 0 || tun[i] >= 0) return false;
+        int rx = -DZ[dir[i]], rz = DX[dir[i]];
+        int qx = xs[i] + 2 * s * rx, qz = zs[i] + 2 * s * rz;
+        long col = ChunkPos.pack(qx, qz), inner = ChunkPos.pack(xs[i] + s * rx, zs[i] + s * rz);
+        if (used.contains(col) || col == doorKey || t.road(qx, qz) || !used.contains(inner) || height.get(inner) != py[i]) return false;
+        int g = t.ground(qx, qz);
+        return Terrain.deep(g) || Terrain.usable(g) && (g >= Terrain.WET || Terrain.level(g) < py[i]);
+    }
+
+    /** Past the end of a rail run: land (the bridge reaches the shore there), or the walked line itself leaves the water. */
+    private static boolean shoreAt(Terrain t, int x, int z, int y, boolean lineOnLand) {
+        int g = t.ground(x, z);
+        return lineOnLand || Terrain.usable(g) && g < Terrain.WET && Terrain.level(g) >= y - 1;
     }
 
     /** A trunk or something built within a block: a cut there would undercut it. */
