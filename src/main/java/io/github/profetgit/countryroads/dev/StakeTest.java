@@ -87,6 +87,12 @@ final class StakeTest {
                         CountryRoads.LOG.info("CR-STAKE KEPT cells=" + built[0] + " journal=" + built[1]);
                         return true;
                     }
+                    int logsCut = 0, leavesCut = 0;
+                    for (var e : be.journal) {
+                        if (e.state().is(net.minecraft.tags.BlockTags.LOGS)) logsCut++;
+                        else if (e.state().is(net.minecraft.tags.BlockTags.LEAVES)) leavesCut++;
+                    }
+                    CountryRoads.LOG.info("CR-STAKE-TREES logs removed " + logsCut + " (must be 0), leaves removed " + leavesCut);
                     int[] mid = snapshot(level, cells[0]);
                     int changed = diff(before[0], mid);
                     HousePaths.takeUp(level, stake);

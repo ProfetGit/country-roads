@@ -75,6 +75,7 @@ public final class HousePaths {
         final Long2LongOpenHashMap parent = new Long2LongOpenHashMap();
         final Long2IntOpenHashMap cost = new Long2IntOpenHashMap();
         final Long2IntOpenHashMap ground = new Long2IntOpenHashMap();
+        final Long2IntOpenHashMap trees = new Long2IntOpenHashMap();
         /** Direction each column was entered by (START at the door). */
         final Long2IntOpenHashMap arrive = new Long2IntOpenHashMap();
         int expansions;
@@ -87,6 +88,7 @@ public final class HousePaths {
             this.sz = stake.getZ();
             cost.defaultReturnValue(Integer.MAX_VALUE);
             ground.defaultReturnValue(UNKNOWN);
+            trees.defaultReturnValue(UNKNOWN);
         }
     }
 
@@ -254,7 +256,7 @@ public final class HousePaths {
             int prevWalk = pg >= 100000 ? pg - 100000 + 1 : pg;
             if (prevWalk != walkFrom || walkTo != walkFrom) bend = BEND_ON_SLOPE;
         }
-        int add = 10 + bend + wobble(nx, nz) + (d0 != START && d0 != d ? TURN : 0) + 8 * Math.abs(dy) + (wet ? 30 : 0);
+        int add = 10 + bend + treeCost(j, nx, nz, walkTo) + wobble(nx, nz) + (d0 != START && d0 != d ? TURN : 0) + 8 * Math.abs(dy) + (wet ? 30 : 0);
         if (dy < 0 && x == j.sx && z == j.sz) add += END_STEP;
         else if (dy > 0 && RoadColumns.isOpenRoad(j.level, nx, nz)) add += END_STEP;
         long nk = key(nx, nz);
@@ -264,6 +266,21 @@ public final class HousePaths {
         j.parent.put(nk, k);
         j.arrive.put(nk, d);
         j.open.add(new long[]{cost, nk});
+    }
+
+    /** Leaves where the path would have to cut them, or a trunk beside it: dear, so the route goes round trees rather than through their canopy. */
+    private static int treeCost(Job j, int x, int z, int walkY) {
+        long k = key(x, z);
+        int v = j.trees.get(k);
+        if (v == UNKNOWN) {
+            v = 0;
+            for (int dy = 1; dy <= LEAF_ROOM; dy++)
+                if (j.level.getBlockState(new BlockPos(x, walkY + dy, z)).is(BlockTags.LEAVES)) v += 14;
+            for (Direction d : DIRS)
+                if (j.level.getBlockState(new BlockPos(x + d.getStepX(), walkY + 1, z + d.getStepZ())).is(BlockTags.LOGS)) v += 8;
+            j.trees.put(k, v);
+        }
+        return v;
     }
 
     private static double lattice(long seed, int a, int b) {
@@ -405,7 +422,7 @@ public final class HousePaths {
                     int rx = xs[i] + sgn * (-DZ[dir[i]]), rz = zs[i] + sgn * DX[dir[i]];
                     if (used.contains(key(rx, rz)) || (rx == j.sx && rz == j.sz) || RoadColumns.isRoad(j.level, rx, rz)) continue;
                     int sh = ground(j, rx, rz);
-                    if (sh < -1000 || sh >= 100000 || Math.abs(sh - plan.y[i]) > 1) continue;
+                    if (sh < -1000 || sh >= 100000 || Math.abs(sh - plan.y[i]) > 1 || treeCost(j, rx, rz, plan.y[i]) > 0) continue;
                     cells.add(new Cell(rx, rz, plan.y[i], false, true, plan.stair[i]));
                     used.add(key(rx, rz));
                     earth++;
@@ -447,8 +464,8 @@ public final class HousePaths {
         return false;
     }
 
-    /** Blocks above a path cell that must go: everything natural up to HEADROOM, and tree leaves above that. */
-    static final int HEADROOM = 5, CANOPY = 9;
+    /** Above a path cell: natural ground and plants go up to HEADROOM, leaves only up to LEAF_ROOM; trees are never cut (logs stay, canopy stays). */
+    static final int HEADROOM = 5, LEAF_ROOM = 3;
 
     private static void lay(ServerLevel level, StakeBlockEntity be, Cell c, boolean quiet) {
         int y = c.y;
@@ -474,12 +491,11 @@ public final class HousePaths {
                 : c.edge ? Palette.houseEdge(biome, h, natural) : Palette.housePath(biome, 1f, h, natural);
         }
         change(level, be, at, surface);
-        for (int dy = 1; dy <= CANOPY; dy++) {
+        for (int dy = 1; dy <= HEADROOM; dy++) {
             BlockPos q = at.above(dy);
             BlockState s = level.getBlockState(q);
-            if (s.isAir()) continue;
-            boolean leaves = s.is(BlockTags.LEAVES);
-            if (dy <= HEADROOM ? !(Retrofit.isCrafted(s) && !leaves) : leaves) change(level, be, q, Blocks.AIR.defaultBlockState());
+            if (s.isAir() || s.is(BlockTags.LOGS)) continue;
+            if (s.is(BlockTags.LEAVES) ? dy <= LEAF_ROOM : !Retrofit.isCrafted(s)) change(level, be, q, Blocks.AIR.defaultBlockState());
         }
         if (!RoadColumns.isRoad(level, c.x, c.z)) {
             RoadColumns.mark(level, c.x, c.z, true);
