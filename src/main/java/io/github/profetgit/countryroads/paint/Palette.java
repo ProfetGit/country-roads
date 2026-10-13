@@ -240,7 +240,10 @@ public final class Palette {
         Surface pal = surface(biome);
         int r = (int) ((h >>> 28) & 1023);
         Block[] set;
-        if (pal == DESERT) set = r < 600 ? SAND_SET : SMOOTH_SAND_SET;
+        // beaches share the desert road palette, but white sandstone steps on a temperate shore stand out: sandstone only
+        // in real deserts
+        boolean desert = pal == DESERT && (biome.is(ConventionalBiomeTags.IS_DESERT) || biome.is(BiomeTags.IS_BADLANDS) || !biome.is(ConventionalBiomeTags.IS_BEACH));
+        if (desert) set = r < 600 ? SAND_SET : SMOOTH_SAND_SET;
         else if (pal == BADLANDS) set = r < 600 ? RED_SET : SMOOTH_RED_SET;
         else if (STEP.equals("mud") || STEP.equals("auto") && !rocky) set = MUD_SET;
         else if (STEP.equals("cobble")) {
@@ -286,6 +289,14 @@ public final class Palette {
 
     public static BlockState woodLog(Holder<Biome> biome) {
         return wood(wood(biome)).log().defaultBlockState();
+    }
+
+    public static BlockState woodStripped(Holder<Biome> biome) {
+        return wood(wood(biome)).strippedLog().defaultBlockState();
+    }
+
+    public static BlockState woodFence(Holder<Biome> biome) {
+        return wood(wood(biome)).fence().defaultBlockState();
     }
 
     public static BlockState woodPlanks(Holder<Biome> biome) {

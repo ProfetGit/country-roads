@@ -128,7 +128,7 @@ final class ColumnSnapshot {
                 if ((k & WATER) != 0) {
                     int below = top;
                     while (below > minY && (kind(c.getBlockState(p.set(x, below, z))) & WATER) != 0 && top - below < 6) below--;
-                    g = top - below >= 6 ? Terrain.CLOSED : top + Terrain.WET;
+                    g = top - below >= 6 ? Terrain.DEEP + top : top + Terrain.WET;
                 } else if ((k & (FLUID | LOG)) != 0 || ((k & CRAFTED) != 0 && !(road != null && rc.road(lx, lz)))) {
                     g = Terrain.CLOSED;
                 } else g = top;

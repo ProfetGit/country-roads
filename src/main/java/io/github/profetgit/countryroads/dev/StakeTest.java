@@ -139,6 +139,27 @@ final class StakeTest {
                         }
                         shot(cx, cy, cz, far.x() + 0.5, far.y() + 1, far.z() + 0.5, "housepath");
                         shot(far.x() + 0.5, far.y() + 45, far.z() + 0.51, far.x() + 0.5, far.y(), far.z() + 0.5, "hptop");
+                        // the middle of the longest bridge, from the side
+                        HousePaths.Cell br = null;
+                        int brLen = 0, run = 0;
+                        for (int i = 0; i < cs.size(); i++) {
+                            var q = cs.get(i);
+                            if (q.edge()) continue;
+                            run = q.water() ? run + 1 : 0;
+                            if (run > brLen) {
+                                brLen = run;
+                                br = q;
+                            }
+                        }
+                        if (br != null && brLen >= 3) {
+                            int bi = cs.indexOf(br), mid = bi;
+                            for (int k = bi, m = 0; k >= 0 && m < brLen / 2; k--) if (!cs.get(k).edge()) { mid = k; m++; }
+                            var mc = cs.get(mid);
+                            int rx = -HousePaths.DIRS[mc.dir()].getStepZ(), rz = HousePaths.DIRS[mc.dir()].getStepX();
+                            int ax = HousePaths.DIRS[mc.dir()].getStepX(), az = HousePaths.DIRS[mc.dir()].getStepZ();
+                            shot(mc.x() + 0.5 + rx * 9 - ax * 5, mc.y() + 5, mc.z() + 0.5 + rz * 9 - az * 5, mc.x() + 0.5, mc.y() + 0.5, mc.z() + 0.5, "hpbridge");
+                            shot(mc.x() + 0.5 - ax * 9, mc.y() + 3, mc.z() + 0.5 - az * 9, mc.x() + 0.5, mc.y() + 1, mc.z() + 0.5, "hpbridgeB");
+                        }
                         // and where the fieldstone steps (rocky ground) are densest
                         HousePaths.Cell rk = null;
                         int rockN = 0;
@@ -423,10 +444,17 @@ final class StakeTest {
         int bad = 0, stairs = 0, steps = 0, flat = 0, slabs = 0, mudSteps = 0, stoneSteps = 0;
         int[] halfSteps = {0}, stairSteps = {0};
         HousePaths.Cell prev = null;
-        int banks = 0, cutFill = 0;
+        int banks = 0, cutFill = 0, rails = 0;
         for (HousePaths.Cell c : cells) {
             BlockPos at = new BlockPos(c.x(), c.y(), c.z());
             var state = level.getBlockState(at);
+            if (c.rail()) {
+                // a bridge rail: a fence on a beam, or a post, at rail height
+                rails++;
+                var top = level.getBlockState(at.above());
+                if (!top.is(net.minecraft.tags.BlockTags.FENCES) && !top.is(net.minecraft.tags.BlockTags.LOGS)) bad = fail(++bad, "rail missing", at.above(), top);
+                continue;
+            }
             if (c.bank()) {
                 // a bank is ground, not path: it only has to be at its height with nothing standing loose on it
                 banks++;
@@ -498,7 +526,7 @@ final class StakeTest {
         }
         int above = 0;
         for (HousePaths.Cell c : cells)
-            for (int dy = 1; dy <= 8 && c.tun() < 1 && !c.bank(); dy++) {
+            for (int dy = 1; dy <= 8 && c.tun() < 1 && !c.bank() && !c.rail(); dy++) {
                 BlockPos q = new BlockPos(c.x(), c.y() + dy, c.z());
                 var st = level.getBlockState(q);
                 // canopy from four blocks up is allowed (trees are never cut back further); anything else is left over
@@ -547,7 +575,7 @@ final class StakeTest {
         CountryRoads.LOG.info("CR-STAKE-WALLS centre cells with a 2-high wall beside: " + walled + "/" + centreN + ", stair cells: " + stairWalled + "/" + stairN);
         // width: centre cells whose two side columns (across the direction of travel) are path at the same height
         java.util.Map<Long, HousePaths.Cell> at = new java.util.HashMap<>();
-        for (HousePaths.Cell c : cells) if (!c.bank()) at.put(net.minecraft.world.level.ChunkPos.pack(c.x(), c.z()), c);
+        for (HousePaths.Cell c : cells) if (!c.bank() && !c.rail()) at.put(net.minecraft.world.level.ChunkPos.pack(c.x(), c.z()), c);
         // a side counts when it is path (not a fringe straggler) within half a block of the cell: a slab beside a full block still walks
         // at a bend the cell's side is the path itself going on (or coming in): that side is path, not narrowing
         java.util.Map<Long, Integer> lineAt = new java.util.HashMap<>();
@@ -586,7 +614,7 @@ final class StakeTest {
         }
         int pct = open == 0 ? 100 : wide * 100 / open;
         CountryRoads.LOG.info("CR-STAKE-WIDTH " + (pct >= 95 && one == 0 ? "PASS" : "FAIL") + " three wide " + wide + "/" + open + " (" + pct + "%) two=" + two + " one=" + one + " banks=" + banks + " why=" + why);
-        CountryRoads.LOG.info("CR-STAKE-WALK " + (bad == 0 ? "PASS" : "FAIL") + " cells=" + cells.size() + " flat=" + flat + " steps=" + steps + " (half " + halfSteps[0] + ", stair " + stairSteps[0] + ") stairs=" + stairs + " slabs=" + slabs + " (mud " + mudSteps + ", other " + stoneSteps + ") bad=" + bad
+        CountryRoads.LOG.info("CR-STAKE-WALK " + (bad == 0 ? "PASS" : "FAIL") + " cells=" + cells.size() + " flat=" + flat + " steps=" + steps + " (half " + halfSteps[0] + ", stair " + stairSteps[0] + ") stairs=" + stairs + " rails=" + rails + " slabs=" + slabs + " (mud " + mudSteps + ", other " + stoneSteps + ") bad=" + bad
             + " palette=" + io.github.profetgit.countryroads.paint.Palette.surface(level.getBiome(stake)).name() + " at=" + stake.toShortString());
     }
 

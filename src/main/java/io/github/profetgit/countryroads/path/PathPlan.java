@@ -19,6 +19,8 @@ final class PathPlan {
     static final int PROFILE_RANGE = 2;
     /** Most a bed column or a bank column is cut or filled; banks reach this many columns beyond the bed. */
     static final int BED_MAX = 3, BANK_MAX = 4, BANK_REACH = 3;
+    /** Bridge rail posts every this many cells (and at both ends). */
+    static final int BRIDGE_POST = 4;
     /**
      * Profile costs: per block cut, per block filled, a step, a step right after a step (a flight: stairs instead of a
      * slab), a step beside a corner.
@@ -142,6 +144,22 @@ final class PathPlan {
             used.add(col);
         }
         dir[n] = dirOf(ChunkPos.getX(endKey) - px, ChunkPos.getZ(endKey) - pz);
+        // a crossing is one bridge: its deck at one height (the highest water level under it), numbered from the shore
+        // for the posts
+        int[] bidx = new int[n], blen = new int[n];
+        for (int i = 0; i < n; ) {
+            if (!wet[i] || tm[i] > 0) {
+                i++;
+                continue;
+            }
+            int a = i, top = Integer.MIN_VALUE;
+            while (i < n && wet[i] && tm[i] <= 0) top = Math.max(top, ty[i++]);
+            for (int q = a; q < i; q++) {
+                ty[q] = top;
+                bidx[q] = q - a;
+                blen[q] = i - a;
+            }
+        }
         // near a bore the walked line keeps its ground: the portals need it, and a stretch passing over the tunnel must
         // not sink into its headroom
         Set<Long> bored = new HashSet<>();
@@ -200,7 +218,7 @@ final class PathPlan {
                 for (int s = -1; s <= 1; s += 2) {
                     int qx = xs[i] + s * rx, qz = zs[i] + s * rz;
                     if (used.contains(ChunkPos.pack(qx, qz)) || (qx == sx && qz == sz)) continue;
-                    bands.get(i).add(new HousePaths.Cell(qx, qz, plan.y[i], false, true, plan.stair[i], dir[i], false, tun[i], tidx[i], false, plan.slab[i]));
+                    bands.get(i).add(new HousePaths.Cell(qx, qz, plan.y[i], false, true, plan.stair[i], dir[i], false, tun[i], tidx[i], false, plan.slab[i], false));
                     used.add(ChunkPos.pack(qx, qz));
                 }
                 if (tun[i] >= 1)
@@ -263,13 +281,18 @@ final class PathPlan {
                 stair = f;
             }
             int g = t.ground(cx, cz);
+            // deep water beside a path on the shore: a deck at path height when the water lies just under it
+            boolean deckDeep = Terrain.deep(g) && !wet[i] && y == g - Terrain.DEEP + 1;
+            if (deckDeep) g = g - Terrain.DEEP + Terrain.WET;
             if (!Terrain.usable(g)) {
-                skipped.put(col, "closed");
+                skipped.put(col, Terrain.deep(g) ? "deep" : "closed");
                 continue;
             }
             boolean sideWet = g >= Terrain.WET;
             int lvl = Terrain.level(g), extra = 0;
-            if (sideWet && !wet[i]) {
+            if (deckDeep) {
+                // too deep to fill: planks on the water
+            } else if (sideWet && !wet[i]) {
                 // shallow water beside a path on land: filled up to the path (its depth is not known here: billed as two)
                 int water = lvl - 1;
                 if (y < water || y - water > BED_MAX) {
@@ -280,12 +303,12 @@ final class PathPlan {
                 lvl = water;
                 extra = 2;
             }
-            if (sideWet ? lvl != y : Math.abs(lvl - y) > BED_MAX) {
+            if (sideWet ? Math.abs(lvl - y) > 1 : Math.abs(lvl - y) > BED_MAX) {
                 skipped.put(col, sideWet ? "deckLevel" : "bedMax" + (lvl - y));
                 continue;
             }
             fill += extra;
-            bands.get(i).add(new HousePaths.Cell(cx, cz, y, sideWet, true, stair, dir[i], false, -1, 0, false, plan.slab[i] && !sideWet));
+            bands.get(i).add(new HousePaths.Cell(cx, cz, y, sideWet, true, stair, dir[i], false, -1, 0, false, plan.slab[i] && !sideWet, false));
             used.add(col);
             height.put(col, y);
             if (sideWet) planks++;
@@ -293,6 +316,26 @@ final class PathPlan {
                 surface++;
                 if (lvl > y) cut += lvl - y;
                 else fill += y - lvl;
+            }
+        }
+
+        // bridge rails: two out from the walked line over the water, a stripped-log beam with a fence on it, and a log
+        // post down to the bed at both ends and every BRIDGE_POST cells; only where the deck beside is laid and the
+        // column is water or lower ground
+        for (int i = 0; i < n; i++) {
+            if (!wet[i] || tm[i] > 0 || tun[i] >= 0) continue;
+            int rx = -DZ[dir[i]], rz = DX[dir[i]], y = plan.y[i];
+            boolean post = bidx[i] == 0 || bidx[i] == blen[i] - 1 || bidx[i] % BRIDGE_POST == 0;
+            for (int s = -1; s <= 1; s += 2) {
+                int qx = xs[i] + 2 * s * rx, qz = zs[i] + 2 * s * rz;
+                long col = ChunkPos.pack(qx, qz), inner = ChunkPos.pack(xs[i] + s * rx, zs[i] + s * rz);
+                if (used.contains(col) || col == doorKey || t.road(qx, qz) || !used.contains(inner) || height.get(inner) != y) continue;
+                int g = t.ground(qx, qz);
+                if (!Terrain.usable(g) || g < Terrain.WET && Terrain.level(g) >= y) continue;
+                bands.get(i).add(new HousePaths.Cell(qx, qz, y, true, true, -1, dir[i], false, -1, post ? 1 : 0, false, false, true));
+                used.add(col);
+                // a beam and a fence (4 + 2 planks), a post about three logs
+                planks += post ? 12 : 6;
             }
         }
 
@@ -329,7 +372,7 @@ final class PathPlan {
                     if (target == lvl) {
                         banked.add(col);
                         if (away == 1 && lvl == yRef && RouteSolver.lattice(seed + 9, cx, cz) < 0.22 && t.treeCost(cx, cz, lvl) == 0) {
-                            bands.get(i).add(new HousePaths.Cell(cx, cz, lvl, false, true, -1, dir[i], true, -1, 0, false, false));
+                            bands.get(i).add(new HousePaths.Cell(cx, cz, lvl, false, true, -1, dir[i], true, -1, 0, false, false, false));
                             used.add(col);
                         }
                         continue;
@@ -337,7 +380,7 @@ final class PathPlan {
                     if (Math.abs(target - lvl) > BANK_MAX) target = lvl + Integer.signum(target - lvl) * BANK_MAX;
                     if (target < lvl && trunkOrBuiltNear(t, cx, cz)) continue;
                     banked.add(col);
-                    bands.get(i).add(new HousePaths.Cell(cx, cz, target, false, true, -1, dir[i], false, -1, 0, true, false));
+                    bands.get(i).add(new HousePaths.Cell(cx, cz, target, false, true, -1, dir[i], false, -1, 0, true, false, false));
                     if (lvl > target) cut += lvl - target;
                     else fill += target - lvl;
                 }
@@ -345,7 +388,7 @@ final class PathPlan {
 
         List<HousePaths.Cell> cells = new ArrayList<>();
         for (int i = 0; i < n; i++) {
-            cells.add(new HousePaths.Cell(xs[i], zs[i], plan.y[i], wet[i], false, plan.stair[i], dir[i], false, tun[i], tidx[i], false, plan.slab[i] && !wet[i]));
+            cells.add(new HousePaths.Cell(xs[i], zs[i], plan.y[i], wet[i], false, plan.stair[i], dir[i], false, tun[i], tidx[i], false, plan.slab[i] && !wet[i], false));
             cells.addAll(bands.get(i));
         }
         // path blocks are half a block of material each; earth the cuts do not supply is paid; steps are paid in stone

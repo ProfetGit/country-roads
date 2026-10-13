@@ -24,6 +24,10 @@ final class RouteSolver {
     static final int TURN = 1, END_STEP = 12, START = 4, BEND_ON_SLOPE = 200, WOBBLE = 18, JITTER = 5;
     /** The path is a bed three wide: per block of cut or fill the columns either side need, and for a side that cannot be bed. */
     static final int SIDE = 4, SIDE_CLOSED = 12;
+    /** Both sides closed (a trunk and deep water, two trunks): the path would be one wide there. */
+    static final int BOTH_CLOSED = 120;
+    /** A bend on the water: bridges cross straight. */
+    static final int WET_TURN = 80;
     /**
      * A switchback whose legs pass within two columns of each other shares its bed columns (one leg two wide, or one
      * wide when they sit at different heights): per column that close to the route's own earlier stretch. Five cells
@@ -482,7 +486,7 @@ final class RouteSolver {
         }
         int add = 10 + bend + (int) (lattice(31, nx * 7 + d, nz) * JITTER) + (dy != 0 ? climbPenalty(k) : 0) + treeCost(ni, nx, nz, walkTo)
             + wobble(nx, nz) + (d0 != START && d0 != d ? TURN : 0) + 8 * Math.abs(dy) + (wet ? 30 : 0) + sideCost(nx, nz, d, walkTo)
-            + closeLeg(k, nx, nz);
+            + closeLeg(k, nx, nz) + (d0 != START && d0 != d && (wet || fromWet) ? WET_TURN : 0);
         if (dy < 0 && x == sx && z == sz) add += END_STEP;
         else if (dy > 0 && t.openRoad(nx, nz)) add += END_STEP;
         if (penalty != null) add += penalty[ni];
@@ -497,16 +501,20 @@ final class RouteSolver {
 
     /** What the bed beside a step into (x, z) heading d costs: cut or fill of the two side columns, or a side that cannot be bed. */
     private int sideCost(int x, int z, int d, int y) {
-        int rx = -DZ[d], rz = DX[d], c = 0;
+        int rx = -DZ[d], rz = DX[d], c = 0, closed = 0;
         for (int s = -1; s <= 1; s += 2) {
             int g = ground(x + s * rx, z + s * rz);
-            if (!Terrain.usable(g)) c += SIDE_CLOSED;
+            if (Terrain.deep(g) && g - Terrain.DEEP + 1 == y) c += SIDE;
+            else if (!Terrain.usable(g)) {
+                c += SIDE_CLOSED;
+                closed++;
+            }
             else if (g < Terrain.WET) {
                 int off = Math.abs(Terrain.level(g) - y);
                 c += off > PathPlan.BED_MAX ? SIDE_CLOSED : SIDE * off;
             }
         }
-        return c;
+        return closed == 2 ? c + BOTH_CLOSED : c;
     }
 
     /**
@@ -760,7 +768,8 @@ final class RouteSolver {
             int climb = 0;
             if (dy != 0) for (int q = 0; q < 4 && j - 2 - q >= 0; q++) if (lv[j - 1 - q] != lv[j - 2 - q]) climb += 6;
             long add = 10 + bend + (int) (lattice(31, nx * 7 + d, nz) * JITTER) + climb + t.treeCost(nx, nz, lv[j]) + wobble(nx, nz)
-                + (d0 != START && d0 != d ? TURN : 0) + 8L * Math.abs(dy) + (wet ? 30 : 0) + sideCost(nx, nz, d, lv[j]);
+                + (d0 != START && d0 != d ? TURN : 0) + 8L * Math.abs(dy) + (wet ? 30 : 0) + sideCost(nx, nz, d, lv[j])
+                + (d0 != START && d0 != d && (wet || ground(x, z) >= Terrain.WET) ? WET_TURN : 0);
             int cl = closeLeg(nodes, boreLen, j - 1, nx, nz);
             add += cl;
             if (cl > 0 && lastFolds++ == 0) firstFold = key(nx, nz);

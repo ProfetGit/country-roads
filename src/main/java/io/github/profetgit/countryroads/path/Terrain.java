@@ -11,6 +11,8 @@ interface Terrain {
     int CLOSED = -100000;
     /** Added to the water surface Y of a shallow-water column (a deck goes on top). */
     int WET = 100000;
+    /** Added to the water surface Y of deep water (6 or more): the path cannot use it, but the bed beside may deck over it. */
+    int DEEP = -1000000;
 
     /** Surface block Y the path may use, +WET for shallow water, CLOSED, or UNKNOWN when the chunk is not captured. */
     int ground(int x, int z);
@@ -25,6 +27,10 @@ interface Terrain {
     /** Walking level of a ground value: one above the water for a deck. */
     static int level(int g) {
         return g >= WET ? g - WET + 1 : g;
+    }
+
+    static boolean deep(int g) {
+        return g >= DEEP - 1000 && g <= DEEP + 1000;
     }
 
     static boolean usable(int g) {

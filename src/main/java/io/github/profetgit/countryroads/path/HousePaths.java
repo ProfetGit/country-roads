@@ -64,7 +64,7 @@ public final class HousePaths {
      * block in the verge, the tunnel part (-1 none, 0 open cut, 1 inside the rock, 2 portal) with the index along the
      * roofed run, and whether it is a bank: no path there, only the ground cut or filled to height y.
      */
-    public record Cell(int x, int z, int y, boolean water, boolean edge, int stair, int dir, boolean fringe, int tun, int tidx, boolean bank, boolean slab) {}
+    public record Cell(int x, int z, int y, boolean water, boolean edge, int stair, int dir, boolean fringe, int tun, int tidx, boolean bank, boolean slab, boolean rail) {}
 
     /** A finished survey: cells from the door to the road, the bill, and what the route is made of. */
     public record Survey(List<Cell> cells, int earth, int stone, int planks, int torches, int tunnelCells, int length, Map<Long, String> skipped) {}
@@ -229,7 +229,7 @@ public final class HousePaths {
         if (s.is(Blocks.WATER)) {
             int below = top;
             while (below > level.getMinY() && level.getBlockState(new BlockPos(x, below, z)).is(Blocks.WATER) && top - below < 6) below--;
-            return top - below >= 6 ? Terrain.CLOSED : top + Terrain.WET;
+            return top - below >= 6 ? Terrain.DEEP + top : top + Terrain.WET;
         }
         if (!s.getFluidState().isEmpty() || s.is(BlockTags.LOGS) || (Retrofit.isCrafted(s) && !RoadColumns.isRoad(level, x, z))) return Terrain.CLOSED;
         return top;
@@ -326,7 +326,7 @@ public final class HousePaths {
         java.util.Set<Long> cols = new java.util.HashSet<>();
         for (Cell c : s.cells) {
             chunks.add(ChunkPos.pack(c.x >> 4, c.z >> 4));
-            if (!c.bank) cols.add(key(c.x, c.z));
+            if (!c.bank && !c.rail) cols.add(key(c.x, c.z));
         }
         ROLLOUTS.add(new Rollout(level, stake, s.cells, new int[]{0}, chunks, new int[]{0}, cols, rocky(level, s.cells)));
         tell(player, Component.translatable("countryroads.stake.building", s.cells.size()), true);
@@ -428,7 +428,7 @@ public final class HousePaths {
                 DustParticleOptions dust = new DustParticleOptions(0xF5D76E, 1.1f);
                 double px = p.player.getX(), pz = p.player.getZ();
                 for (Cell c : p.cells) {
-                    if (c.bank) continue;
+                    if (c.bank || c.rail) continue;
                     // cells far from the player would not be seen: no packet for them
                     double dx = c.x + 0.5 - px, dz = c.z + 0.5 - pz;
                     if (dx * dx + dz * dz > PREVIEW_REACH * PREVIEW_REACH) continue;
@@ -517,6 +517,10 @@ public final class HousePaths {
         int y = c.y;
         long h = c.x * 0x2545F4914F6CDD1DL ^ c.z * 0x9E3779B97F4A7C15L;
         BlockPos at = new BlockPos(c.x, y, c.z);
+        if (c.rail) {
+            rail(level, be, c);
+            return;
+        }
         if (c.bank) {
             bank(level, be, c);
             plant(level, be, c.x, c.z, BANK_PLANTS);
@@ -590,6 +594,35 @@ public final class HousePaths {
         }
         for (int yy = top; yy < c.y; yy++) change(level, be, new BlockPos(c.x, yy, c.z), Blocks.DIRT.defaultBlockState());
         change(level, be, new BlockPos(c.x, c.y, c.z), cover);
+    }
+
+    /**
+     * A bridge rail column: a stripped-log beam along the bridge at deck height with a fence on it, or (tidx 1) a log
+     * post from the water bed up to rail height. Fences take their connections from what stands around them, so the
+     * quiet second pass joins them up.
+     */
+    private static void rail(ServerLevel level, StakeBlockEntity be, Cell c) {
+        BlockPos at = new BlockPos(c.x, c.y, c.z);
+        var biome = level.getBiome(at);
+        BlockState log = Palette.woodLog(biome);
+        if (c.tidx == 1) {
+            for (int yy = c.y; yy >= c.y - 10; yy--) {
+                BlockPos q = at.atY(yy);
+                BlockState s = level.getBlockState(q);
+                if (yy < c.y && PaintRules.solid(s) && s.getFluidState().isEmpty()) break;
+                change(level, be, q, log);
+            }
+            change(level, be, at.above(), log);
+        } else {
+            Direction.Axis axis = DX[c.dir] != 0 ? Direction.Axis.X : Direction.Axis.Z;
+            change(level, be, at, Palette.woodStripped(biome).setValue(net.minecraft.world.level.block.RotatedPillarBlock.AXIS, axis));
+            BlockState fence = Palette.woodFence(biome);
+            change(level, be, at.above(), Block.updateFromNeighbourShapes(fence, level, at.above()));
+        }
+        for (int dy = 2; dy <= 3; dy++) {
+            BlockState s = level.getBlockState(at.above(dy));
+            if (!s.isAir() && !s.is(BlockTags.LOGS) && !s.is(BlockTags.LEAVES) && !Retrofit.isCrafted(s)) change(level, be, at.above(dy), Blocks.AIR.defaultBlockState());
+        }
     }
 
     /** Chance (of 1024, times a smooth patch density) of a plant beside the bed and on a bank. */
