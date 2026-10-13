@@ -41,8 +41,17 @@ abstract class FeaturePlacerMixin {
         require = 1, allow = 2)
     private boolean countryroads$skipBig(Feature feature, WorldGenLevel level, ChunkGenerator generator, RandomSource random, BlockPos pos, Operation<Boolean> original) {
         int radius = bigRadius(feature);
-        if (radius >= 0 && GenContext.blocksBigFeature(pos, radius)) return false;
-        return original.call(feature, level, generator, random, pos);
+        if (radius >= 0 && GenContext.blocksBigFeature(pos, radius, feature instanceof AbstractHugeMushroomFeature)) return false;
+        if (radius != 0) return original.call(feature, level, generator, random, pos);
+        // trees and mushrooms are placed whole or not at all: one the road would cut is taken back
+        boolean owner = GenContext.beginTree();
+        boolean placed = false;
+        try {
+            placed = original.call(feature, level, generator, random, pos);
+        } finally {
+            if (GenContext.endTree(level, owner)) placed = false;
+        }
+        return placed;
     }
 
     private static int bigRadius(Feature f) {

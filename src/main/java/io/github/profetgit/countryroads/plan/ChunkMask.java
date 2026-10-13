@@ -21,6 +21,8 @@ public final class ChunkMask {
     public final byte[] earth = new byte[256];
     /** Which side of the centreline (+1 right, -1 left, walking from village a to b), and the wall/fence there (-1 none). */
     public final byte[] side = new byte[256], run = new byte[256];
+    /** |nx| + |nz| of the unit direction from the centreline to the column (1 when the road runs along an axis, 1.41 diagonally). */
+    public final float[] slant = new float[256];
     private boolean any;
     public final java.util.List<EdgePlan.Decor> decor = new java.util.ArrayList<>();
 
@@ -126,6 +128,7 @@ public final class ChunkMask {
                             for (EdgePlan.Run run : p.runs)
                                 if (i >= run.s0() && i <= run.s1() && (run.side() == 0 || run.side() == m.side[c])) m.run[c] = run.type();
                             m.s[c] = i + t;
+                            m.slant[c] = dist > 1e-4f ? (Math.abs(qx) + Math.abs(qz)) / dist : 1f;
                             m.any = true;
                         }
                     }

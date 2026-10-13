@@ -13,6 +13,6 @@ import org.spongepowered.asm.mixin.injection.callback.CallbackInfoReturnable;
 abstract class WorldGenRegionMixin {
     @Inject(method = "setBlock", at = @At("HEAD"), cancellable = true)
     private void countryroads$guard(BlockPos pos, BlockState state, int flags, int updateLimit, CallbackInfoReturnable<Boolean> cir) {
-        if (GenContext.blocksFeatureWrite(pos)) cir.setReturnValue(false);
+        if (GenContext.guardWrite((WorldGenRegion) (Object) this, pos, state)) cir.setReturnValue(false);
     }
 }

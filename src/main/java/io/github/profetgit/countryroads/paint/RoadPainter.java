@@ -33,9 +33,10 @@ import io.github.profetgit.countryroads.mixin.SignBlockEntityAccessor;
 public final class RoadPainter {
     private static final BlockState AIR = Blocks.AIR.defaultBlockState();
     static final int MAX_FILL = 4, MAX_BANK = 5;
-    static final float BANK_REACH = 5f, VERGE_REACH = 4f;
-    /** Chance (of 1024) of a pebble on a stony road column near the edge, and in the middle. */
-    static final int PEBBLE_EDGE = 28, PEBBLE_MIDDLE = 8;
+    public static final float BANK_REACH = 5f;
+    static final float VERGE_REACH = 4f;
+    /** Chance (of 1024) of a pebble on a pebbly road column near the edge, and in the middle (about 1 in 9 and 1 in 34). */
+    static final int PEBBLE_EDGE = 120, PEBBLE_MIDDLE = 30;
 
     private final Canvas chunk;
     private final BlockPos.MutableBlockPos pos = new BlockPos.MutableBlockPos();
@@ -97,7 +98,7 @@ public final class RoadPainter {
         int top = (int) Math.floor(Math.round(d.y() * 2) / 2.0);
         int x = d.x(), z = d.z();
         int g = groundAt(x, z, top);
-        if (Math.abs(g - top) > 4 || !PaintRules.terrain(get(x, g, z))) return;
+        if (Math.abs(g - top) > 4 || !PaintRules.terrain(get(x, g, z)) || woody(x, g + 1, g + 5, z)) return;
         Palette.Wood wood = Palette.wood(m.in[i] == Float.NEGATIVE_INFINITY ? 0 : m.wood[i]);
         long h = hash(x, z);
         int ax = x + d.toRoad().getStepX(), az = z + d.toRoad().getStepZ();
@@ -105,7 +106,7 @@ public final class RoadPainter {
         // a gallows post: stone foot, three fences, an arm reaching over the road edge; a hanging sign or a lantern
         // hangs from the arm. States are set exactly so the post never latches onto banks or grass beside it.
         net.minecraft.core.Direction toRoad = d.toRoad();
-        BlockState foot = (((h >>> 5) & 1) == 0 ? Blocks.MOSSY_COBBLESTONE_WALL : Blocks.COBBLESTONE_WALL).defaultBlockState();
+        BlockState foot = Palette.localStone((((h >>> 5) & 1) == 0 ? Blocks.MOSSY_COBBLESTONE_WALL : Blocks.COBBLESTONE_WALL).defaultBlockState(), pal(x, g + 1, z));
         BlockState fence = wood.fence().defaultBlockState();
         exact(x, g + 1, z, foot);
         exact(x, g + 2, z, fence);
@@ -202,6 +203,7 @@ public final class RoadPainter {
             return;
         }
         if (d < 1.0f || d >= 2.1f || Math.floorMod(s, 19) == 0) return;
+        if (tree(x, g + 1, g + 2, z)) return;
         BlockState leaf = hedgeLeaves(m.wood[i], h).setValue(net.minecraft.world.level.block.LeavesBlock.PERSISTENT, true);
         clear(x, g + 1, g + 2, z);
         set(x, g + 1, z, leaf);
@@ -222,28 +224,29 @@ public final class RoadPainter {
     private void wallOrFence(int x, int z, int top, float d, ChunkMask m, int i) {
         if (m.run[i] < 0 || m.kind[i] != EdgePlan.GROUND) return;
         int g = groundAt(x, z, top);
-        if (!PaintRules.terrain(get(x, g, z))) return;
+        if (!PaintRules.terrain(get(x, g, z)) || tree(x, g + 1, g + 3, z)) return;
         int s = (int) Math.floor(m.s[i]);
         long h = hash(x, z);
         if (m.run[i] == EdgePlan.STONE_WALL && g == top && (d >= 2.1f && d < 3.1f && ((h >>> 50) & 7) < 3 || d >= 0.6f && d < 1.0f && ((h >>> 50) & 15) < 2)) {
             // the wall is not a single line: loose stones and a few low courses either side of it
             clear(x, g + 1, g + 2, z);
-            set(x, g + 1, z, ((h >>> 54) & 3) == 0 ? Palette.wallBody(h) : Palette.wallCap(h >>> 3) == null ? Blocks.COBBLESTONE_SLAB.defaultBlockState()
-                : Palette.wallCap(h >>> 3).hasProperty(net.minecraft.world.level.block.StairBlock.FACING) ? Blocks.MOSSY_COBBLESTONE_SLAB.defaultBlockState() : Palette.wallCap(h >>> 3));
+            set(x, g + 1, z, Palette.localStone(((h >>> 54) & 3) == 0 ? Palette.wallBody(h) : Palette.wallCap(h >>> 3) == null ? Blocks.COBBLESTONE_SLAB.defaultBlockState()
+                : Palette.wallCap(h >>> 3).hasProperty(net.minecraft.world.level.block.StairBlock.FACING) ? Blocks.MOSSY_COBBLESTONE_SLAB.defaultBlockState() : Palette.wallCap(h >>> 3), pal(x, g, z)));
             return;
         }
         if (m.run[i] == EdgePlan.HEDGE) {
             hedge(x, z, top, d, g, m, i, s, h);
             return;
         }
-        if (d < 1.0f || d >= 2.1f) return;
+        if (!onLine(d, m.slant[i])) return;
         if (m.run[i] == EdgePlan.FENCE ? g != top : Math.abs(g - top) > 1) return;
         if (m.run[i] == EdgePlan.STONE_WALL) {
             if (Math.floorMod(s, 17) == 0) return;
             clear(x, g + 1, g + 3, z);
             boolean low = ((h >>> 3) & 7) == 0;
-            if (!low) set(x, g + 1, z, Palette.wallBody(h));
-            BlockState cap = Palette.wallCap(h >>> 7);
+            Palette.Surface stone = pal(x, g, z);
+            if (!low) set(x, g + 1, z, Palette.localStone(Palette.wallBody(h), stone));
+            BlockState cap = Palette.localStone(Palette.wallCap(h >>> 7), stone);
             if (cap != null) {
                 if (cap.hasProperty(net.minecraft.world.level.block.StairBlock.FACING))
                     cap = cap.setValue(net.minecraft.world.level.block.StairBlock.FACING, net.minecraft.core.Direction.Plane.HORIZONTAL.getRandomDirection(net.minecraft.util.RandomSource.create(h)));
@@ -255,6 +258,18 @@ public final class RoadPainter {
             set(x, g + 1, z, Palette.wood(m.wood[i]).fence().defaultBlockState());
         }
     }
+
+    /**
+     * Whether the column lies on the fence line 1.5 blocks out from the road edge, as a 4-connected digital line: one
+     * column across on straight stretches, a clean staircase on diagonals, never two side by side (fences would close
+     * into little squares).
+     */
+    static boolean onLine(float d, float slant) {
+        float h = slant / 2;
+        return d - LINE >= -h && d - LINE < h;
+    }
+
+    static final float LINE = 1.5f;
 
     private static SignText text(String a, String b, String c, String d) {
         List<Component> lines = List.of(Component.literal(a), Component.literal(b), Component.literal(c), Component.literal(d));
@@ -275,11 +290,14 @@ public final class RoadPainter {
             BlockState here = get(x, y, z);
             if (here.isAir()) continue;
             if (here.is(BlockTags.LOGS)) chunk.beforeRemovingLog(pos.set(x, y, z).immutable());
+            if (TRACE && (io.github.profetgit.countryroads.gen.GenContext.woody(here) || here.is(BlockTags.LEAVES)))
+                io.github.profetgit.countryroads.CountryRoads.LOG.info("CR-TRACE paintclear " + x + "," + y + "," + z + " " + here.getBlock().getDescriptionId(), new Throwable("where"));
             if (!get(x, y, z).isAir()) set(x, y, z, AIR);
         }
     }
 
     static final String DEBUG = System.getProperty("countryroads.debugColumn", "");
+    static final boolean TRACE = Boolean.getBoolean("countryroads.traceClear");
 
     private String dump(int x, int z, int top) {
         StringBuilder sb = new StringBuilder();
@@ -350,7 +368,6 @@ public final class RoadPainter {
                 }
                 // everything above the road goes, up to the plants that stood on the old ground
                 clear(x, from, Math.max(top + 3, ground + 2), z);
-                if (ground > top + 1) clearLeaves(x, ground + 1, ground + 10, z);
                 // a pebble now and then on stony stretches, mostly toward the edges where wheels do not run
                 if (!half && Palette.pebbly(get(x, top, z)) && (int) ((h >>> 50) & 1023) < (in < 1f ? PEBBLE_EDGE : PEBBLE_MIDDLE))
                     set(x, top + 1, z, Palette.pebble((int) (h >>> 12)));
@@ -452,20 +469,22 @@ public final class RoadPainter {
     }
 
     private void shoulder(int x, int z, int top, float d, int ground, BlockState natural, long h, float roadY) {
-        // a tree standing here keeps its ground (they are only allowed this close where the road lies on the ground)
-        if (get(x, ground + 1, z).is(BlockTags.LOGS)) return;
+        // a tree standing here (or a branch or its canopy reaching low over it) keeps its ground: cutting under it would
+        // leave it hanging, trimming its leaves would leave a loose clump of them
+        if (tree(x, Math.min(top, ground) + 1, Math.max(top + 3, ground + 2), z)) return;
         if (ground == top + 1 && d < 1.5f) {
             // flush shoulder: no one-block lip along the road
             clear(x, top + 1, top + 3, z);
             set(x, top, z, natural);
+            support(x, top - 1, z);
         } else if (ground > top + 1) {
             // cut: a 1:1 bank up from the road edge (beyond the reach the hillside keeps its own face); measured from the
             // road's smooth height, so the bank's steps follow the road instead of each column's rounding
             int bank = Math.max(top, Math.round(roadY + Math.max(0f, d - 0.5f)));
             if (ground > bank) {
                 clear(x, bank + 1, ground + 2, z);
-                clearLeaves(x, ground + 3, ground + 10, z);
                 set(x, bank, z, natural);
+                support(x, bank - 1, z);
             }
         } else if (ground == top - 1 && d < 1.5f) {
             set(x, top, z, natural);
@@ -487,7 +506,7 @@ public final class RoadPainter {
     private void feather(int x, int z, int top, float d, long h) {
         if (d >= 1.6f) return;
         BlockState here = get(x, top, z);
-        if (!PaintRules.terrain(here) || PaintRules.solid(get(x, top + 1, z))) return;
+        if (!PaintRules.terrain(here) || PaintRules.solid(get(x, top + 1, z)) || tree(x, top + 1, top + 2, z)) return;
         int r = (int) ((h >>> 33) & 1023);
         if (r >= (int) (400 * (1 - d / 1.6f))) return;
         Palette.Surface pal = pal(x, top, z);
@@ -496,8 +515,25 @@ public final class RoadPainter {
         set(x, top, z, edge);
     }
 
-    private void clearLeaves(int x, int y0, int y1, int z) {
-        for (int y = y0; y <= y1; y++) if (get(x, y, z).is(BlockTags.LEAVES)) set(x, y, z, AIR);
+    /** A new bank top never hangs over a cave or a cliff lip: dirt down to the next solid block (a few at most). */
+    private void support(int x, int y, int z) {
+        for (int k = y; k > y - 8 && !PaintRules.solid(get(x, k, z)); k--) set(x, k, z, Blocks.DIRT.defaultBlockState());
+    }
+
+    /** A tree trunk, branch or huge mushroom in this stretch of the column. */
+    private boolean woody(int x, int y0, int y1, int z) {
+        for (int y = y0; y <= y1; y++) if (io.github.profetgit.countryroads.gen.GenContext.woody(get(x, y, z))) return true;
+        return false;
+    }
+
+    /** A tree trunk, branch, natural leaves or huge mushroom in this stretch of the column. */
+    private boolean tree(int x, int y0, int y1, int z) {
+        for (int y = y0; y <= y1; y++) {
+            BlockState s = get(x, y, z);
+            if (io.github.profetgit.countryroads.gen.GenContext.woody(s) || s.is(BlockTags.LEAVES) && s.hasProperty(net.minecraft.world.level.block.LeavesBlock.PERSISTENT)
+                && !s.getValue(net.minecraft.world.level.block.LeavesBlock.PERSISTENT)) return true;
+        }
+        return false;
     }
 
     private Palette.Surface pal(int x, int y, int z) {

@@ -1,0 +1,6 @@
+execute positioned -350 70 -490 run countryroads check 200
+execute positioned 980 70 -60 run countryroads check 200
+execute positioned -1340 70 -205 run countryroads check 200
+execute positioned -143 70 -271 run countryroads check 250
+execute positioned 72 70 -7 run countryroads check 250
+execute positioned -1900 70 -200 run countryroads check 250

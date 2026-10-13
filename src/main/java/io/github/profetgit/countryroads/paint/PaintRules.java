@@ -16,9 +16,10 @@ public final class PaintRules {
         return s.is(BlockTags.FENCES) || s.is(BlockTags.WALLS) || s.is(BlockTags.STAIRS) || s.is(Blocks.LANTERN);
     }
 
-    /** Ground itself: solid, not a fluid, not a tree. */
+    /** Ground itself: solid, not a fluid, not a tree or huge mushroom. */
     public static boolean terrain(BlockState s) {
-        return !s.isAir() && s.getFluidState().isEmpty() && s.isSolid() && !s.is(BlockTags.LEAVES) && !s.is(BlockTags.LOGS);
+        return !s.isAir() && s.getFluidState().isEmpty() && s.isSolid() && !s.is(BlockTags.LEAVES) && !s.is(BlockTags.LOGS)
+            && !s.is(Blocks.MUSHROOM_STEM) && !s.is(Blocks.BROWN_MUSHROOM_BLOCK) && !s.is(Blocks.RED_MUSHROOM_BLOCK);
     }
 
     /** The block a bank or embankment gets on top: the column's natural surface, grass for exposed dirt. */

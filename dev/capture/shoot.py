@@ -27,15 +27,20 @@ def main() -> int:
     ap.add_argument("--name", default="look")
     ap.add_argument("--mods", nargs="*", default=[])
     ap.add_argument("--time", type=int, default=5000)
+    ap.add_argument("--jvm", action="append", default=[], help="extra server JVM arg (wg.py --jvm)")
+    ap.add_argument("--shot", action="append", default=[], help="own camera 'x y z yaw pitch label' (repeatable)")
+    ap.add_argument("--only", action="store_true", help="only the --shot cameras, not the road's own picks")
+    ap.add_argument("--port", type=int, default=25591)
     ap.add_argument("--after", nargs="*", default=[], help="extra commands after pregen (e.g. 'countryroads staketest X Z keep')")
     a = ap.parse_args()
     x, z = a.at
     p = f"execute positioned {x} 80 {z} run countryroads"
-    run = subprocess.run([sys.executable, str(ROOT / "dev/server/wg.py"), "--seed", a.seed, "--name", f"cap-{a.name}",
-                          *(["--mods", *a.mods] if a.mods else []),
+    run = subprocess.run([sys.executable, str(ROOT / "dev/server/wg.py"), "--seed", a.seed, "--name", f"cap-{a.name}", "--port", str(a.port),
+                          *(["--mods", *a.mods] if a.mods else []), *[f"--jvm={j}" for j in a.jvm],
                           f"{p} pregen {a.radius + 128}", *a.after, f"{p} shots {a.radius}"], capture_output=True, text=True)
     print(run.stdout)
-    shots = [l.split()[1:] for l in run.stdout.splitlines() if l.startswith("CR-SHOT ") and "none" not in l]
+    shots = [] if a.only else [l.split()[1:] for l in run.stdout.splitlines() if l.startswith("CR-SHOT ") and "none" not in l]
+    shots += [s.split() for s in a.shot]
     if run.returncode or not shots:
         print("FAIL no shots")
         return 1

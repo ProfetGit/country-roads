@@ -71,14 +71,74 @@ public final class Palette {
         new BlockState[]{b(Blocks.DIRT_PATH), b(Blocks.GRAVEL), b(Blocks.COARSE_DIRT)}, new int[]{140, 60},
         new BlockState[]{b(Blocks.DIRT_PATH), b(Blocks.GRAVEL), b(Blocks.SNOW_BLOCK)}, new int[]{300, 110},
         b(Blocks.COBBLESTONE_SLAB), 200);
-    static final Surface DESERT = new Surface("desert",
+    static final Surface DESERT_0 = new Surface("desert",
         new BlockState[]{b(Blocks.SMOOTH_SANDSTONE), b(Blocks.SANDSTONE), b(Blocks.SAND)}, new int[]{260, 60},
         new BlockState[]{b(Blocks.SAND), b(Blocks.SANDSTONE), b(Blocks.SMOOTH_SANDSTONE)}, new int[]{240, 160},
         b(Blocks.SMOOTH_SANDSTONE_SLAB), 220);
-    static final Surface BADLANDS = new Surface("badlands",
+    static final Surface BADLANDS_0 = new Surface("badlands",
         new BlockState[]{b(Blocks.SMOOTH_RED_SANDSTONE), b(Blocks.RED_SANDSTONE), b(Blocks.COARSE_DIRT)}, new int[]{240, 120},
         new BlockState[]{b(Blocks.RED_SAND), b(Blocks.TERRACOTTA), b(Blocks.COARSE_DIRT)}, new int[]{200, 200},
         b(Blocks.SMOOTH_RED_SANDSTONE_SLAB), 200);
+    // dry-country options shown to the user 2026-10-13 (sand-coloured roads were hard to see): a dirt caravan track,
+    // a gravel track, mud-brick paving
+    static final Surface DESERT_A = new Surface("desert",
+        new BlockState[]{b(Blocks.PACKED_MUD), b(Blocks.COARSE_DIRT), b(Blocks.DIRT_PATH)}, new int[]{350, 110},
+        new BlockState[]{b(Blocks.COARSE_DIRT), b(Blocks.PACKED_MUD), b(Blocks.SAND)}, new int[]{300, 160},
+        b(Blocks.MUD_BRICK_SLAB), 90);
+    /** User pick 2026-10-13: A (dirt track) with path blocks worked in. */
+    static final Surface DESERT_P = new Surface("desert",
+        new BlockState[]{b(Blocks.DIRT_PATH), b(Blocks.PACKED_MUD), b(Blocks.COARSE_DIRT)}, new int[]{330, 250},
+        new BlockState[]{b(Blocks.COARSE_DIRT), b(Blocks.DIRT_PATH), b(Blocks.PACKED_MUD), b(Blocks.SAND)}, new int[]{260, 200, 140},
+        b(Blocks.MUD_BRICK_SLAB), 90);
+    static final Surface BADLANDS_P = new Surface("badlands",
+        new BlockState[]{b(Blocks.DIRT_PATH), b(Blocks.COARSE_DIRT), b(Blocks.PACKED_MUD)}, new int[]{330, 230},
+        new BlockState[]{b(Blocks.COARSE_DIRT), b(Blocks.DIRT_PATH), b(Blocks.PACKED_MUD), b(Blocks.RED_SAND)}, new int[]{260, 200, 140},
+        b(Blocks.MUD_BRICK_SLAB), 90);
+    static final Surface DESERT_B = new Surface("desert",
+        new BlockState[]{b(Blocks.GRAVEL), b(Blocks.COARSE_DIRT), b(Blocks.PACKED_MUD)}, new int[]{250, 120},
+        new BlockState[]{b(Blocks.GRAVEL), b(Blocks.COARSE_DIRT), b(Blocks.SAND)}, new int[]{300, 160},
+        b(Blocks.COBBLESTONE_SLAB), 90);
+    static final Surface DESERT_C = new Surface("desert",
+        new BlockState[]{b(Blocks.MUD_BRICKS), b(Blocks.PACKED_MUD), b(Blocks.COARSE_DIRT)}, new int[]{300, 80},
+        new BlockState[]{b(Blocks.PACKED_MUD), b(Blocks.MUD_BRICKS), b(Blocks.COARSE_DIRT), b(Blocks.SAND)}, new int[]{250, 200, 120},
+        b(Blocks.MUD_BRICK_SLAB), 60);
+    static final Surface BADLANDS_A = new Surface("badlands",
+        new BlockState[]{b(Blocks.COARSE_DIRT), b(Blocks.PACKED_MUD), b(Blocks.DIRT_PATH)}, new int[]{300, 150},
+        new BlockState[]{b(Blocks.COARSE_DIRT), b(Blocks.PACKED_MUD), b(Blocks.RED_SAND)}, new int[]{250, 160},
+        b(Blocks.MUD_BRICK_SLAB), 90);
+    static final Surface BADLANDS_B = new Surface("badlands",
+        new BlockState[]{b(Blocks.GRAVEL), b(Blocks.COARSE_DIRT), b(Blocks.ANDESITE)}, new int[]{250, 70},
+        new BlockState[]{b(Blocks.GRAVEL), b(Blocks.COARSE_DIRT), b(Blocks.RED_SAND)}, new int[]{300, 160},
+        b(Blocks.COBBLESTONE_SLAB), 90);
+    static final Surface BADLANDS_C = new Surface("badlands",
+        new BlockState[]{b(Blocks.MUD_BRICKS), b(Blocks.PACKED_MUD), b(Blocks.COARSE_DIRT)}, new int[]{300, 80},
+        new BlockState[]{b(Blocks.PACKED_MUD), b(Blocks.MUD_BRICKS), b(Blocks.COARSE_DIRT), b(Blocks.RED_SAND)}, new int[]{250, 200, 120},
+        b(Blocks.MUD_BRICK_SLAB), 60);
+    static final String DRY = System.getProperty("countryroads.dry", "p");
+    static final Surface DESERT = switch (DRY) { case "0" -> DESERT_0; case "a" -> DESERT_A; case "b" -> DESERT_B; case "c" -> DESERT_C; default -> DESERT_P; };
+    static final Surface BADLANDS = switch (DRY) { case "0" -> BADLANDS_0; case "a" -> BADLANDS_A; case "b" -> BADLANDS_B; case "c" -> BADLANDS_C; default -> BADLANDS_P; };
+
+    /**
+     * Wall and post stones in the biome's own rock (user, 2026-10-13: sandstone in deserts, red sandstone in badlands
+     * instead of cobblestone). Cobble-family blocks map to the matching sandstone shape; anything else is unchanged.
+     */
+    static BlockState localStone(BlockState s, Surface pal) {
+        boolean desert = pal == DESERT, red = pal == BADLANDS;
+        if (!desert && !red || s == null) return s;
+        Block b = s.getBlock();
+        Block out;
+        if (b == Blocks.COBBLESTONE || b == Blocks.ANDESITE) out = red ? Blocks.RED_SANDSTONE : Blocks.SANDSTONE;
+        else if (b == Blocks.MOSSY_COBBLESTONE) out = red ? Blocks.CUT_RED_SANDSTONE : Blocks.CUT_SANDSTONE;
+        else if (b == Blocks.STONE) out = red ? Blocks.SMOOTH_RED_SANDSTONE : Blocks.SMOOTH_SANDSTONE;
+        else if (b == Blocks.COBBLESTONE_SLAB || b == Blocks.ANDESITE_SLAB) out = red ? Blocks.RED_SANDSTONE_SLAB : Blocks.SANDSTONE_SLAB;
+        else if (b == Blocks.MOSSY_COBBLESTONE_SLAB) out = red ? Blocks.CUT_RED_SANDSTONE_SLAB : Blocks.CUT_SANDSTONE_SLAB;
+        else if (b == Blocks.STONE_SLAB) out = red ? Blocks.SMOOTH_RED_SANDSTONE_SLAB : Blocks.SMOOTH_SANDSTONE_SLAB;
+        else if (b == Blocks.COBBLESTONE_WALL || b == Blocks.MOSSY_COBBLESTONE_WALL || b == Blocks.ANDESITE_WALL) out = red ? Blocks.RED_SANDSTONE_WALL : Blocks.SANDSTONE_WALL;
+        else if (b == Blocks.COBBLESTONE_STAIRS) out = red ? Blocks.RED_SANDSTONE_STAIRS : Blocks.SANDSTONE_STAIRS;
+        else if (b == Blocks.STONE_STAIRS) out = red ? Blocks.SMOOTH_RED_SANDSTONE_STAIRS : Blocks.SMOOTH_SANDSTONE_STAIRS;
+        else return s;
+        return out.withPropertiesOf(s);
+    }
     static final Surface SAVANNA = new Surface("savanna",
         new BlockState[]{b(Blocks.PACKED_MUD), b(Blocks.DIRT_PATH), b(Blocks.COARSE_DIRT)}, new int[]{280, 170},
         new BlockState[]{b(Blocks.COARSE_DIRT), b(Blocks.PACKED_MUD), b(Blocks.DIRT_PATH)}, new int[]{260, 200},
@@ -256,10 +316,14 @@ public final class Palette {
             || ground.is(Blocks.MOSS_BLOCK) || ground.is(Blocks.ROOTED_DIRT) || ground.is(Blocks.MYCELIUM);
     }
 
-    /** Stony road surfaces that get the odd pebble (a stone button) on top. */
+    /**
+     * Road surfaces that get the odd pebble (a stone button) on top: stony ones and the full-height dirt blocks. Not dirt
+     * path: it is a sixteenth lower than a block, so a button on it would float.
+     */
     public static boolean pebbly(BlockState surface) {
         return surface.is(Blocks.GRAVEL) || surface.is(Blocks.COBBLESTONE) || surface.is(Blocks.MOSSY_COBBLESTONE) || surface.is(Blocks.ANDESITE)
-            || surface.is(Blocks.STONE) || surface.is(Blocks.TUFF);
+            || surface.is(Blocks.STONE) || surface.is(Blocks.TUFF) || surface.is(Blocks.COARSE_DIRT) || surface.is(Blocks.PACKED_MUD)
+            || surface.is(Blocks.ROOTED_DIRT);
     }
 
     /** A pebble lying on the road: a stone button, turned by r. */

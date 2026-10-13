@@ -86,6 +86,7 @@ final class RoadChecks {
             throw new IllegalStateException(e);
         }
         BlockPos.MutableBlockPos pos = new BlockPos.MutableBlockPos();
+        TreeCheck trees = new TreeCheck(level, examples);
         DevCommands.queue(() -> {
             long until = System.nanoTime() + 45_000_000L;
             while (next[0] < total && System.nanoTime() < until) {
@@ -124,6 +125,7 @@ final class RoadChecks {
                         }
                     }
                 }
+                trees.chunk(m, cx, cz, io.github.profetgit.countryroads.paint.RoadPainter.BANK_REACH);
                 for (int lz = 0; lz < 16; lz++) {
                     for (int lx = 0; lx < 16; lx++) {
                         int c = ChunkMask.idx(lx, lz);
@@ -135,7 +137,7 @@ final class RoadChecks {
                         cols[0]++;
                         BlockState surf = chunk.getBlockState(pos.set(x, top, z));
                         BlockState above = chunk.getBlockState(pos.set(x, top + 1, z));
-                        boolean ok = isSurface(surf) && (above.getBlock() instanceof SlabBlock || above.isAir())
+                        boolean ok = isSurface(surf) && (above.getBlock() instanceof SlabBlock || above.isAir() || above.is(Blocks.STONE_BUTTON))
                             && chunk.getBlockState(pos.set(x, top + 2, z)).isAir();
                         if (!ok) {
                             bad[0]++;
@@ -157,8 +159,10 @@ final class RoadChecks {
                 }
             }
             if (next[0] < total) return false;
-            String verdict = cols[0] > 0 && bad[0] == 0 && breaks[0] == 0 && floating[0] == 0 && snowyBare[0] == 0 ? "PASS" : "FAIL";
+            String verdict = cols[0] > 0 && bad[0] == 0 && breaks[0] == 0 && floating[0] == 0 && snowyBare[0] == 0
+                && trees.floatingTrees == 0 && trees.floatingMushrooms == 0 && trees.floatingLeaves == 0 && trees.overhangs == 0 ? "PASS" : "FAIL";
             report(src, "CR-CHECK " + verdict + " roadColumns=" + cols[0] + " bad=" + bad[0] + " breaks=" + breaks[0] + " oneBlockSteps=" + steps[0] + " skippedChunks=" + skipped[0] + " floatingPlants=" + floating[0] + " frostyBareGrass=" + snowyBare[0]
+                + " treesUndone=" + io.github.profetgit.countryroads.gen.GenContext.UNDONE.get() + " floatingTrees=" + trees.floatingTrees + " floatingMushrooms=" + trees.floatingMushrooms + " floatingLeaves=" + trees.floatingLeaves + " (vanilla loose leaves " + trees.vanillaLeaves + ") overhangs=" + trees.overhangs
                 + " examples=" + examples);
             report(src, "CR-HASH " + HexFormat.of().formatHex(sha.digest()).substring(0, 16) + " columns=" + cols[0]);
             return true;
@@ -322,6 +326,9 @@ final class RoadChecks {
     }
 
     /** Planned signs, lamps and camps in the area vs what the world has. */
+    /** Longest connected fence line beside a road the user accepts (2026-10-13: "fences should not be that long"). */
+    static final int MAX_FENCE = 16;
+
     static int decor(CommandSourceStack src, int radius) {
         ServerLevel level = src.getLevel();
         RoadNetwork n = RoadNetwork.get(level);
@@ -369,12 +376,57 @@ final class RoadChecks {
                     report(src, "CR-CAMP " + p.camp + " at " + (c.x() << 4) + "," + (c.z() << 4) + (st != null && st.isValid() ? " present" : " MISSING"));
                 }
             }
-            int runs = 0, runCols = 0, runHit = 0;
+            int runs = 0, runCols = 0, runHit = 0, fenceSquares = 0, longestFence = 0;
+            String squareAt = "";
             for (EdgePlan p : n.readyPlans()) {
                 for (EdgePlan.Run r : p.runs) {
                     int mid = (r.s0() + r.s1()) / 2;
                     if (Math.abs(p.x[mid] - at.getX()) > radius || Math.abs(p.z[mid] - at.getZ()) > radius) continue;
                     runs++;
+                    if (r.type() == EdgePlan.FENCE) {
+                        // fence columns around the run: no 2x2 block of fences (they close into little pens), no long lines
+                        it.unimi.dsi.fastutil.longs.LongOpenHashSet cols = new it.unimi.dsi.fastutil.longs.LongOpenHashSet();
+                        for (int i = Math.max(0, r.s0() - 4); i <= Math.min(p.length() - 1, r.s1() + 4); i++) {
+                            int r0 = (int) Math.ceil(p.hw[i]) + 4;
+                            for (int dx = -r0; dx <= r0; dx++)
+                                for (int dz = -r0; dz <= r0; dz++) {
+                                    int x = (int) Math.floor(p.x[i]) + dx, z = (int) Math.floor(p.z[i]) + dz;
+                                    long key = net.minecraft.world.level.ChunkPos.pack(x, z);
+                                    if (cols.contains(key)) continue;
+                                    ChunkAccess chunk = level.getChunkSource().getChunk(x >> 4, z >> 4, ChunkStatus.FULL, true);
+                                    for (int y = (int) p.y[i] - 3; y <= (int) p.y[i] + 4; y++)
+                                        if (chunk.getBlockState(pos.set(x, y, z)).is(BlockTags.WOODEN_FENCES)) {
+                                            cols.add(key);
+                                            break;
+                                        }
+                                }
+                        }
+                        it.unimi.dsi.fastutil.longs.LongOpenHashSet left = new it.unimi.dsi.fastutil.longs.LongOpenHashSet(cols);
+                        for (long c : cols) {
+                            int x = net.minecraft.world.level.ChunkPos.getX(c), z = net.minecraft.world.level.ChunkPos.getZ(c);
+                            if (cols.contains(net.minecraft.world.level.ChunkPos.pack(x + 1, z)) && cols.contains(net.minecraft.world.level.ChunkPos.pack(x, z + 1))
+                                && cols.contains(net.minecraft.world.level.ChunkPos.pack(x + 1, z + 1))) {
+                                fenceSquares++;
+                                squareAt = x + "," + z;
+                            }
+                        }
+                        while (!left.isEmpty()) {
+                            long c0 = left.iterator().nextLong();
+                            left.remove(c0);
+                            it.unimi.dsi.fastutil.longs.LongArrayFIFOQueue q = new it.unimi.dsi.fastutil.longs.LongArrayFIFOQueue();
+                            q.enqueue(c0);
+                            int size = 0;
+                            while (!q.isEmpty()) {
+                                long c = q.dequeueLong();
+                                size++;
+                                int x = net.minecraft.world.level.ChunkPos.getX(c), z = net.minecraft.world.level.ChunkPos.getZ(c);
+                                for (long nb : new long[]{net.minecraft.world.level.ChunkPos.pack(x + 1, z), net.minecraft.world.level.ChunkPos.pack(x - 1, z),
+                                    net.minecraft.world.level.ChunkPos.pack(x, z + 1), net.minecraft.world.level.ChunkPos.pack(x, z - 1)})
+                                    if (left.remove(nb)) q.enqueue(nb);
+                            }
+                            longestFence = Math.max(longestFence, size);
+                        }
+                    }
                     for (int i = r.s0() + 1; i < r.s1() - 1; i += 2) {
                         float tx = p.x[i + 1] - p.x[i - 1], tz = p.z[i + 1] - p.z[i - 1], len = (float) Math.hypot(tx, tz);
                         for (int side = -1; side <= 1; side += 2) {
@@ -394,8 +446,9 @@ final class RoadChecks {
                     }
                 }
             }
-            report(src, "CR-RUNS runs=" + runs + " columnsWithWallOrFence=" + runHit + "/" + runCols);
-            String verdict = signsFound == signs && campsFound == camps && lampsFound >= lamps * 0.8 ? "PASS" : "FAIL";
+            report(src, "CR-RUNS runs=" + runs + " columnsWithWallOrFence=" + runHit + "/" + runCols + " fenceSquares=" + fenceSquares
+                + (squareAt.isEmpty() ? "" : " (" + squareAt + ")") + " longestFence=" + longestFence);
+            String verdict = signsFound == signs && campsFound == camps && lampsFound >= lamps * 0.8 && fenceSquares == 0 && longestFence <= MAX_FENCE ? "PASS" : "FAIL";
             report(src, "CR-DECOR " + verdict + " signs=" + signsFound + "/" + signs + " lamps=" + lampsFound + "/" + lamps + " camps=" + campsFound + "/" + camps + " orchardTrees=" + orchardsFound + "/" + orchards + " names=" + names);
             return true;
         });
@@ -487,6 +540,50 @@ final class RoadChecks {
                 return false;
             }
             report(src, "CR-ROADS edges=" + list.size() + " routed=" + ok[0] + " totalLength=" + len[0]);
+            return true;
+        });
+        return 1;
+    }
+
+    /** Road samples every 24 blocks grouped by biome: CR-RBIOME biome palette count, then up to 4 example positions. */
+    static int roadBiomes(CommandSourceStack src, int radius) {
+        ServerLevel level = src.getLevel();
+        RoadNetwork n = RoadNetwork.get(level);
+        if (n == null) return 0;
+        BlockPos at = BlockPos.containing(src.getPosition());
+        Set<Edge> edges = new LinkedHashSet<>();
+        for (int rx = (at.getX() - radius) >> 9; rx <= (at.getX() + radius) >> 9; rx++)
+            for (int rz = (at.getZ() - radius) >> 9; rz <= (at.getZ() + radius) >> 9; rz++)
+                edges.addAll(n.edgesInRegion(rx, rz));
+        List<Edge> list = new ArrayList<>(edges);
+        java.util.Map<String, List<String>> seen = new java.util.TreeMap<>();
+        int[] next = {0};
+        DevCommands.queue(() -> {
+            if (next[0] < list.size()) {
+                EdgePlan p = n.plan(list.get(next[0]++)).join();
+                if (p == null) return false;
+                for (int i = 0; i < p.length(); i += 24) {
+                    int x = (int) p.x[i], z = (int) p.z[i], y = Math.round(p.y[i]);
+                    if (Math.abs(x - at.getX()) > radius || Math.abs(z - at.getZ()) > radius) continue;
+                    var b = level.getUncachedNoiseBiome(x >> 2, y >> 2, z >> 2);
+                    String key = b.unwrapKey().map(k -> k.identifier().getPath()).orElse("?") + " " + io.github.profetgit.countryroads.paint.Palette.surface(b).name();
+                    seen.computeIfAbsent(key, k -> new ArrayList<>()).add(x + "," + y + "," + z + (p.kind[i] == EdgePlan.GROUND ? "" : "/k" + p.kind[i]));
+                }
+                for (EdgePlan.Run r : p.runs) {
+                    int i = (r.s0() + r.s1()) / 2, x = (int) p.x[i], z = (int) p.z[i], y = Math.round(p.y[i]);
+                    if (Math.abs(x - at.getX()) > radius || Math.abs(z - at.getZ()) > radius) continue;
+                    var b = level.getUncachedNoiseBiome(x >> 2, y >> 2, z >> 2);
+                    CountryRoads.LOG.info("CR-RUNAT " + (r.type() == EdgePlan.FENCE ? "fence" : r.type() == EdgePlan.STONE_WALL ? "wall" : "hedge")
+                        + " " + io.github.profetgit.countryroads.paint.Palette.surface(b).name() + " " + x + "," + y + "," + z + " len=" + (r.s1() - r.s0()) + " side=" + r.side());
+                }
+                return false;
+            }
+            for (var e : seen.entrySet()) {
+                List<String> v = e.getValue();
+                List<String> pick = new ArrayList<>();
+                for (int k = 0; k < v.size() && pick.size() < 6; k += Math.max(1, v.size() / 6)) pick.add(v.get(k));
+                report(src, "CR-RBIOME " + e.getKey() + " samples=" + v.size() + " at " + pick);
+            }
             return true;
         });
         return 1;

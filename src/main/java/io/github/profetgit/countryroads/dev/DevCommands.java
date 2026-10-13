@@ -90,6 +90,8 @@ public final class DevCommands {
                 .then(Commands.argument("radius", IntegerArgumentType.integer(16, 4000)).executes(c -> RoadChecks.check(c.getSource(), IntegerArgumentType.getInteger(c, "radius")))))
             .then(Commands.literal("roads")
                 .then(Commands.argument("radius", IntegerArgumentType.integer(16, 8000)).executes(c -> RoadChecks.roads(c.getSource(), IntegerArgumentType.getInteger(c, "radius")))))
+            .then(Commands.literal("roadbiomes")
+                .then(Commands.argument("radius", IntegerArgumentType.integer(16, 8000)).executes(c -> RoadChecks.roadBiomes(c.getSource(), IntegerArgumentType.getInteger(c, "radius")))))
             .then(Commands.literal("shots")
                 .then(Commands.argument("radius", IntegerArgumentType.integer(16, 4000)).executes(c -> {
                     CommandSourceStack src = c.getSource();
@@ -114,6 +116,49 @@ public final class DevCommands {
                         CountryRoads.LOG.info("CR-INHABIT chunk " + (x >> 4) + "," + (z >> 4));
                         return 1;
                     }))))
+            .then(Commands.literal("box")
+                .then(Commands.argument("x", IntegerArgumentType.integer()).then(Commands.argument("y", IntegerArgumentType.integer()).then(Commands.argument("z", IntegerArgumentType.integer())
+                    .then(Commands.argument("r", IntegerArgumentType.integer(1, 8)).then(Commands.argument("dy", IntegerArgumentType.integer(1, 16))
+                    .executes(c -> {
+                        var level = c.getSource().getLevel();
+                        int x = IntegerArgumentType.getInteger(c, "x"), y = IntegerArgumentType.getInteger(c, "y"), z = IntegerArgumentType.getInteger(c, "z");
+                        int r = IntegerArgumentType.getInteger(c, "r"), dy = IntegerArgumentType.getInteger(c, "dy");
+                        // one line per layer, top down: rows of z, columns of x; legend after
+                        java.util.Map<String, Character> legend = new java.util.LinkedHashMap<>();
+                        String keys = ".abcdefghijklmnopqrstuvwxyzABCDEFGHIJKLMNOPQRSTUVWXYZ0123456789";
+                        var m = io.github.profetgit.countryroads.plan.RoadNetwork.get(level).mask(x >> 4, z >> 4);
+                        StringBuilder out = new StringBuilder("CR-BOX " + x + "," + y + "," + z + " r=" + r);
+                        for (int yy = y + dy; yy >= y - dy; yy--) {
+                            out.append("\nCR-BOX y=").append(yy).append(" ");
+                            for (int zz = z - r; zz <= z + r; zz++) {
+                                out.append(zz == z - r ? "" : "|");
+                                for (int xx = x - r; xx <= x + r; xx++) {
+                                    var st = level.getBlockState(new net.minecraft.core.BlockPos(xx, yy, zz));
+                                    String id = st.isAir() ? "air" : st.getBlock().getDescriptionId().replace("block.minecraft.", "");
+                                    Character ch = legend.get(id);
+                                    if (ch == null) {
+                                        ch = keys.charAt(Math.min(keys.length() - 1, legend.size()));
+                                        legend.put(id, ch);
+                                    }
+                                    out.append(ch);
+                                }
+                            }
+                        }
+                        out.append("\nCR-BOX legend ").append(legend);
+                        StringBuilder ins = new StringBuilder("\nCR-BOX in(z rows) ");
+                        var n = io.github.profetgit.countryroads.plan.RoadNetwork.get(level);
+                        for (int zz = z - r; zz <= z + r; zz++) {
+                            ins.append(zz == z - r ? "" : "|");
+                            for (int xx = x - r; xx <= x + r; xx++) {
+                                var mm = n.mask(xx >> 4, zz >> 4);
+                                float v = mm.in[io.github.profetgit.countryroads.plan.ChunkMask.idx(xx & 15, zz & 15)];
+                                ins.append(v == Float.NEGATIVE_INFINITY ? "_" : v >= 0 ? "R" : String.valueOf(Math.min(9, (int) -v)));
+                            }
+                        }
+                        out.append(ins);
+                        CountryRoads.LOG.info(out.toString());
+                        return 1;
+                    })))))))
             .then(Commands.literal("column")
                 .then(Commands.argument("x", IntegerArgumentType.integer()).then(Commands.argument("z", IntegerArgumentType.integer())
                     .executes(c -> {

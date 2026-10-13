@@ -264,9 +264,12 @@ public final class Planner {
         int s = 30 + (int) Math.floorMod(h, 120L);
         while (s < n - 30) {
             h = h * 6364136223846793005L + 1442695040888963407L;
-            int len = 12 + (int) Math.floorMod(h >>> 33, 33L);
+            long t = Math.floorMod(h >>> 41, 20L);
+            byte type = t < 9 ? EdgePlan.STONE_WALL : t < 15 ? EdgePlan.FENCE : EdgePlan.HEDGE;
+            // split-rail fences stay short (user, 2026-10-13: long fence lines look wrong)
+            int len = type == EdgePlan.FENCE ? 6 + (int) Math.floorMod(h >>> 33, 8L) : 12 + (int) Math.floorMod(h >>> 33, 33L);
             int e = Math.min(n - 30, s + len);
-            boolean ok = e - s >= 10;
+            boolean ok = e - s >= (type == EdgePlan.FENCE ? 6 : 10);
             for (int k = s; k <= e && ok; k++) ok = p.kind[k] == EdgePlan.GROUND;
             for (EdgePlan.Decor d : p.decor) {
                 int near = nearestSample(p, d.x() + 0.5f, d.z() + 0.5f);
@@ -274,9 +277,7 @@ public final class Planner {
             }
             if (ok) {
                 int r = (int) Math.floorMod(h >>> 17, 10L);
-                byte side = (byte) (r < 2 ? 0 : r < 6 ? 1 : -1);
-                long t = Math.floorMod(h >>> 41, 20L);
-                byte type = t < 9 ? EdgePlan.STONE_WALL : t < 15 ? EdgePlan.FENCE : EdgePlan.HEDGE;
+                byte side = (byte) (r < 2 && type != EdgePlan.FENCE ? 0 : r < 6 ? 1 : -1);
                 p.runs.add(new EdgePlan.Run(s, e, side, type));
             }
             s = e + 80 + (int) Math.floorMod(h >>> 25, 180L);
