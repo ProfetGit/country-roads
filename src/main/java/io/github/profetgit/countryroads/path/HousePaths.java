@@ -45,7 +45,7 @@ import net.minecraft.world.level.levelgen.Heightmap;
  * stake restores every block it changed and refunds what was paid.
  */
 public final class HousePaths {
-    static final int RADIUS = 160, MAX_EXPANSIONS = 400_000, PREVIEW_TICKS = 2400, CONTAINER_REACH = 8;
+    static final int RADIUS = 320, MAX_EXPANSIONS = 1_200_000, PREVIEW_TICKS = 2400, CONTAINER_REACH = 8, WAIT_TICKS = 1200, TICKET_EVERY = 100;
     static final long SLICE_NANOS = 2_000_000;
     /**
      * Path blocks go in (and come back out) exactly, without neighbour updates: a full update would break the top half
@@ -76,6 +76,11 @@ public final class HousePaths {
         final Long2IntOpenHashMap cost = new Long2IntOpenHashMap();
         final Long2IntOpenHashMap ground = new Long2IntOpenHashMap();
         final Long2IntOpenHashMap trees = new Long2IntOpenHashMap();
+        /** Edges whose far column is in a chunk that is not loaded yet: {lower-bound cost, from column, direction, cost at from}. */
+        final List<long[]> blocked = new ArrayList<>();
+        /** Chunks asked for (ticketed again every few seconds while the survey runs). */
+        final java.util.Set<Long> requested = new java.util.HashSet<>();
+        int waited, age;
         /** Direction each column was entered by (START at the door). */
         final Long2IntOpenHashMap arrive = new Long2IntOpenHashMap();
         int expansions;
@@ -92,7 +97,7 @@ public final class HousePaths {
         }
     }
 
-    private record Rollout(ServerLevel level, BlockPos stake, List<Cell> cells, int[] next) {}
+    private record Rollout(ServerLevel level, BlockPos stake, List<Cell> cells, int[] next, java.util.Set<Long> chunks, int[] age) {}
 
     private record Preview(ServerLevel level, BlockPos stake, ServerPlayer player, List<Cell> cells, long until) {}
 
@@ -130,6 +135,7 @@ public final class HousePaths {
         j.parent.clear();
         j.cost.clear();
         j.arrive.clear();
+        j.blocked.clear();
         j.expansions = 0;
         j.cost.put(k, 0);
         j.arrive.put(k, START);
@@ -165,7 +171,9 @@ public final class HousePaths {
         be.survey = null;
         be.setChanged();
         PREVIEWS.remove(stake);
-        ROLLOUTS.add(new Rollout(level, stake, s.cells, new int[]{0}));
+        java.util.Set<Long> chunks = new java.util.HashSet<>();
+        for (Cell c : s.cells) chunks.add(ChunkPos.pack(c.x >> 4, c.z >> 4));
+        ROLLOUTS.add(new Rollout(level, stake, s.cells, new int[]{0}, chunks, new int[]{0}));
         tell(player, Component.translatable("countryroads.stake.building", s.cells.size()), true);
     }
 
@@ -217,9 +225,21 @@ public final class HousePaths {
      */
     private static boolean step(Job j, long until) {
         ServerLevel level = j.level;
-        while (!j.open.isEmpty()) {
+        if (j.age++ % TICKET_EVERY == 0) for (long ch : j.requested) ticket(level, ch);
+        retryBlocked(j);
+        while (true) {
+            long[] n = j.open.peek();
+            if (!j.blocked.isEmpty() && (n == null || n[0] >= minBlocked(j))) {
+                // the cheapest unexplored edge is waiting for a chunk: do not go on past it
+                if (++j.waited > WAIT_TICKS) {
+                    j.blocked.clear();
+                    continue;
+                }
+                return false;
+            }
+            if (n == null) break;
             if (System.nanoTime() > until) return false;
-            long[] n = j.open.poll();
+            j.open.poll();
             long k = n[1];
             int c = (int) n[0];
             if (c != j.cost.get(k)) continue;
@@ -238,9 +258,41 @@ public final class HousePaths {
         return true;
     }
 
+    private static void ticket(ServerLevel level, long chunk) {
+        level.getChunkSource().addTicketWithRadius(net.minecraft.server.level.TicketType.PORTAL, new ChunkPos(ChunkPos.getX(chunk), ChunkPos.getZ(chunk)), 0);
+    }
+
+    private static long minBlocked(Job j) {
+        long m = Long.MAX_VALUE;
+        for (long[] b : j.blocked) m = Math.min(m, b[0]);
+        return m;
+    }
+
+    /** Edges that were waiting for a chunk go on as soon as it is loaded. */
+    private static void retryBlocked(Job j) {
+        if (j.blocked.isEmpty()) return;
+        List<long[]> ready = new ArrayList<>();
+        for (java.util.Iterator<long[]> it = j.blocked.iterator(); it.hasNext(); ) {
+            long[] b = it.next();
+            int nx = ChunkPos.getX(b[1]) + DX[(int) b[2]], nz = ChunkPos.getZ(b[1]) + DZ[(int) b[2]];
+            if (j.level.getChunkSource().getChunkNow(nx >> 4, nz >> 4) != null) {
+                ready.add(b);
+                it.remove();
+            }
+        }
+        if (!ready.isEmpty()) j.waited = 0;
+        for (long[] b : ready) expand(j, b[1], ChunkPos.getX(b[1]), ChunkPos.getZ(b[1]), j.arrive.get(b[1]), (int) b[3], (int) b[2]);
+    }
+
     private static void expand(Job j, long k, int x, int z, int d0, int c, int d) {
         int nx = x + DX[d], nz = z + DZ[d];
         if (Math.max(Math.abs(nx - j.sx), Math.abs(nz - j.sz)) > RADIUS || (nx == j.sx && nz == j.sz)) return;
+        if (j.level.getChunkSource().getChunkNow(nx >> 4, nz >> 4) == null) {
+            long chunk = ChunkPos.pack(nx >> 4, nz >> 4);
+            if (j.requested.add(chunk)) ticket(j.level, chunk);
+            j.blocked.add(new long[]{c + 10, k, d, c});
+            return;
+        }
         int ny = ground(j, nx, nz);
         if (ny < -1000) return;
         int from = ground(j, x, z);
@@ -317,7 +369,7 @@ public final class HousePaths {
         int v = j.ground.get(k);
         if (v == UNKNOWN) {
             v = passable(j, x, z);
-            j.ground.put(k, v);
+            if (v != CLOSED || j.level.getChunkSource().getChunkNow(x >> 4, z >> 4) != null) j.ground.put(k, v);
         }
         return v;
     }
@@ -444,6 +496,7 @@ public final class HousePaths {
      * anything the first pass or the game's own updates left behind and clears whatever still stands above the path.
      */
     private static boolean roll(Rollout r) {
+        if (r.age[0]++ % TICKET_EVERY == 0) for (long ch : r.chunks) ticket(r.level, ch);
         if (!r.level.hasChunkAt(r.stake)) return false;
         if (!(r.level.getBlockEntity(r.stake) instanceof StakeBlockEntity be)) return true;
         int per = Math.max(1, r.cells.size() / 60);
