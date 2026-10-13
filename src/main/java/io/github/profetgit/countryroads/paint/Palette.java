@@ -291,12 +291,43 @@ public final class Palette {
         return wood(wood(biome)).log().defaultBlockState();
     }
 
+    /**
+     * Bridge details (comma list): trim (darker posts and beams, posts above the rail), stone (cobble footings), lantern
+     * (on the end posts). User pick 2026-10-13: all three.
+     */
+    static final java.util.Set<String> BRIDGE = java.util.Set.of(System.getProperty("countryroads.bridge", "trim,stone,lantern").split(","));
+
+    public static boolean bridgeDetail(String what) {
+        return BRIDGE.contains(what);
+    }
+
+    /** Posts and beams of a bridge: the deck's own wood, or with "trim" a darker one beside it. */
+    public static Wood bridgeFrame(Holder<Biome> biome) {
+        int w = wood(biome);
+        if (!bridgeDetail("trim")) return wood(w);
+        return wood(w == 0 ? 3 : 0);
+    }
+
     public static BlockState woodStripped(Holder<Biome> biome) {
         return wood(wood(biome)).strippedLog().defaultBlockState();
     }
 
     public static BlockState woodFence(Holder<Biome> biome) {
         return wood(wood(biome)).fence().defaultBlockState();
+    }
+
+    public static BlockState woodSlab(Holder<Biome> biome) {
+        return wood(wood(biome)).slab().defaultBlockState();
+    }
+
+    /** The stairs of a plank block (bridge undersides), or null. */
+    public static Block stairsOf(Block planks) {
+        if (planks == Blocks.SPRUCE_PLANKS) return Blocks.SPRUCE_STAIRS;
+        if (planks == Blocks.OAK_PLANKS) return Blocks.OAK_STAIRS;
+        if (planks == Blocks.MANGROVE_PLANKS) return Blocks.MANGROVE_STAIRS;
+        if (planks == Blocks.DARK_OAK_PLANKS) return Blocks.DARK_OAK_STAIRS;
+        if (planks == Blocks.JUNGLE_PLANKS) return Blocks.JUNGLE_STAIRS;
+        return null;
     }
 
     public static BlockState woodPlanks(Holder<Biome> biome) {

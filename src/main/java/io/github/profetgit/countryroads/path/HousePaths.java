@@ -64,10 +64,10 @@ public final class HousePaths {
      * block in the verge, the tunnel part (-1 none, 0 open cut, 1 inside the rock, 2 portal) with the index along the
      * roofed run, and whether it is a bank: no path there, only the ground cut or filled to height y.
      */
-    public record Cell(int x, int z, int y, boolean water, boolean edge, int stair, int dir, boolean fringe, int tun, int tidx, boolean bank, boolean slab, boolean rail) {}
+    public record Cell(int x, int z, int y, boolean water, boolean edge, int stair, int dir, boolean fringe, int tun, int tidx, boolean bank, boolean slab, boolean rail, int arch) {}
 
     /** A finished survey: cells from the door to the road, the bill, and what the route is made of. */
-    public record Survey(List<Cell> cells, int earth, int stone, int planks, int torches, int tunnelCells, int length, Map<Long, String> skipped) {}
+    public record Survey(List<Cell> cells, int earth, int stone, int planks, int torches, int lanterns, int tunnelCells, int length, Map<Long, String> skipped) {}
 
     public static final Direction[] DIRS = {Direction.NORTH, Direction.EAST, Direction.SOUTH, Direction.WEST};
     static final int[] DX = {0, 1, 0, -1}, DZ = {-1, 0, 1, 0};
@@ -303,10 +303,11 @@ public final class HousePaths {
             int eo = count(sources, earthOnly), so = count(sources, stoneOnly), sh = count(sources, both);
             int earthShort = Math.max(0, s.earth - eo), stoneShort = Math.max(0, s.stone - so), over = Math.max(0, earthShort + stoneShort - sh);
             int planksHave = count(sources, st -> st.is(ItemTags.PLANKS)), torchesHave = count(sources, st -> st.is(Items.TORCH));
-            if (over > 0 || planksHave < s.planks || torchesHave < s.torches) {
+            int lanternsHave = count(sources, st -> st.is(Items.LANTERN));
+            if (over > 0 || planksHave < s.planks || torchesHave < s.torches || lanternsHave < s.lanterns) {
                 int earthMiss = Math.max(0, earthShort - Math.max(0, sh - stoneShort)), stoneMiss = Math.max(0, over - earthMiss);
                 tell(player, Component.translatable("countryroads.stake.missing", earthMiss, stoneMiss,
-                    Math.max(0, s.planks - planksHave), Math.max(0, s.torches - torchesHave)).withStyle(ChatFormatting.RED), false);
+                    Math.max(0, s.planks - planksHave), Math.max(0, s.torches - torchesHave), Math.max(0, s.lanterns - lanternsHave)).withStyle(ChatFormatting.RED), false);
                 return;
             }
             paid.addAll(take(sources, stoneOnly, s.stone));
@@ -315,6 +316,7 @@ public final class HousePaths {
             paid.addAll(take(sources, both, earthShort));
             paid.addAll(take(sources, st -> st.is(ItemTags.PLANKS), s.planks));
             paid.addAll(take(sources, st -> st.is(Items.TORCH), s.torches));
+            paid.addAll(take(sources, st -> st.is(Items.LANTERN), s.lanterns));
         }
         be.paid.clear();
         be.paid.addAll(paid);
@@ -354,8 +356,13 @@ public final class HousePaths {
         }
         if (!(level.getBlockEntity(stake) instanceof StakeBlockEntity be) || be.status != StakeBlockEntity.BUILT) return;
         // torches the player mined out of the tunnel are not paid back a second time
-        int torchesLeft = 0;
-        for (long tp : be.torchPos) if (level.getBlockState(BlockPos.of(tp)).is(Blocks.WALL_TORCH)) torchesLeft++;
+        // (and bridge lanterns: their positions are kept in the same list)
+        int torchesLeft = 0, lanternsLeft = 0;
+        for (long tp : be.torchPos) {
+            BlockState ts = level.getBlockState(BlockPos.of(tp));
+            if (ts.is(Blocks.WALL_TORCH)) torchesLeft++;
+            else if (ts.is(Blocks.LANTERN)) lanternsLeft++;
+        }
         for (int i = be.journal.size() - 1; i >= 0; i--) {
             StakeBlockEntity.Entry e = be.journal.get(i);
             level.setBlock(e.pos(), e.state(), EXACT);
@@ -370,6 +377,9 @@ public final class HousePaths {
             if (back.is(Items.TORCH)) {
                 back.setCount(Math.min(back.getCount(), torchesLeft));
                 torchesLeft -= back.getCount();
+            } else if (back.is(Items.LANTERN)) {
+                back.setCount(Math.min(back.getCount(), lanternsLeft));
+                lanternsLeft -= back.getCount();
             }
             if (!back.isEmpty()) Block.popResource(level, stake, back);
         }
@@ -450,7 +460,7 @@ public final class HousePaths {
             be.status = StakeBlockEntity.PREVIEW;
             be.survey = sv;
             if (j.player != null) PREVIEWS.put(j.stake, new Preview(j.level, j.stake, j.player, sv.cells, j.level.getGameTime() + PREVIEW_TICKS));
-            tell(j.player, Component.translatable("countryroads.stake.preview", sv.length, sv.tunnelCells, sv.earth, sv.stone, sv.planks, sv.torches).withStyle(ChatFormatting.YELLOW), false);
+            tell(j.player, Component.translatable("countryroads.stake.preview", sv.length, sv.tunnelCells, sv.earth, sv.stone, sv.planks, sv.torches, sv.lanterns).withStyle(ChatFormatting.YELLOW), false);
         }
     }
 
@@ -533,6 +543,11 @@ public final class HousePaths {
             return;
         }
         BlockState surface;
+        if (c.water && c.arch > 0) {
+            archDeck(level, be, c, biome);
+            markPath(level, be, c.x, c.z);
+            return;
+        }
         if (c.water) {
             surface = c.stair >= 0 ? Palette.deckStair(biome).setValue(StairBlock.FACING, DIRS[c.stair]) : Palette.deck(biome);
         } else {
@@ -604,24 +619,78 @@ public final class HousePaths {
     private static void rail(ServerLevel level, StakeBlockEntity be, Cell c) {
         BlockPos at = new BlockPos(c.x, c.y, c.z);
         var biome = level.getBiome(at);
-        BlockState log = Palette.woodLog(biome);
-        if (c.tidx == 1) {
-            for (int yy = c.y; yy >= c.y - 10; yy--) {
+        Palette.Wood frame = Palette.bridgeFrame(biome);
+        BlockState log = frame.log().defaultBlockState();
+        // the beam sits at the deck block's height, the fence on it (an odd arch half: on the deck's slab level)
+        int beamY = c.y + c.arch / 2, fenceY = c.y + (c.arch + 2) / 2;
+        if (c.tidx >= 1) {
+            boolean stone = Palette.bridgeDetail("stone");
+            for (int yy = fenceY + (Palette.bridgeDetail("trim") ? 1 : 0); yy >= c.y - 10; yy--) {
                 BlockPos q = at.atY(yy);
                 BlockState s = level.getBlockState(q);
                 if (yy < c.y && PaintRules.solid(s) && s.getFluidState().isEmpty()) break;
-                change(level, be, q, log);
+                // with "stone" the post stands on a cobble footing that shows a block above the water
+                long h = c.x * 31L + yy * 17L + c.z;
+                change(level, be, q, stone && yy <= c.y ? ((h & 3) == 0 ? Blocks.MOSSY_COBBLESTONE : Blocks.COBBLESTONE).defaultBlockState() : log);
             }
-            change(level, be, at.above(), log);
         } else {
             Direction.Axis axis = DX[c.dir] != 0 ? Direction.Axis.X : Direction.Axis.Z;
-            change(level, be, at, Palette.woodStripped(biome).setValue(net.minecraft.world.level.block.RotatedPillarBlock.AXIS, axis));
+            change(level, be, at.atY(beamY), frame.strippedLog().defaultBlockState().setValue(net.minecraft.world.level.block.RotatedPillarBlock.AXIS, axis));
+            archUnderside(level, be, c, at.atY(beamY), frame.planks());
             BlockState fence = Palette.woodFence(biome);
-            change(level, be, at.above(), Block.updateFromNeighbourShapes(fence, level, at.above()));
+            change(level, be, at.atY(fenceY), Block.updateFromNeighbourShapes(fence, level, at.atY(fenceY)));
         }
-        for (int dy = 2; dy <= 3; dy++) {
-            BlockState s = level.getBlockState(at.above(dy));
-            if (!s.isAir() && !s.is(BlockTags.LOGS) && !s.is(BlockTags.LEAVES) && !Retrofit.isCrafted(s)) change(level, be, at.above(dy), Blocks.AIR.defaultBlockState());
+        int postTop = fenceY + (c.tidx >= 1 && Palette.bridgeDetail("trim") ? 1 : 0);
+        for (int dy = 1; dy <= 2; dy++) {
+            BlockPos q = at.atY(postTop + dy);
+            BlockState s = level.getBlockState(q);
+            if (!s.isAir() && !s.is(BlockTags.LOGS) && !s.is(BlockTags.LEAVES) && !Retrofit.isCrafted(s)) change(level, be, q, Blocks.AIR.defaultBlockState());
+        }
+        // the end posts carry a lantern (paid; refunded only while it still stands)
+        if (c.tidx == 2 && Palette.bridgeDetail("lantern")) {
+            BlockPos lp = at.atY(postTop + 1);
+            change(level, be, lp, Blocks.LANTERN.defaultBlockState());
+            if (!be.torchPos.contains(lp.asLong())) be.torchPos.add(lp.asLong());
+        }
+    }
+
+    /**
+     * A deck cell of an arched bridge: a plank arch/2 blocks up, a bottom slab on it for an odd half, the water open
+     * under it, an upside-down stair under the step of the underside so it curves, and room to walk above.
+     */
+    private static void archDeck(ServerLevel level, StakeBlockEntity be, Cell c, net.minecraft.core.Holder<net.minecraft.world.level.biome.Biome> biome) {
+        BlockPos at = new BlockPos(c.x, c.y + c.arch / 2, c.z);
+        BlockState planks = Palette.deck(biome);
+        change(level, be, at, planks);
+        int top = at.getY();
+        if ((c.arch & 1) == 1) {
+            change(level, be, at.above(), Palette.woodSlab(biome));
+            top++;
+        }
+        archUnderside(level, be, c, at, planks.getBlock());
+        for (int dy = 1; dy <= HEADROOM; dy++) {
+            BlockPos q = new BlockPos(c.x, top + dy, c.z);
+            BlockState s = level.getBlockState(q);
+            if (s.isAir() || s.is(BlockTags.LOGS) || s.is(Stake.BLOCK) || Retrofit.isCrafted(s)) continue;
+            if (!s.is(BlockTags.LEAVES) || dy <= LEAF_ROOM) change(level, be, q, Blocks.AIR.defaultBlockState());
+        }
+    }
+
+    /** Under a raised deck block: an upside-down stair toward a neighbour along the bridge whose deck sits a block lower. */
+    private static void archUnderside(ServerLevel level, StakeBlockEntity be, Cell c, BlockPos deck, Block wood) {
+        if (c.arch < 2) return;
+        Block stairs = Palette.stairsOf(wood);
+        if (stairs == null) return;
+        for (int s = -1; s <= 1; s += 2) {
+            int nx = c.x + s * DX[c.dir], nz = c.z + s * DZ[c.dir];
+            BlockPos nb = new BlockPos(nx, deck.getY() - 1, nz);
+            BlockState ns = level.getBlockState(nb);
+            BlockState above = level.getBlockState(nb.above());
+            if (!ns.is(BlockTags.PLANKS) && !ns.is(BlockTags.LOGS) || above.is(BlockTags.PLANKS) || above.is(BlockTags.LOGS)) continue;
+            Direction toward = s > 0 ? DIRS[c.dir] : DIRS[c.dir].getOpposite();
+            change(level, be, deck.below(), stairs.defaultBlockState().setValue(StairBlock.FACING, toward)
+                .setValue(StairBlock.HALF, net.minecraft.world.level.block.state.properties.Half.TOP));
+            return;
         }
     }
 

@@ -689,7 +689,7 @@ final class PathSearch implements RouteSolver.Host, Runnable {
     /** What the plan adds to the route cost when candidates are compared: stairs, the longest flight, the bill. */
     private static long score(HousePaths.Survey sv) {
         int[] st = stairs(sv);
-        return 6L * st[0] + 15L * st[1] + sv.earth() + sv.stone() + 2L * sv.planks() + 8L * sv.torches();
+        return 6L * st[0] + 15L * st[1] + sv.earth() + sv.stone() + 2L * sv.planks() + 8L * sv.torches() + 8L * sv.lanterns();
     }
 
     /** {stair cells, longest run of stair cells} along the walked line. */

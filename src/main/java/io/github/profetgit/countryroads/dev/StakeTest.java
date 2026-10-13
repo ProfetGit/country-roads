@@ -444,15 +444,21 @@ final class StakeTest {
         int bad = 0, stairs = 0, steps = 0, flat = 0, slabs = 0, mudSteps = 0, stoneSteps = 0;
         int[] halfSteps = {0}, stairSteps = {0};
         HousePaths.Cell prev = null;
-        int banks = 0, cutFill = 0, rails = 0;
+        int banks = 0, cutFill = 0, rails = 0, archCells = 0, lanterns = 0;
         for (HousePaths.Cell c : cells) {
             BlockPos at = new BlockPos(c.x(), c.y(), c.z());
             var state = level.getBlockState(at);
             if (c.rail()) {
                 // a bridge rail: a fence on a beam, or a post, at rail height
                 rails++;
-                var top = level.getBlockState(at.above());
-                if (!top.is(net.minecraft.tags.BlockTags.FENCES) && !top.is(net.minecraft.tags.BlockTags.LOGS)) bad = fail(++bad, "rail missing", at.above(), top);
+                BlockPos fenceAt = at.atY(c.y() + (c.arch() + 2) / 2);
+                var top = level.getBlockState(fenceAt);
+                if (!top.is(net.minecraft.tags.BlockTags.FENCES) && !top.is(net.minecraft.tags.BlockTags.LOGS)) bad = fail(++bad, "rail missing", fenceAt, top);
+                if (c.tidx() == 2) {
+                    BlockPos lp = fenceAt.above(level.getBlockState(fenceAt.above()).is(net.minecraft.tags.BlockTags.LOGS) ? 2 : 1);
+                    if (level.getBlockState(lp).is(net.minecraft.world.level.block.Blocks.LANTERN)) lanterns++;
+                    else bad = fail(++bad, "end post lantern", lp, level.getBlockState(lp));
+                }
                 continue;
             }
             if (c.bank()) {
@@ -460,6 +466,21 @@ final class StakeTest {
                 banks++;
                 int top = level.getHeight(net.minecraft.world.level.levelgen.Heightmap.Types.MOTION_BLOCKING_NO_LEAVES, c.x(), c.z()) - 1;
                 if (top != c.y() && !level.getBlockState(new BlockPos(c.x(), top, c.z())).is(net.minecraft.tags.BlockTags.LOGS)) bad = fail(++bad, "bank height " + top, at, state);
+                continue;
+            }
+            if (c.water() && c.arch() > 0) {
+                // an arched deck cell: the plank arch/2 up (a slab on it for an odd half), room above the top
+                archCells++;
+                BlockPos deck = at.above(c.arch() / 2);
+                if (!level.getBlockState(deck).is(net.minecraft.tags.BlockTags.PLANKS)) bad = fail(++bad, "arch deck", deck, level.getBlockState(deck));
+                BlockPos top = (c.arch() & 1) == 1 ? deck.above() : deck;
+                if ((c.arch() & 1) == 1 && !level.getBlockState(top).is(net.minecraft.tags.BlockTags.WOODEN_SLABS)) bad = fail(++bad, "arch slab", top, level.getBlockState(top));
+                for (int dy = 1; dy <= 2; dy++)
+                    if (!level.getBlockState(top.above(dy)).getCollisionShape(level, top.above(dy)).isEmpty()) bad = fail(++bad, "arch headroom", top.above(dy), level.getBlockState(top.above(dy)));
+                if (!c.edge()) {
+                    if (prev != null && Math.abs(c.x() - prev.x()) + Math.abs(c.z() - prev.z()) != 1) bad = fail(++bad, "cells do not touch", at, state);
+                    prev = c;
+                }
                 continue;
             }
             boolean isStair = state.getBlock() instanceof net.minecraft.world.level.block.StairBlock;
@@ -526,7 +547,7 @@ final class StakeTest {
         }
         int above = 0;
         for (HousePaths.Cell c : cells)
-            for (int dy = 1; dy <= 8 && c.tun() < 1 && !c.bank() && !c.rail(); dy++) {
+            for (int dy = 1; dy <= 8 && c.tun() < 1 && !c.bank() && !c.rail() && c.arch() == 0; dy++) {
                 BlockPos q = new BlockPos(c.x(), c.y() + dy, c.z());
                 var st = level.getBlockState(q);
                 // canopy from four blocks up is allowed (trees are never cut back further); anything else is left over
@@ -614,7 +635,7 @@ final class StakeTest {
         }
         int pct = open == 0 ? 100 : wide * 100 / open;
         CountryRoads.LOG.info("CR-STAKE-WIDTH " + (pct >= 95 && one == 0 ? "PASS" : "FAIL") + " three wide " + wide + "/" + open + " (" + pct + "%) two=" + two + " one=" + one + " banks=" + banks + " why=" + why);
-        CountryRoads.LOG.info("CR-STAKE-WALK " + (bad == 0 ? "PASS" : "FAIL") + " cells=" + cells.size() + " flat=" + flat + " steps=" + steps + " (half " + halfSteps[0] + ", stair " + stairSteps[0] + ") stairs=" + stairs + " rails=" + rails + " slabs=" + slabs + " (mud " + mudSteps + ", other " + stoneSteps + ") bad=" + bad
+        CountryRoads.LOG.info("CR-STAKE-WALK " + (bad == 0 ? "PASS" : "FAIL") + " cells=" + cells.size() + " flat=" + flat + " steps=" + steps + " (half " + halfSteps[0] + ", stair " + stairSteps[0] + ") stairs=" + stairs + " rails=" + rails + " lanterns=" + lanterns + " arched=" + archCells + " slabs=" + slabs + " (mud " + mudSteps + ", other " + stoneSteps + ") bad=" + bad
             + " palette=" + io.github.profetgit.countryroads.paint.Palette.surface(level.getBiome(stake)).name() + " at=" + stake.toShortString());
     }
 

@@ -504,7 +504,7 @@ final class RouteSolver {
         int rx = -DZ[d], rz = DX[d], c = 0, closed = 0;
         for (int s = -1; s <= 1; s += 2) {
             int g = ground(x + s * rx, z + s * rz);
-            if (Terrain.deep(g) && g - Terrain.DEEP + 1 == y) c += SIDE;
+            if (Terrain.deep(g) && Math.abs(g - Terrain.DEEP + 1 - y) <= 1) c += SIDE;
             else if (!Terrain.usable(g)) {
                 c += SIDE_CLOSED;
                 closed++;
