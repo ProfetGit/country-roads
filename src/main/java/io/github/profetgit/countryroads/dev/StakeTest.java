@@ -537,7 +537,19 @@ final class StakeTest {
                 }
                 pc = c;
             }
-            CountryRoads.LOG.info("CR-STAKE-BRIDGE " + (bends == 0 ? "PASS" : "FAIL") + " bends=" + bends + " longest=" + longest);
+            // posts come in pairs, opposite each other across the deck
+            java.util.Map<Long, HousePaths.Cell> railAt = new java.util.HashMap<>();
+            for (HousePaths.Cell c : cells) if (c.rail()) railAt.put(net.minecraft.world.level.ChunkPos.pack(c.x(), c.z()), c);
+            int unpaired = 0;
+            for (HousePaths.Cell c : cells) {
+                if (!c.rail() || c.tidx() == 0) continue;
+                int rx = -HousePaths.DIRS[c.dir()].getStepZ(), rz = HousePaths.DIRS[c.dir()].getStepX();
+                HousePaths.Cell m1 = railAt.get(net.minecraft.world.level.ChunkPos.pack(c.x() + 4 * rx, c.z() + 4 * rz)), m2 = railAt.get(net.minecraft.world.level.ChunkPos.pack(c.x() - 4 * rx, c.z() - 4 * rz));
+                if (!(m1 != null && m1.tidx() > 0 || m2 != null && m2.tidx() > 0)) {
+                    if (++unpaired <= 4) CountryRoads.LOG.info("CR-STAKE-BRIDGE-UNPAIRED post at " + c.x() + "," + c.y() + "," + c.z());
+                }
+            }
+            CountryRoads.LOG.info("CR-STAKE-BRIDGE " + (bends == 0 && unpaired == 0 ? "PASS" : "FAIL") + " bends=" + bends + " longest=" + longest + " unpairedPosts=" + unpaired);
         }
         {
             int runs = 0, longest = 0, len = 0, pdx = 9, pdz = 9, over10 = 0;

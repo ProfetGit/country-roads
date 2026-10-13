@@ -350,27 +350,32 @@ final class PathPlan {
         }
 
         // bridge rails: two out from the walked line over the water, a stripped-log beam with a fence on it, where the
-        // deck beside is laid and the column is water or lower ground. Planned per side as runs along a straight
-        // stretch: a log post down to the bed at both ends of a run and every BRIDGE_POST cells, a lantern on the
-        // posts where the run meets the shore; a run of one is just a post (no stub of beam)
-        for (int s = -1; s <= 1; s += 2) {
-            for (int i = 0; i < n; ) {
-                if (!railable(t, i, s, wet, tm, tun, dir, xs, zs, plan.y, used, height, doorKey)) {
-                    i++;
-                    continue;
-                }
-                int a = i;
+        // deck beside is laid and the column is water or low ground. Both sides together, on the rows of a straight
+        // stretch where both can take a rail, so the two rails start, end and carry their posts opposite each other
+        // (user, 0.1.12: posts did not line up): posts at both ends and evenly about every BRIDGE_POST cells between,
+        // lanterns on the end posts where the bridge meets the shore; a run of one is a pair of posts
+        for (int i = 0; i < n; ) {
+            if (!railable(t, i, -1, wet, tm, tun, dir, xs, zs, plan.y, used, height, doorKey) || !railable(t, i, 1, wet, tm, tun, dir, xs, zs, plan.y, used, height, doorKey)) {
                 i++;
-                while (i < n && dir[i] == dir[i - 1] && railable(t, i, s, wet, tm, tun, dir, xs, zs, plan.y, used, height, doorKey)) i++;
-                int len = i - a;
-                for (int k = a; k < i; k++) {
-                    int rx = -DZ[dir[k]], rz = DX[dir[k]];
+                continue;
+            }
+            int a = i;
+            i++;
+            while (i < n && dir[i] == dir[i - 1] && railable(t, i, -1, wet, tm, tun, dir, xs, zs, plan.y, used, height, doorKey)
+                && railable(t, i, 1, wet, tm, tun, dir, xs, zs, plan.y, used, height, doorKey)) i++;
+            int len = i - a, gaps = Math.max(1, Math.round((len - 1) / (float) BRIDGE_POST));
+            Set<Integer> posts = new HashSet<>();
+            for (int j = 0; j <= gaps; j++) posts.add(a + Math.round(j * (len - 1) / (float) gaps));
+            int rx = -DZ[dir[a]], rz = DX[dir[a]];
+            boolean shoreA = a == 0 || !wet[a - 1] || shoreAt(t, xs[a] - DX[dir[a]] + 2 * rx, zs[a] - DZ[dir[a]] + 2 * rz, plan.y[a], false)
+                || shoreAt(t, xs[a] - DX[dir[a]] - 2 * rx, zs[a] - DZ[dir[a]] - 2 * rz, plan.y[a], false);
+            int b = i - 1;
+            boolean shoreB = b == n - 1 || !wet[b + 1] || shoreAt(t, xs[b] + DX[dir[b]] + 2 * rx, zs[b] + DZ[dir[b]] + 2 * rz, plan.y[b], false)
+                || shoreAt(t, xs[b] + DX[dir[b]] - 2 * rx, zs[b] + DZ[dir[b]] - 2 * rz, plan.y[b], false);
+            for (int k = a; k < i; k++)
+                for (int s = -1; s <= 1; s += 2) {
                     int qx = xs[k] + 2 * s * rx, qz = zs[k] + 2 * s * rz;
-                    boolean endPost = k == a || k == i - 1, post = endPost || (k - a) % BRIDGE_POST == 0 && i - 1 - k >= 2;
-                    // the end of a run where it meets land (not where a corner or something built cut it short)
-                    boolean shore = endPost && (k == a ? shoreAt(t, xs[k] - DX[dir[k]] + 2 * s * rx, zs[k] - DZ[dir[k]] + 2 * s * rz, plan.y[k], k == 0 || !wet[k - 1])
-                        : shoreAt(t, xs[k] + DX[dir[k]] + 2 * s * rx, zs[k] + DZ[dir[k]] + 2 * s * rz, plan.y[k], k == n - 1 || !wet[k + 1]));
-                    boolean lantern = shore && Palette.bridgeDetail("lantern");
+                    boolean post = posts.contains(k), lantern = Palette.bridgeDetail("lantern") && (k == a && shoreA || k == b && shoreB);
                     bands.get(k).add(new HousePaths.Cell(qx, qz, plan.y[k], true, true, -1, dir[k], false, -1, lantern ? 2 : post ? 1 : 0, false, false, true, arch[k]));
                     used.add(ChunkPos.pack(qx, qz));
                     // a beam, a fence and a trapdoor (4 + 2 + 3 planks), a post about three logs
@@ -378,8 +383,6 @@ final class PathPlan {
                     if (post && Palette.bridgeDetail("stone")) stoneExtra += 2;
                     if (lantern) lanterns++;
                 }
-                if (len == 0) i++;
-            }
         }
 
         // banks: beyond the bed the ground is brought to within one block per column of the path, so there is no wall
