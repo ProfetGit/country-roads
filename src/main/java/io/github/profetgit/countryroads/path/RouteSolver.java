@@ -22,6 +22,8 @@ import net.minecraft.world.level.ChunkPos;
 final class RouteSolver {
     static final int RADIUS = 320, MAX_EXPANSIONS = 1_200_000;
     static final int TURN = 1, END_STEP = 12, START = 4, BEND_ON_SLOPE = 200, WOBBLE = 18, JITTER = 5;
+    /** The path is a bed three wide: per block of cut or fill the columns either side need, and for a side that cannot be bed. */
+    static final int SIDE = 4, SIDE_CLOSED = 12;
     static final int MAX_VIAS = 40;
     /** Predicted goals are road centrelines; the painted road is wider, so the estimate gives this many blocks back. */
     static final int GOAL_SLACK = 3;
@@ -465,7 +467,7 @@ final class RouteSolver {
             if (prevLevel(k) != walkFrom || walkTo != walkFrom) bend = BEND_ON_SLOPE;
         }
         int add = 10 + bend + (int) (lattice(31, nx * 7 + d, nz) * JITTER) + (dy != 0 ? climbPenalty(k) : 0) + treeCost(ni, nx, nz, walkTo)
-            + wobble(nx, nz) + (d0 != START && d0 != d ? TURN : 0) + 8 * Math.abs(dy) + (wet ? 30 : 0);
+            + wobble(nx, nz) + (d0 != START && d0 != d ? TURN : 0) + 8 * Math.abs(dy) + (wet ? 30 : 0) + sideCost(nx, nz, d, walkTo);
         if (dy < 0 && x == sx && z == sz) add += END_STEP;
         else if (dy > 0 && t.openRoad(nx, nz)) add += END_STEP;
         if (penalty != null) add += penalty[ni];
@@ -476,6 +478,17 @@ final class RouteSolver {
         arrive[ni] = (byte) d;
         bore[ni] = 0;
         push(total + h(ni), total, ni);
+    }
+
+    /** What the bed beside a step into (x, z) heading d costs: cut or fill of the two side columns, or a side that cannot be bed. */
+    private int sideCost(int x, int z, int d, int y) {
+        int rx = -DZ[d], rz = DX[d], c = 0;
+        for (int s = -1; s <= 1; s += 2) {
+            int g = ground(x + s * rx, z + s * rz);
+            if (!Terrain.usable(g)) c += SIDE_CLOSED;
+            else if (g < Terrain.WET) c += SIDE * Math.min(3, Math.abs(Terrain.level(g) - y));
+        }
+        return c;
     }
 
     /**
@@ -686,7 +699,7 @@ final class RouteSolver {
             int climb = 0;
             if (dy != 0) for (int q = 0; q < 4 && j - 2 - q >= 0; q++) if (lv[j - 1 - q] != lv[j - 2 - q]) climb += 6;
             long add = 10 + bend + (int) (lattice(31, nx * 7 + d, nz) * JITTER) + climb + t.treeCost(nx, nz, lv[j]) + wobble(nx, nz)
-                + (d0 != START && d0 != d ? TURN : 0) + 8L * Math.abs(dy) + (wet ? 30 : 0);
+                + (d0 != START && d0 != d ? TURN : 0) + 8L * Math.abs(dy) + (wet ? 30 : 0) + sideCost(nx, nz, d, lv[j]);
             if (dy < 0 && x == sx && z == sz) add += END_STEP;
             else if (dy > 0 && j == n - 1) add += END_STEP;
             total += add;

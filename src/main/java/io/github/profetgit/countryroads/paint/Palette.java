@@ -134,10 +134,10 @@ public final class Palette {
         return s;
     }
 
-    /** A shoulder column of a house path: often the natural top block stays, so the path frays into the verge. */
+    /** A side column of a house path's bed: now and then the natural top block stays, so the path frays a little. */
     public static BlockState houseEdge(Holder<Biome> biome, long h, BlockState natural) {
         Surface pal = surface(biome);
-        if (keepable(pal, natural) && ((h >>> 8) & 1023) < 480) return natural;
+        if (keepable(pal, natural) && ((h >>> 8) & 1023) < 200) return natural;
         return flat(pal.pick(pal.edge(), pal.edgeW(), (int) ((h >>> 24) & 1023)));
     }
 

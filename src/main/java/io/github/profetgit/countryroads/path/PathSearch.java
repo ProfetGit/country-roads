@@ -85,6 +85,7 @@ final class PathSearch implements RouteSolver.Host, Runnable {
     private List<RouteSolver.Bore> finalBores = List.of();
     private final LongOpenHashSet unsafe = new LongOpenHashSet();
     private boolean holding, revalidated;
+    private int retries;
 
     // worker -> server thread
     private final ConcurrentLinkedQueue<long[]> wanted = new ConcurrentLinkedQueue<>();
@@ -569,6 +570,24 @@ final class PathSearch implements RouteSolver.Host, Runnable {
                 bores = bores2;
             }
         }
+        if (chain != direct && crossing(chain, view) != Long.MIN_VALUE) {
+            // the wandering version passes over its own tunnel too low: the direct route does not need the bends
+            chain = direct;
+            end = win.route.endKey();
+            bores = directBores;
+            stats.candLines.add("CR-STAKE-CROSSING the wandering route crossed its tunnel: kept the direct route");
+        }
+        long crossed = crossing(chain, view);
+        if (crossed != Long.MIN_VALUE && retries < 4) {
+            // the route passes over its own tunnel too low (the path would sit in its headroom): no such bore, again
+            synchronized (unsafe) {
+                unsafe.add(crossed);
+            }
+            retries++;
+            stats.candLines.add("CR-STAKE-CROSSING the route crossed its own tunnel: searched again without that bore");
+            compute();
+            return;
+        }
         stats.costFinal = s.routeCost(chain, end);
         stats.candLines.add(String.format(java.util.Locale.ROOT, "CR-STAKE-PHASES goals=%dms (loaded %d, paths %d, all %d) candidates=%dms wander=%dms",
             (tGoals - t0) / 1_000_000, loadedGoals.length, pathGoals.length, goals.size(), (tCands - tGoals) / 1_000_000, (System.nanoTime() - tCands) / 1_000_000));
@@ -591,6 +610,41 @@ final class PathSearch implements RouteSolver.Host, Runnable {
             if (same) return true;
         }
         return false;
+    }
+
+    /**
+     * The bore (Bore.id) whose tunnel another part of the route crosses too low (a cell on one of the tunnel's three
+     * columns across, its surface not at least a block above the tunnel's roof), or Long.MIN_VALUE.
+     */
+    private static long crossing(List<long[]> chain, Terrain t) {
+        it.unimi.dsi.fastutil.longs.Long2LongOpenHashMap boreAt = new it.unimi.dsi.fastutil.longs.Long2LongOpenHashMap();
+        it.unimi.dsi.fastutil.longs.Long2IntOpenHashMap floor = new it.unimi.dsi.fastutil.longs.Long2IntOpenHashMap();
+        LongOpenHashSet tunnel = new LongOpenHashSet();
+        for (int i = 0; i < chain.size(); i++) {
+            long[] e = chain.get(i);
+            if (e[1] != 1 || i == 0) continue;
+            long entry = chain.get(i - 1)[0];
+            int ex = ChunkPos.getX(entry), ez = ChunkPos.getZ(entry), len = (int) e[2];
+            int d = PathPlan.dirOf(Integer.signum(ChunkPos.getX(e[0]) - ex), Integer.signum(ChunkPos.getZ(e[0]) - ez));
+            int y = Terrain.level(t.ground(ex, ez));
+            for (int m = 1; m < len && i + m - 1 < chain.size(); m++) {
+                tunnel.add(chain.get(i + m - 1)[0]);
+                // the tunnel's own columns: the bored line and one either side (it is three wide)
+                int cx = ex + RouteSolver.DX[d] * m, cz = ez + RouteSolver.DZ[d] * m, rx = -RouteSolver.DZ[d], rz = RouteSolver.DX[d];
+                for (int l = -1; l <= 1; l++) {
+                    long k = ChunkPos.pack(cx + l * rx, cz + l * rz);
+                    boreAt.put(k, RouteSolver.key(ex, ez) * 4 + d);
+                    floor.put(k, y);
+                }
+            }
+        }
+        if (boreAt.isEmpty()) return Long.MIN_VALUE;
+        for (long[] e : chain) {
+            if (e[1] > 0 || tunnel.contains(e[0]) || !boreAt.containsKey(e[0])) continue;
+            int lvl = Terrain.level(t.ground(ChunkPos.getX(e[0]), ChunkPos.getZ(e[0])));
+            if (lvl <= floor.get(e[0]) + Tunnels.ROOF) return boreAt.get(e[0]);
+        }
+        return Long.MIN_VALUE;
     }
 
     private final class Candidate {

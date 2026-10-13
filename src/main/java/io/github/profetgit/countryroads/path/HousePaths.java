@@ -56,11 +56,12 @@ public final class HousePaths {
         Items.MUD, Items.ROOTED_DIRT, Items.COBBLESTONE, Items.DIRT_PATH);
 
     /**
-     * One path cell: column, surface block Y, deck over water, shoulder column, the stair facing (index into DIRS, -1 for a
-     * flat block), the direction of travel into it, whether it is a straggler beyond the worn band, and the tunnel part
-     * (-1 none, 0 open cut, 1 inside the rock, 2 portal) with the index along the roofed run.
+     * One path cell: column, surface block Y, deck over water, a column beside the walked line (bed, fringe or bank), the
+     * stair facing (index into DIRS, -1 for a flat block), the direction of travel into it, whether it is a stray path
+     * block in the verge, the tunnel part (-1 none, 0 open cut, 1 inside the rock, 2 portal) with the index along the
+     * roofed run, and whether it is a bank: no path there, only the ground cut or filled to height y.
      */
-    public record Cell(int x, int z, int y, boolean water, boolean edge, int stair, int dir, boolean fringe, int tun, int tidx) {}
+    public record Cell(int x, int z, int y, boolean water, boolean edge, int stair, int dir, boolean fringe, int tun, int tidx, boolean bank) {}
 
     /** A finished survey: cells from the door to the road, the bill, and what the route is made of. */
     public record Survey(List<Cell> cells, int earth, int planks, int torches, int tunnelCells, int length) {}
@@ -314,7 +315,7 @@ public final class HousePaths {
         java.util.Set<Long> cols = new java.util.HashSet<>();
         for (Cell c : s.cells) {
             chunks.add(ChunkPos.pack(c.x >> 4, c.z >> 4));
-            cols.add(key(c.x, c.z));
+            if (!c.bank) cols.add(key(c.x, c.z));
         }
         ROLLOUTS.add(new Rollout(level, stake, s.cells, new int[]{0}, chunks, new int[]{0}, cols));
         tell(player, Component.translatable("countryroads.stake.building", s.cells.size()), true);
@@ -416,6 +417,7 @@ public final class HousePaths {
                 DustParticleOptions dust = new DustParticleOptions(0xF5D76E, 1.1f);
                 double px = p.player.getX(), pz = p.player.getZ();
                 for (Cell c : p.cells) {
+                    if (c.bank) continue;
                     // cells far from the player would not be seen: no packet for them
                     double dx = c.x + 0.5 - px, dz = c.z + 0.5 - pz;
                     if (dx * dx + dz * dz > PREVIEW_REACH * PREVIEW_REACH) continue;
@@ -473,12 +475,16 @@ public final class HousePaths {
     }
 
     /** Above a path cell: natural ground and plants go up to HEADROOM, leaves only up to LEAF_ROOM; trees are never cut (logs stay, canopy stays). */
-    static final int HEADROOM = 5, LEAF_ROOM = 3, TUNNEL_ROOF = Tunnels.ROOF;
+    public static final int HEADROOM = 5, LEAF_ROOM = 3, TUNNEL_ROOF = Tunnels.ROOF, CUT_MAX = 12;
 
     private static void lay(ServerLevel level, StakeBlockEntity be, Cell c, boolean quiet, java.util.Set<Long> cols) {
         int y = c.y;
         long h = c.x * 0x2545F4914F6CDD1DL ^ c.z * 0x9E3779B97F4A7C15L;
         BlockPos at = new BlockPos(c.x, y, c.z);
+        if (c.bank) {
+            bank(level, be, c);
+            return;
+        }
         var biome = level.getBiome(at);
         if (c.tun >= 1) {
             Tunnels.carve(level, be, c, cols);
@@ -503,8 +509,10 @@ public final class HousePaths {
                 ? Palette.deckStair(biome).setValue(StairBlock.FACING, DIRS[c.stair])
                 : c.fringe ? Palette.houseFringe(natural, h) : c.edge ? Palette.houseEdge(biome, h, natural) : Palette.housePath(biome, 1f, h, natural);
         }
+        // a column cut deeper than the headroom is cleared to its old ground, so no lip of earth hangs over the path
+        int clear = Math.max(HEADROOM, Math.min(CUT_MAX, level.getHeight(Heightmap.Types.MOTION_BLOCKING_NO_LEAVES, c.x, c.z) - 1 - y));
         change(level, be, at, surface);
-        for (int dy = 1; dy <= HEADROOM; dy++) {
+        for (int dy = 1; dy <= clear; dy++) {
             BlockPos q = at.above(dy);
             BlockState s = level.getBlockState(q);
             if (s.isAir() || s.is(BlockTags.LOGS) || s.is(Stake.BLOCK)) continue;
@@ -515,6 +523,29 @@ public final class HousePaths {
         level.sendParticles(new BlockParticleOption(ParticleTypes.BLOCK, surface), c.x + 0.5, y + 1.05, c.z + 0.5, 6, 0.3, 0.05, 0.3, 0);
         if (((c.x + c.z) & 3) == 0)
             level.playSound(null, at, surface.getSoundType().getPlaceSound(), SoundSource.BLOCKS, 0.5f, 0.9f + ((h >>> 40) & 7) * 0.03f);
+    }
+
+    /**
+     * A bank column: the ground cut down or filled up to y, topped with its own cover (grass for bare dirt), so the
+     * slope beside the path steps one block per column. Plants on the old ground go; trees and built blocks stay.
+     */
+    private static void bank(ServerLevel level, StakeBlockEntity be, Cell c) {
+        int top = level.getHeight(Heightmap.Types.MOTION_BLOCKING_NO_LEAVES, c.x, c.z) - 1;
+        if (top == c.y) return;
+        BlockPos.MutableBlockPos p = new BlockPos.MutableBlockPos(c.x, top, c.z);
+        BlockState natural = level.getBlockState(p);
+        if (Retrofit.isCrafted(natural) || natural.is(BlockTags.LOGS) || !natural.getFluidState().isEmpty() || natural.is(Stake.BLOCK) || !natural.isSolid()) return;
+        BlockState cover = natural.is(Blocks.DIRT) || natural.is(Blocks.COARSE_DIRT) || natural.is(Blocks.ROOTED_DIRT) || natural.is(Blocks.DIRT_PATH)
+            || natural.is(Blocks.FARMLAND) ? Blocks.GRASS_BLOCK.defaultBlockState() : natural;
+        int lo = Math.min(top, c.y), hi = Math.max(top, c.y);
+        // what stands on the old ground (and above the new one) goes first, so nothing is left hanging or half buried
+        for (int yy = hi + 2; yy > lo; yy--) {
+            BlockState s = level.getBlockState(p.setY(yy));
+            if (s.isAir() || s.is(BlockTags.LOGS) || s.is(BlockTags.LEAVES) || Retrofit.isCrafted(s) || s.is(Stake.BLOCK) || !s.getFluidState().isEmpty()) continue;
+            if (yy > top || top > c.y) change(level, be, p.immutable(), Blocks.AIR.defaultBlockState());
+        }
+        for (int yy = top; yy < c.y; yy++) change(level, be, new BlockPos(c.x, yy, c.z), Blocks.DIRT.defaultBlockState());
+        change(level, be, new BlockPos(c.x, c.y, c.z), cover);
     }
 
     /** A path column joins the road columns (other stakes can connect to it) and the index surveys read. */

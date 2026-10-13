@@ -382,9 +382,17 @@ final class StakeTest {
     private static void walk(ServerLevel level, java.util.List<HousePaths.Cell> cells, BlockPos stake) {
         int bad = 0, stairs = 0, steps = 0, flat = 0;
         HousePaths.Cell prev = null;
+        int banks = 0, cutFill = 0;
         for (HousePaths.Cell c : cells) {
             BlockPos at = new BlockPos(c.x(), c.y(), c.z());
             var state = level.getBlockState(at);
+            if (c.bank()) {
+                // a bank is ground, not path: it only has to be at its height with nothing standing loose on it
+                banks++;
+                int top = level.getHeight(net.minecraft.world.level.levelgen.Heightmap.Types.MOTION_BLOCKING_NO_LEAVES, c.x(), c.z()) - 1;
+                if (top != c.y() && !level.getBlockState(new BlockPos(c.x(), top, c.z())).is(net.minecraft.tags.BlockTags.LOGS)) bad = fail(++bad, "bank height " + top, at, state);
+                continue;
+            }
             boolean isStair = state.getBlock() instanceof net.minecraft.world.level.block.StairBlock;
             if (isStair) stairs++;
             if (isStair != (c.stair() >= 0)) bad = fail(++bad, "stair mismatch", at, state);
@@ -440,11 +448,13 @@ final class StakeTest {
         }
         int above = 0;
         for (HousePaths.Cell c : cells)
-            for (int dy = 1; dy <= 8 && c.tun() < 1; dy++) {
+            for (int dy = 1; dy <= 8 && c.tun() < 1 && !c.bank(); dy++) {
                 BlockPos q = new BlockPos(c.x(), c.y() + dy, c.z());
                 var st = level.getBlockState(q);
-                if (!st.isAir() && !st.getCollisionShape(level, q).isEmpty() || st.is(net.minecraft.tags.BlockTags.LEAVES)) {
-                    if (++above <= 10) CountryRoads.LOG.info("CR-STAKE-ABOVE " + st.getBlock().getDescriptionId() + " " + dy + " above cell " + c.x() + "," + c.y() + "," + c.z() + (c.edge() ? " edge" : "") + (c.stair() >= 0 ? " stair" : ""));
+                // canopy from four blocks up is allowed (trees are never cut back further); anything else is left over
+                boolean leaves = st.is(net.minecraft.tags.BlockTags.LEAVES);
+                if (leaves ? dy <= HousePaths.LEAF_ROOM : !st.isAir() && !st.getCollisionShape(level, q).isEmpty()) {
+                    if (++above <= 10) CountryRoads.LOG.info("CR-STAKE-ABOVE " + st.getBlock().getDescriptionId() + " " + dy + " above cell " + c.x() + "," + c.y() + "," + c.z() + (c.edge() ? " edge" : "") + (c.stair() >= 0 ? " stair" : "") + " tun=" + c.tun() + (c.fringe() ? " fringe" : ""));
                 }
             }
         CountryRoads.LOG.info("CR-STAKE-ABOVE-TOTAL " + above);
@@ -485,6 +495,18 @@ final class StakeTest {
             }
         }
         CountryRoads.LOG.info("CR-STAKE-WALLS centre cells with a 2-high wall beside: " + walled + "/" + centreN + ", stair cells: " + stairWalled + "/" + stairN);
+        // width: centre cells whose two side columns (across the direction of travel) are path at the same height
+        java.util.Map<Long, HousePaths.Cell> at = new java.util.HashMap<>();
+        for (HousePaths.Cell c : cells) if (!c.bank()) at.put(net.minecraft.world.level.ChunkPos.pack(c.x(), c.z()), c);
+        int wide = 0, open = 0;
+        for (HousePaths.Cell c : cells) {
+            if (c.edge() || c.tun() >= 0) continue;
+            open++;
+            int rx = -HousePaths.DIRS[c.dir()].getStepZ(), rz = HousePaths.DIRS[c.dir()].getStepX();
+            HousePaths.Cell a = at.get(net.minecraft.world.level.ChunkPos.pack(c.x() + rx, c.z() + rz)), b = at.get(net.minecraft.world.level.ChunkPos.pack(c.x() - rx, c.z() - rz));
+            if (a != null && b != null && a.y() == c.y() && b.y() == c.y()) wide++;
+        }
+        CountryRoads.LOG.info("CR-STAKE-WIDTH three wide " + wide + "/" + open + " (" + (open == 0 ? 0 : wide * 100 / open) + "%) banks=" + banks);
         CountryRoads.LOG.info("CR-STAKE-WALK " + (bad == 0 ? "PASS" : "FAIL") + " cells=" + cells.size() + " flat=" + flat + " steps=" + steps + " stairs=" + stairs + " bad=" + bad
             + " palette=" + io.github.profetgit.countryroads.paint.Palette.surface(level.getBiome(stake)).name() + " at=" + stake.toShortString());
     }
