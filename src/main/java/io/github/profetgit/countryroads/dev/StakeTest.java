@@ -19,13 +19,17 @@ final class StakeTest {
     private StakeTest() {}
 
     static int run(CommandSourceStack src, int x, int z, boolean keep) {
+        return run(src, x, z, keep, Integer.MIN_VALUE, 0);
+    }
+
+    static int run(CommandSourceStack src, int x, int z, boolean keep, int viaX, int viaZ) {
         ServerLevel level = src.getLevel();
         int r = 170, cr = (r >> 4) + 1;
         for (int dx = -cr; dx <= cr; dx++)
             for (int dz = -cr; dz <= cr; dz++) level.setChunkForced((x >> 4) + dx, (z >> 4) + dz, true);
         int[] phase = {-1};
         int[] built = new int[2];
-        BlockPos[] stakeRef = new BlockPos[1];
+        BlockPos[] stakeRef = new BlockPos[1], viaRef = new BlockPos[1];
         int[][] before = new int[1][];
         java.util.Map<BlockPos, net.minecraft.world.level.block.state.BlockState>[] beforeStates = new java.util.Map[1];
         @SuppressWarnings("unchecked")
@@ -39,6 +43,15 @@ final class StakeTest {
                 stakeRef[0] = new BlockPos(x, y, z);
                 level.setBlock(stakeRef[0], Stake.BLOCK.defaultBlockState(), 3);
                 HousePaths.survey(level, stakeRef[0], null);
+                if (viaX != Integer.MIN_VALUE) {
+                    for (int dx = -1; dx <= 1; dx++)
+                        for (int dz = -1; dz <= 1; dz++) level.setChunkForced((viaX >> 4) + dx, (viaZ >> 4) + dz, true);
+                    int vy = level.getHeight(Heightmap.Types.MOTION_BLOCKING_NO_LEAVES, viaX, viaZ);
+                    BlockPos vp = new BlockPos(viaX, vy, viaZ);
+                    level.setBlock(vp, Stake.BLOCK.defaultBlockState(), 3);
+                    viaRef[0] = vp;
+                    HousePaths.placed(level, vp, null);
+                }
                 phase[0] = 0;
                 return false;
             }
@@ -61,6 +74,7 @@ final class StakeTest {
                 case 1 -> {
                     built[1] = be.journal.size();
                     walk(level, cells[0], stake);
+                    map(level, cells[0]);
                     sim(level, cells[0]);
                     if (keep) {
                         // leave it built and print a camera shot: behind the stake, looking down the path
@@ -79,9 +93,20 @@ final class StakeTest {
                         double dx = far.x() - prevCell.x(), dz = far.z() - prevCell.z(), l = Math.max(1, Math.hypot(dx, dz));
                         double cx = far.x() + 0.5 - dx / l * 7, cz = far.z() + 0.5 - dz / l * 7, cy = far.y() + 5;
                         double lx = far.x() + 0.5 - cx, ly = far.y() + 1 - cy, lz = far.z() + 0.5 - cz;
-                        map(level, cs);
+                        HousePaths.Cell portal = null, inner = null;
+                        for (var c : cs) {
+                            if (c.edge()) continue;
+                            if (portal == null && c.tun() == 2) portal = c;
+                            if (portal != null && inner == null && c.tun() == 1 && c.tidx() >= 5) inner = c;
+                        }
+                        if (portal != null) {
+                            int pdx = HousePaths.DIRS[portal.dir()].getStepX(), pdz = HousePaths.DIRS[portal.dir()].getStepZ();
+                            shot(portal.x() + 0.5 - pdx * 8, portal.y() + 4.5, portal.z() + 0.5 - pdz * 8, portal.x() + 0.5, portal.y() + 2, portal.z() + 0.5, "tunnelA");
+                            if (inner != null)
+                                shot(inner.x() + 0.5 - pdx * 0.5, inner.y() + 2.62, inner.z() + 0.5 - pdz * 0.5, inner.x() + 0.5 + pdx * 10, inner.y() + 2, inner.z() + 0.5 + pdz * 10, "tunnelB");
+                        }
                         shot(cx, cy, cz, far.x() + 0.5, far.y() + 1, far.z() + 0.5, "housepath");
-                        shot(far.x() + 0.5, far.y() + 26, far.z() + 0.51, far.x() + 0.5, far.y(), far.z() + 0.5, "hptop");
+                        shot(far.x() + 0.5, far.y() + 45, far.z() + 0.51, far.x() + 0.5, far.y(), far.z() + 0.5, "hptop");
                         var ahead = cs.get(Math.min(cs.size() - 1, cs.indexOf(far) + 9));
                         shot(ahead.x() + 0.5, ahead.y() + 5, ahead.z() + 0.5, far.x() + 0.5, far.y() + 1, far.z() + 0.5, "hpback");
                         CountryRoads.LOG.info("CR-STAKE KEPT cells=" + built[0] + " journal=" + built[1]);
@@ -93,6 +118,11 @@ final class StakeTest {
                         else if (e.state().is(net.minecraft.tags.BlockTags.LEAVES)) leavesCut++;
                     }
                     CountryRoads.LOG.info("CR-STAKE-TREES logs removed " + logsCut + " (must be 0), leaves removed " + leavesCut);
+                    if (viaRef[0] != null) {
+                        boolean onRoute = false;
+                        for (var c : cells[0]) if (!c.edge() && c.x() == viaRef[0].getX() && c.z() == viaRef[0].getZ()) onRoute = true;
+                        CountryRoads.LOG.info("CR-STAKE-WAYPOINT " + (onRoute ? "PASS" : "FAIL") + " onRoute=" + onRoute + " stakeRemoved=" + !level.getBlockState(viaRef[0]).is(Stake.BLOCK));
+                    }
                     int[] mid = snapshot(level, cells[0]);
                     int changed = diff(before[0], mid);
                     HousePaths.takeUp(level, stake);
@@ -248,7 +278,7 @@ final class StakeTest {
             if (isStair && state.getValue(net.minecraft.world.level.block.StairBlock.FACING) != HousePaths.DIRS[c.stair()]) bad = fail(++bad, "stair facing", at, state);
             if (!isStair && !state.isSolid() && !c.water()) bad = fail(++bad, "surface not solid", at, state);
             for (int dy = 1; dy <= 2; dy++)
-                if (!level.getBlockState(at.above(dy)).getCollisionShape(level, at.above(dy)).isEmpty()) bad = fail(++bad, "headroom", at.above(dy), level.getBlockState(at.above(dy)));
+                if (!level.getBlockState(at.above(dy)).getCollisionShape(level, at.above(dy)).isEmpty() && !level.getBlockState(at.above(dy)).is(net.minecraft.world.level.block.Blocks.MOSS_CARPET)) bad = fail(++bad, "headroom", at.above(dy), level.getBlockState(at.above(dy)));
             if (!c.edge()) {
                 if (prev != null) {
                     int dy = c.y() - prev.y(), man = Math.abs(c.x() - prev.x()) + Math.abs(c.z() - prev.z());
@@ -274,9 +304,30 @@ final class StakeTest {
             }
         }
         CountryRoads.LOG.info("CR-STAKE-DEADENDS " + deadEnds);
+        {
+            int runs = 0, longest = 0, len = 0, pdx = 9, pdz = 9, over10 = 0;
+            HousePaths.Cell pc = null;
+            for (HousePaths.Cell c : cells) {
+                if (c.edge()) continue;
+                if (pc != null) {
+                    int dx = c.x() - pc.x(), dz = c.z() - pc.z();
+                    if (dx == pdx && dz == pdz) len++;
+                    else {
+                        if (len > 0) { runs++; longest = Math.max(longest, len); if (len > 10) over10++; }
+                        len = 1;
+                        pdx = dx;
+                        pdz = dz;
+                    }
+                }
+                pc = c;
+            }
+            runs++;
+            longest = Math.max(longest, len);
+            CountryRoads.LOG.info("CR-STAKE-SHAPE runs=" + runs + " longest=" + longest + " runsOver10=" + over10);
+        }
         int above = 0;
         for (HousePaths.Cell c : cells)
-            for (int dy = 1; dy <= 8; dy++) {
+            for (int dy = 1; dy <= 8 && c.tun() < 1; dy++) {
                 BlockPos q = new BlockPos(c.x(), c.y() + dy, c.z());
                 var st = level.getBlockState(q);
                 if (!st.isAir() && !st.getCollisionShape(level, q).isEmpty() || st.is(net.minecraft.tags.BlockTags.LEAVES)) {
@@ -284,6 +335,26 @@ final class StakeTest {
                 }
             }
         CountryRoads.LOG.info("CR-STAKE-ABOVE-TOTAL " + above);
+        int tCells = 0, tPortals = 0, tBad = 0, tFrames = 0;
+        for (HousePaths.Cell c : cells) {
+            if (c.tun() < 1) continue;
+            tCells++;
+            if (c.tun() == 2 && !c.edge()) tPortals++;
+            if (HousePaths.isFrame(c)) tFrames++;
+            BlockPos at = new BlockPos(c.x(), c.y(), c.z());
+            for (int dy = 1; dy <= 3; dy++)
+                if (!level.getBlockState(at.above(dy)).getCollisionShape(level, at.above(dy)).isEmpty() && !level.getBlockState(at.above(dy)).is(net.minecraft.world.level.block.Blocks.MOSS_CARPET)) {
+                    if (++tBad <= 5) CountryRoads.LOG.info("CR-STAKE-TUNNEL-BAD blocked interior " + dy + " above " + at.toShortString() + " " + level.getBlockState(at.above(dy)));
+                }
+            if (!level.getBlockState(at.above(4)).isSolid()) {
+                if (++tBad <= 5) CountryRoads.LOG.info("CR-STAKE-TUNNEL-BAD no roof above " + at.toShortString());
+            }
+        }
+        if (tCells > 0) {
+            int torches = 0;
+            if (level.getBlockEntity(stake) instanceof StakeBlockEntity sbe) torches = sbe.torchPos.size();
+            CountryRoads.LOG.info("CR-STAKE-TUNNEL " + (tBad == 0 ? "PASS" : "FAIL") + " cells=" + tCells + " portals=" + tPortals + " frames=" + tFrames + " torches=" + torches + " bad=" + tBad);
+        }
         int walled = 0, centreN = 0, stairWalled = 0, stairN = 0;
         for (HousePaths.Cell c : cells) {
             if (c.edge()) continue;

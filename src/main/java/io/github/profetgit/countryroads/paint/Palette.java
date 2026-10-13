@@ -141,6 +141,12 @@ public final class Palette {
         return flat(pal.pick(pal.edge(), pal.edgeW(), (int) ((h >>> 24) & 1023)));
     }
 
+    /** A straggler beside the worn band: a lone path block on grass, so the trail frays instead of ending on a line. */
+    public static BlockState houseFringe(BlockState natural, long h) {
+        if (natural.is(Blocks.GRASS_BLOCK) || natural.is(Blocks.DIRT) || natural.is(Blocks.PODZOL) || natural.is(Blocks.COARSE_DIRT)) return Blocks.DIRT_PATH.defaultBlockState();
+        return natural;
+    }
+
     public static BlockState houseStair(Holder<Biome> biome) {
         Block slab = surface(biome).step().getBlock();
         if (slab == Blocks.MUD_BRICK_SLAB) return Blocks.MUD_BRICK_STAIRS.defaultBlockState();
@@ -148,6 +154,40 @@ public final class Palette {
         if (slab == Blocks.SMOOTH_RED_SANDSTONE_SLAB) return Blocks.SMOOTH_RED_SANDSTONE_STAIRS.defaultBlockState();
         if (slab == Blocks.MOSSY_COBBLESTONE_SLAB) return Blocks.MOSSY_COBBLESTONE_STAIRS.defaultBlockState();
         return Blocks.COBBLESTONE_STAIRS.defaultBlockState();
+    }
+
+    /** Floor of a tunnel: path blocks worn between gravel, packed mud and the odd cobble; the sides stonier. */
+    public static BlockState tunnelFloor(Holder<Biome> biome, long h, boolean edge) {
+        int r = (int) ((h >>> 8) & 1023);
+        if (!edge) {
+            if (r < 460) return Blocks.DIRT_PATH.defaultBlockState();
+            if (r < 640) return Blocks.GRAVEL.defaultBlockState();
+            if (r < 780) return Blocks.PACKED_MUD.defaultBlockState();
+            if (r < 900) return Blocks.COBBLESTONE.defaultBlockState();
+            return Blocks.ANDESITE.defaultBlockState();
+        }
+        if (r < 320) return Blocks.COBBLESTONE.defaultBlockState();
+        if (r < 620) return Blocks.GRAVEL.defaultBlockState();
+        if (r < 780) return Blocks.ANDESITE.defaultBlockState();
+        if (r < 900) return Blocks.MOSSY_COBBLESTONE.defaultBlockState();
+        return Blocks.DIRT_PATH.defaultBlockState();
+    }
+
+    /** Portal masonry: cobblestone, moss and a little worked stone, counted in the bill as path material. */
+    public static BlockState portalStone(long h) {
+        int r = (int) ((h >>> 12) & 15);
+        if (r < 8) return Blocks.COBBLESTONE.defaultBlockState();
+        if (r < 11) return Blocks.MOSSY_COBBLESTONE.defaultBlockState();
+        if (r < 14) return Blocks.STONE_BRICKS.defaultBlockState();
+        return Blocks.CRACKED_STONE_BRICKS.defaultBlockState();
+    }
+
+    public static BlockState woodLog(Holder<Biome> biome) {
+        return wood(wood(biome)).log().defaultBlockState();
+    }
+
+    public static BlockState woodPlanks(Holder<Biome> biome) {
+        return wood(wood(biome)).planks().defaultBlockState();
     }
 
     public static BlockState deckStair(Holder<Biome> biome) {

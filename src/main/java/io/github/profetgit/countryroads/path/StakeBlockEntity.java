@@ -26,6 +26,13 @@ public final class StakeBlockEntity extends BlockEntity {
     public final List<ItemStack> paid = new ArrayList<>();
     /** Road columns this path marked (packed x/z), unmarked again when the path is taken up. */
     public final List<Long> columns = new ArrayList<>();
+    /** Wall torches the tunnel got (BlockPos longs): only those still standing are paid back. */
+    public final List<Long> torchPos = new ArrayList<>();
+    public static final int DOOR = 0, WAYPOINT = 1;
+    /** A stake is the door's (the first one, which builds) or a waypoint placed to steer the route; not saved: after a reload every stake is a door. */
+    public transient int role = DOOR;
+    public transient BlockPos door;
+    public final transient List<BlockPos> waypoints = new ArrayList<>();
     /** The surveyed path while it is only a preview; not saved (a reload means a fresh survey). */
     public transient HousePaths.Survey survey;
 
@@ -40,6 +47,7 @@ public final class StakeBlockEntity extends BlockEntity {
         out.store("journal", Entry.CODEC.listOf(), journal);
         out.store("paid", ItemStack.CODEC.listOf(), paid);
         out.store("columns", Codec.LONG.listOf(), columns);
+        out.store("torches", Codec.LONG.listOf(), torchPos);
     }
 
     @Override
@@ -52,5 +60,7 @@ public final class StakeBlockEntity extends BlockEntity {
         paid.addAll(in.read("paid", ItemStack.CODEC.listOf()).orElse(List.of()));
         columns.clear();
         columns.addAll(in.read("columns", Codec.LONG.listOf()).orElse(List.of()));
+        torchPos.clear();
+        torchPos.addAll(in.read("torches", Codec.LONG.listOf()).orElse(List.of()));
     }
 }

@@ -102,7 +102,15 @@ public final class DevCommands {
                 .then(Commands.argument("x", IntegerArgumentType.integer()).then(Commands.argument("z", IntegerArgumentType.integer())
                     .executes(c -> StakeTest.run(c.getSource(), IntegerArgumentType.getInteger(c, "x"), IntegerArgumentType.getInteger(c, "z"), false))
                     .then(Commands.literal("keep")
-                        .executes(c -> StakeTest.run(c.getSource(), IntegerArgumentType.getInteger(c, "x"), IntegerArgumentType.getInteger(c, "z"), true))))))
+                        .executes(c -> StakeTest.run(c.getSource(), IntegerArgumentType.getInteger(c, "x"), IntegerArgumentType.getInteger(c, "z"), true)))
+                    .then(Commands.literal("via").then(Commands.argument("vx", IntegerArgumentType.integer()).then(Commands.argument("vz", IntegerArgumentType.integer())
+                        .executes(c -> StakeTest.run(c.getSource(), IntegerArgumentType.getInteger(c, "x"), IntegerArgumentType.getInteger(c, "z"), false,
+                            IntegerArgumentType.getInteger(c, "vx"), IntegerArgumentType.getInteger(c, "vz")))))))))
+            .then(Commands.literal("borecost")
+                .then(Commands.argument("per", IntegerArgumentType.integer(0, 200)).then(Commands.argument("fixed", IntegerArgumentType.integer(0, 1000)).executes(c -> {
+                    io.github.profetgit.countryroads.path.HousePaths.boreCost(IntegerArgumentType.getInteger(c, "per"), IntegerArgumentType.getInteger(c, "fixed"));
+                    return 1;
+                }))))
             .then(Commands.literal("retroresume").executes(c -> {
                 io.github.profetgit.countryroads.retro.Retrofit.paused = false;
                 return 1;

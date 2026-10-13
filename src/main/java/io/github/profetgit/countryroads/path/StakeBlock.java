@@ -42,7 +42,7 @@ public final class StakeBlock extends Block implements EntityBlock {
     @Override
     public void setPlacedBy(Level level, BlockPos pos, BlockState state, @Nullable LivingEntity by, ItemStack stack) {
         super.setPlacedBy(level, pos, state, by, stack);
-        if (level instanceof ServerLevel server && by instanceof ServerPlayer player) HousePaths.survey(server, pos, player);
+        if (level instanceof ServerLevel server && by instanceof ServerPlayer player) HousePaths.placed(server, pos, player);
     }
 
     @Override
