@@ -1,488 +1,805 @@
 package io.github.profetgit.countryroads.path;
 
-import io.github.profetgit.countryroads.retro.Retrofit;
+import io.github.profetgit.countryroads.CountryRoads;
+import io.github.profetgit.countryroads.plan.Edge;
+import io.github.profetgit.countryroads.plan.EdgePlan;
+import io.github.profetgit.countryroads.plan.RoadNetwork;
 import io.github.profetgit.countryroads.world.RoadColumns;
 import it.unimi.dsi.fastutil.longs.Long2IntOpenHashMap;
-import it.unimi.dsi.fastutil.longs.Long2LongOpenHashMap;
+import it.unimi.dsi.fastutil.longs.LongArrayFIFOQueue;
+import it.unimi.dsi.fastutil.longs.LongArrayList;
+import it.unimi.dsi.fastutil.longs.LongLinkedOpenHashSet;
+import it.unimi.dsi.fastutil.longs.LongOpenHashSet;
 import java.util.ArrayList;
-import java.util.HashSet;
+import java.util.Arrays;
 import java.util.Iterator;
 import java.util.List;
-import java.util.PriorityQueue;
-import java.util.Set;
+import java.util.concurrent.CancellationException;
+import java.util.concurrent.CompletableFuture;
+import java.util.concurrent.ConcurrentLinkedQueue;
+import java.util.concurrent.Semaphore;
+import java.util.concurrent.TimeUnit;
+import java.util.concurrent.TimeoutException;
+import java.util.concurrent.atomic.AtomicInteger;
+import net.fabricmc.fabric.api.attachment.v1.AttachmentTarget;
 import net.minecraft.core.BlockPos;
-import net.minecraft.core.Direction;
+import net.minecraft.core.Registry;
+import net.minecraft.core.registries.BuiltInRegistries;
+import net.minecraft.resources.Identifier;
 import net.minecraft.server.level.ServerLevel;
 import net.minecraft.server.level.ServerPlayer;
 import net.minecraft.server.level.TicketType;
-import net.minecraft.tags.BlockTags;
 import net.minecraft.world.level.ChunkPos;
-import net.minecraft.world.level.block.Blocks;
-import net.minecraft.world.level.block.state.BlockState;
-import net.minecraft.world.level.levelgen.Heightmap;
+import net.minecraft.world.level.chunk.LevelChunk;
 
 /**
- * The survey of one stake: a time-sliced search over the real terrain from the door to the nearest road. It runs in
- * legs (door, the player's waypoints in order, the road), then once more with bends added to the straight stretches so
- * the trail wanders, falling back to the direct route when the wandering one fails.
+ * The survey of one stake. The route is searched on a worker thread over captured columns (RouteSolver), so the
+ * server thread only does what must happen there: fetch chunks (one batch of tickets, polled without waiting, never a
+ * synchronous load), capture them into the snapshot within a small budget, and check the rock of proposed tunnels.
  *
- * Moves are four-connected, so every cell touches the next along a side. A corner belongs on level ground (a stair at
- * a bend would end in a wall), climbing several cells in a row is dear (the route zigzags across a slope), trees cost,
- * and a straight bore through a mountain is an extra move when the hill ahead is high enough to roof it.
+ * The worker first learns where the roads are without exploring: open-road columns of loaded chunks, the planned
+ * centrelines of the road network (known from the seed before their chunks exist) and the index of built house
+ * paths. Then A* runs toward them. For the last leg several candidates are searched (the nearest road, other nearby
+ * roads, a route kept apart from the first, one over the hill instead of through it) and the best by cost, stairs and
+ * bill wins; only that one gets the wandering pass and is shown. The route is the house path's own (see RouteSolver).
  */
-final class PathSearch {
-    static final int RADIUS = 320, MAX_EXPANSIONS = 1_200_000, WAIT_TICKS = 1200, TICKET_EVERY = 100;
-    static final int TURN = 1, END_STEP = 12, START = 4, BEND_ON_SLOPE = 200, WOBBLE = 18, JITTER = 5;
-    static final int MAX_VIAS = 40;
-    /** What a bore costs per column and to start one; the dev command borecost changes them to force tunnels in tests. */
-    static int borePer = 26, boreFixed = 80;
-    static final int UNKNOWN = Integer.MIN_VALUE, CLOSED = -100000;
-    static final int[] DX = HousePaths.DX, DZ = HousePaths.DZ;
-    static final Direction[] DIRS = HousePaths.DIRS;
+final class PathSearch implements RouteSolver.Host, Runnable {
+    static final int RADIUS = RouteSolver.RADIUS, TICKET_EVERY = 100, MAX_IN_FLIGHT = 48, CHUNK_TIMEOUT = 1200, PLAN_WAIT_MS = 1500, PLAN_WAIT_LONG_MS = 20000;
+    static final int MAX_CANDIDATES = 4, PENALTY = 15, EST = 20;
+    /** Coarse planning when more chunks than this on the line to the nearest road are not loaded; corridor half-widths in 8-block cells. */
+    static final int COARSE_ABOVE = 6, CORRIDOR = 3, CORRIDOR_WIDE = 8, COARSE_ROUTES = 3;
+    /** Keeps fetched chunks loaded while a survey runs; not saved with the world, expires if a survey forgets it. */
+    static final TicketType TICKET = Registry.register(BuiltInRegistries.TICKET_TYPE, Identifier.fromNamespaceAndPath(CountryRoads.ID, "survey"),
+        new TicketType(400L, TicketType.FLAG_LOADING));
+    /** Workers allowed to compute at once (a waiting worker gives its turn away). */
+    private static final Semaphore COMPUTE = new Semaphore(Runtime.getRuntime().availableProcessors() >= 8 ? 2 : 1);
+    private static final AtomicInteger IDS = new AtomicInteger();
+    /** Survey tickets currently held, all surveys (the stake test checks that a cancelled survey left none). */
+    static int held;
+
+    /** Registers the ticket type (mod init, before the registries freeze). */
+    static void init() {
+    }
 
     final ServerLevel level;
     final BlockPos stake;
     final ServerPlayer player;
-    final int sx, sz;
+    final int sx, sz, stakeY;
     final long doorKey;
+    final SurveyStats stats = new SurveyStats();
+    private final List<Long> waypoints = new ArrayList<>();
+    private final long[] loadedGoals, pathGoals;
+    /** Chunks loaded when the survey began (the coarse corridor never excludes them). */
+    private final LongOpenHashSet loadedAtStart = new LongOpenHashSet();
+    private final ColumnSnapshot snap = new ColumnSnapshot();
+    private final ColumnSnapshot.View view;
+    private final int minY;
 
-    private final PriorityQueue<long[]> open = new PriorityQueue<>((a, b) -> a[0] != b[0] ? Long.compare(a[0], b[0]) : Long.compare(a[1], b[1]));
-    private final Long2LongOpenHashMap parent = new Long2LongOpenHashMap();
-    private final Long2IntOpenHashMap cost = new Long2IntOpenHashMap();
-    private final Long2IntOpenHashMap ground = new Long2IntOpenHashMap();
-    private final Long2IntOpenHashMap trees = new Long2IntOpenHashMap();
-    /** Direction each column was entered by (START at the door). */
-    private final Long2IntOpenHashMap arrive = new Long2IntOpenHashMap();
-    /** Exit column of a bore -> its length in columns; the columns between are tunnel. */
-    private final Long2IntOpenHashMap bore = new Long2IntOpenHashMap();
-    /** Edges whose far column is in a chunk that is not loaded yet: {lower-bound cost, from column, direction, cost at from}. */
-    private final List<long[]> blocked = new ArrayList<>();
-    /** Chunks asked for (ticketed again every few seconds while the survey runs). */
-    private final Set<Long> requested = new HashSet<>();
-    private int waited, age, expansions;
-
-    // legs
-    private long startKey;
-    private int inDir = START, inLevel;
-    private List<Long> targets;
-    private int leg, stage;
-    private List<long[]> acc = new ArrayList<>(), direct;
-    private long directEnd;
-    private final Set<Long> used = new HashSet<>();
-    private final List<Long> waypoints;
-
-    // outcome
+    // outcome: written by the worker before done, read on the server thread after
     HousePaths.Survey survey;
     /** Set when the search ended without a route: the translation key of the player's message. */
     String failure;
     int failureArg;
+    private volatile boolean done, cancelled;
+    /** Bores of the chosen route (checked again on the server thread), and bores found unsafe there (kept for a new search). */
+    private List<RouteSolver.Bore> finalBores = List.of();
+    private final LongOpenHashSet unsafe = new LongOpenHashSet();
+    private boolean holding, revalidated;
 
-    PathSearch(ServerLevel level, BlockPos stake, ServerPlayer player, List<BlockPos> waypoints) {
+    // worker -> server thread
+    private final ConcurrentLinkedQueue<long[]> wanted = new ConcurrentLinkedQueue<>();
+    /** Chunks to capture if they happen to be loaded (never fetched). */
+    private final ConcurrentLinkedQueue<long[]> looking = new ConcurrentLinkedQueue<>();
+    /** Chunks the worker asked to load (for the candidate lines). */
+    private final AtomicInteger loads = new AtomicInteger();
+    private final ConcurrentLinkedQueue<Waiter> waiters = new ConcurrentLinkedQueue<>();
+
+    // server thread only
+    private final LongLinkedOpenHashSet toTicket = new LongLinkedOpenHashSet();
+    private final Long2IntOpenHashMap pending = new Long2IntOpenHashMap();
+    private final LongOpenHashSet ticketed = new LongOpenHashSet();
+    private final LongArrayFIFOQueue toCapture = new LongArrayFIFOQueue();
+    /** Loaded chunks to capture whenever the budget allows, before the worker asks for them. */
+    private final LongArrayFIFOQueue ahead = new LongArrayFIFOQueue();
+    private final LongOpenHashSet capturing = new LongOpenHashSet();
+    private final List<Waiter> waiting = new ArrayList<>();
+    private int age;
+
+    private record Waiter(long[] chunks, boolean load, LongOpenHashSet absent, CompletableFuture<long[]> done) {}
+
+    PathSearch(ServerLevel level, BlockPos stake, ServerPlayer player, List<BlockPos> waypointPos) {
         this.level = level;
         this.stake = stake;
         this.player = player;
         this.sx = stake.getX();
         this.sz = stake.getZ();
-        this.doorKey = key(sx, sz);
-        this.waypoints = new ArrayList<>();
-        for (BlockPos w : waypoints) this.waypoints.add(key(w.getX(), w.getZ()));
-        cost.defaultReturnValue(Integer.MAX_VALUE);
-        ground.defaultReturnValue(UNKNOWN);
-        trees.defaultReturnValue(UNKNOWN);
-        this.targets = new ArrayList<>(this.waypoints);
-        this.startKey = doorKey;
-        used.add(doorKey);
-        startLeg();
+        this.stakeY = stake.getY();
+        this.doorKey = RouteSolver.key(sx, sz);
+        this.minY = level.getMinY();
+        List<long[]> overrides = new ArrayList<>();
+        overrides.add(new long[]{doorKey, stakeY - 1});
+        for (BlockPos w : waypointPos) {
+            waypoints.add(RouteSolver.key(w.getX(), w.getZ()));
+            overrides.add(new long[]{RouteSolver.key(w.getX(), w.getZ()), w.getY() - 1});
+        }
+        this.view = new ColumnSnapshot.View(snap, sx, sz, RADIUS, overrides);
+        this.view.minY = minY;
+        // roads already standing in loaded chunks: read straight from their road bits
+        LongArrayList found = new LongArrayList(), loadedChunks = new LongArrayList(), goalChunks = new LongArrayList();
+        int cr = (RADIUS >> 4) + 1;
+        for (int cx = (sx >> 4) - cr; cx <= (sx >> 4) + cr; cx++)
+            for (int cz = (sz >> 4) - cr; cz <= (sz >> 4) + cr; cz++) {
+                LevelChunk c = level.getChunkSource().getChunkNow(cx, cz);
+                if (c == null) continue;
+                loadedChunks.add(ChunkPos.pack(cx, cz));
+                loadedAtStart.add(ChunkPos.pack(cx, cz));
+                RoadColumns rc = ((AttachmentTarget) c).getAttached(RoadColumns.TYPE);
+                if (rc == null || !rc.any()) continue;
+                goalChunks.add(ChunkPos.pack(cx, cz));
+                for (int lz = 0; lz < 16; lz++)
+                    for (int lx = 0; lx < 16; lx++) {
+                        int x = (cx << 4) + lx, z = (cz << 4) + lz;
+                        if (rc.open(lx, lz) && Math.max(Math.abs(x - sx), Math.abs(z - sz)) <= RADIUS) found.add(RouteSolver.key(x, z));
+                    }
+            }
+        this.loadedGoals = found.toLongArray();
+        // loaded chunks are captured ahead of the search, those between the door and the nearest road first
+        long[] order = loadedChunks.toLongArray();
+        long[] prio = new long[order.length];
+        for (int i = 0; i < order.length; i++) {
+            int cx = ChunkPos.getX(order[i]), cz = ChunkPos.getZ(order[i]);
+            int fromDoor = Math.abs(cx - (sx >> 4)) + Math.abs(cz - (sz >> 4)), toRoad = 0;
+            if (!goalChunks.isEmpty()) {
+                toRoad = Integer.MAX_VALUE;
+                for (long g : goalChunks) toRoad = Math.min(toRoad, Math.abs(cx - ChunkPos.getX(g)) + Math.abs(cz - ChunkPos.getZ(g)));
+            }
+            prio[i] = ((long) (fromDoor + toRoad) << 32) | i;
+        }
+        Arrays.sort(prio);
+        for (long p : prio) ahead.enqueue(order[(int) p]);
+        this.pathGoals = HousePathIndex.of(level).within(sx, sz, RADIUS);
+        // the chunks around the door are needed first: captured now, so the worker starts searching at once
+        for (int cx = (sx >> 4) - 2; cx <= (sx >> 4) + 2; cx++)
+            for (int cz = (sz >> 4) - 2; cz <= (sz >> 4) + 2; cz++) {
+                LevelChunk c = level.getChunkSource().getChunkNow(cx, cz);
+                if (c != null) snap.put(ChunkPos.pack(cx, cz), c, minY);
+            }
+        Thread.ofVirtual().name("CountryRoads-survey-" + IDS.incrementAndGet()).start(this);
     }
 
-    static long key(int x, int z) {
-        return ChunkPos.pack(x, z);
+    // ---------------------------------------------------------------- server thread
+
+    /** Cancels the survey (stake broken, surveyed again, server stopping): tickets go, a late result is dropped. */
+    void cancel() {
+        cancelled = true;
+        release();
     }
 
-    static int level(int g) {
-        return g >= 100000 ? g - 100000 + 1 : g;
+    private void release() {
+        for (long ch : ticketed) level.getChunkSource().removeTicketWithRadius(TICKET, new ChunkPos(ChunkPos.getX(ch), ChunkPos.getZ(ch)), 0);
+        held -= ticketed.size();
+        ticketed.clear();
+        pending.clear();
+        toTicket.clear();
     }
 
-    private void startLeg() {
-        open.clear();
-        parent.clear();
-        cost.clear();
-        arrive.clear();
-        bore.clear();
-        blocked.clear();
-        expansions = 0;
-        waited = 0;
-        cost.put(startKey, 0);
-        arrive.put(startKey, inDir);
-        open.add(new long[]{0, startKey});
+    private void ticket(long ch) {
+        level.getChunkSource().addTicketWithRadius(TICKET, new ChunkPos(ChunkPos.getX(ch), ChunkPos.getZ(ch)), 0);
     }
 
-    /** One slice of work; true when the search is over (see survey / failure). */
+    private boolean loaded(long ch) {
+        return level.getChunkSource().getChunkNow(ChunkPos.getX(ch), ChunkPos.getZ(ch)) != null;
+    }
+
+    /** One slice on the server thread; true when the survey is over (see survey / failure). */
     boolean step(long until) {
-        if (age++ % TICKET_EVERY == 0) for (long ch : requested) ticket(ChunkPos.getX(ch), ChunkPos.getZ(ch));
-        retryBlocked();
-        while (true) {
-            long[] n = open.peek();
-            if (!blocked.isEmpty() && (n == null || n[0] >= minBlocked())) {
-                // the cheapest unexplored edge is waiting for a chunk: do not go on past it
-                if (++waited > WAIT_TICKS) {
-                    blocked.clear();
-                    continue;
-                }
-                return false;
+        if (cancelled) return true;
+        if (age++ % TICKET_EVERY == 0) for (long ch : ticketed) ticket(ch);
+        for (long[] w; (w = wanted.poll()) != null; ) for (long ch : w) want(ch, false);
+        for (long[] w; (w = looking.poll()) != null; ) for (long ch : w) if (loaded(ch)) want(ch, false);
+        for (Waiter w; (w = waiters.poll()) != null; ) {
+            waiting.add(w);
+            for (long ch : w.chunks) {
+                if (w.load || loaded(ch) || pending.containsKey(ch) || toTicket.contains(ch)) want(ch, true);
+                else if (!snap.chunks.containsKey(ch)) w.absent.add(ch);
             }
-            if (n == null) break;
-            if (System.nanoTime() > until) return false;
-            open.poll();
-            long k = n[1];
-            int c = (int) n[0];
-            if (c != cost.get(k)) continue;
-            int x = ChunkPos.getX(k), z = ChunkPos.getZ(k), d0 = arrive.get(k);
-            boolean viaLeg = leg < targets.size();
-            boolean reached = viaLeg ? k == targets.get(leg) : k != doorKey && RoadColumns.isOpenRoad(level, x, z);
-            if (reached) return legDone(k, viaLeg);
-            if (++expansions > MAX_EXPANSIONS) break;
-            for (int d = 0; d < 4; d++)
-                if (d0 == START || d != ((d0 + 2) & 3)) expand(k, x, z, d0, c, d);
         }
-        return noRoute();
-    }
-
-    private boolean noRoute() {
-        if (stage == 1) {
-            // the wandering route found no way: keep the direct one
-            return conclude(direct, directEnd);
+        // tickets in one batch, a capped number in flight; the ones a worker waits for first
+        for (Iterator<Long> it = toTicket.iterator(); it.hasNext() && pending.size() < MAX_IN_FLIGHT; ) {
+            long ch = it.next();
+            it.remove();
+            if (ticketed.add(ch)) {
+                ticket(ch);
+                stats.chunksReq++;
+                held++;
+            }
+            pending.put(ch, age);
         }
-        io.github.profetgit.countryroads.CountryRoads.LOG.debug("Survey from {} found no route after {} columns", stake, expansions);
-        if (player == null) io.github.profetgit.countryroads.CountryRoads.LOG.info("CR-STAKE-DEBUG expansions=" + expansions);
-        if (leg < targets.size()) {
-            failure = "countryroads.stake.no_waypoint";
-            failureArg = leg + 1;
-        } else {
-            failure = "countryroads.stake.no_road";
-            failureArg = RADIUS;
+        for (var it = pending.long2IntEntrySet().fastIterator(); it.hasNext(); ) {
+            var e = it.next();
+            long ch = e.getLongKey();
+            if (loaded(ch)) {
+                it.remove();
+                if (capturing.add(ch)) toCapture.enqueue(ch);
+            } else if (age - e.getIntValue() > CHUNK_TIMEOUT) {
+                // never came: its columns read as closed
+                it.remove();
+                snap.chunks.put(ch, ColumnSnapshot.Chunk.MISSING);
+            }
         }
+        long t0 = System.nanoTime();
+        int n0 = stats.captured;
+        while (!toCapture.isEmpty() && System.nanoTime() < until) {
+            long ch = toCapture.dequeueLong();
+            LevelChunk c = level.getChunkSource().getChunkNow(ChunkPos.getX(ch), ChunkPos.getZ(ch));
+            capturing.remove(ch);
+            if (c == null) {
+                want(ch, true);
+                continue;
+            }
+            snap.put(ch, c, minY);
+            stats.captured++;
+        }
+        while (!done && !ahead.isEmpty() && System.nanoTime() < until) {
+            long ch = ahead.dequeueLong();
+            if (snap.chunks.containsKey(ch)) continue;
+            LevelChunk c = level.getChunkSource().getChunkNow(ChunkPos.getX(ch), ChunkPos.getZ(ch));
+            if (c == null) continue;
+            snap.put(ch, c, minY);
+            stats.captured++;
+        }
+        if (stats.captured > n0) stats.captureNanos += System.nanoTime() - t0;
+        for (Iterator<Waiter> it = waiting.iterator(); it.hasNext(); ) {
+            Waiter w = it.next();
+            boolean all = true;
+            for (long ch : w.chunks) if (!snap.chunks.containsKey(ch) && !w.absent.contains(ch)) all = false;
+            if (all) {
+                it.remove();
+                w.done.complete(w.absent.toLongArray());
+            }
+        }
+        if (!done) return false;
+        if (survey != null && !revalidated && revalidate()) return false;
+        release();
         return true;
     }
 
-    private boolean legDone(long k, boolean viaLeg) {
-        List<long[]> part = extract(k, viaLeg);
-        if (viaLeg) {
-            acc.addAll(part);
-            for (long[] e : part) used.add(e[0]);
-            inDir = arrive.get(k);
-            inLevel = part.size() >= 2 ? level(ground(ChunkPos.getX(part.get(part.size() - 2)[0]), ChunkPos.getZ(part.get(part.size() - 2)[0])))
-                : level(ground(ChunkPos.getX(startKey), ChunkPos.getZ(startKey)));
-            startKey = k;
-            leg++;
-            startLeg();
-            return false;
+    private void want(long ch, boolean urgent) {
+        if (snap.chunks.containsKey(ch) || capturing.contains(ch) || pending.containsKey(ch)) return;
+        if (loaded(ch)) {
+            capturing.add(ch);
+            toCapture.enqueue(ch);
+            return;
         }
-        acc.addAll(part);
-        if (stage == 0) {
-            List<Long> vias = meander(acc);
-            if (!vias.isEmpty()) {
-                direct = new ArrayList<>(acc);
-                directEnd = k;
-                acc = new ArrayList<>();
-                used.clear();
-                used.add(doorKey);
-                targets = vias;
-                leg = 0;
-                stage = 1;
-                startKey = doorKey;
-                inDir = START;
-                startLeg();
-                return false;
-            }
-        }
-        return conclude(acc, k);
-    }
-
-    private boolean conclude(List<long[]> chain, long endKey) {
-        survey = PathPlan.build(this, chain, endKey);
-        if (survey == null) failure = "countryroads.stake.on_road";
-        return true;
-    }
-
-    /** The cells of the leg just found, door end first; the end column only for a leg that stops at a waypoint. */
-    private List<long[]> extract(long endKey, boolean includeEnd) {
-        List<long[]> rev = new ArrayList<>();
-        long n = endKey;
-        while (n != startKey) {
-            long p = parent.get(n);
-            if (n != endKey || includeEnd) rev.add(new long[]{n, 0, 0});
-            int len = bore.get(n);
-            if (len > 0) {
-                int d = arrive.get(n);
-                int px = ChunkPos.getX(p), pz = ChunkPos.getZ(p);
-                for (int m = len - 1; m >= 1; m--) rev.add(new long[]{key(px + DX[d] * m, pz + DZ[d] * m), m, len});
-            }
-            n = p;
-        }
-        java.util.Collections.reverse(rev);
-        return rev;
+        if (urgent) toTicket.addAndMoveToFirst(ch);
+        else toTicket.add(ch);
     }
 
     /**
-     * Pick bends for the direct route: every so often a point a few blocks off the walked line, alternating sides. The
-     * second search runs through them in order (and through the player's waypoints), so the trail swings instead of
-     * ruling one long line.
+     * The ground under the chosen route may have changed since it was captured (the player dug or built): capture its
+     * chunks again and, if any of its columns changed, search once more.
      */
-    private List<Long> meander(List<long[]> chain) {
-        int n = chain.size();
-        List<Long> out = new ArrayList<>();
-        if (n < 24) return waypoints.isEmpty() ? out : new ArrayList<>(waypoints);
-        Set<Long> waypointCols = new HashSet<>(waypoints);
-        List<long[]> picks = new ArrayList<>();
-        int i = 8 + (int) (lattice(3, sx, sz) * 6);
-        int side = lattice(5, sx, sz) < 0.5 ? 1 : -1;
-        while (i < n - 8 && picks.size() < MAX_VIAS) {
-            long[] e = chain.get(i);
-            long col = e[0];
-            boolean near = false;
-            for (int q = Math.max(0, i - 4); q <= Math.min(n - 1, i + 4); q++) if (chain.get(q)[1] > 0 || waypointCols.contains(chain.get(q)[0])) near = true;
-            if (!near) {
-                int px = ChunkPos.getX(chain.get(i - 1)[0]), pz = ChunkPos.getZ(chain.get(i - 1)[0]);
-                int qx = ChunkPos.getX(chain.get(i + 1)[0]), qz = ChunkPos.getZ(chain.get(i + 1)[0]);
-                int dx = Integer.signum(qx - px), dz = Integer.signum(qz - pz);
-                if (dx * dz == 0 && dx + dz != 0) {
-                    int rx = -dz, rz = dx, x = ChunkPos.getX(col), z = ChunkPos.getZ(col);
-                    int off = 3 + (int) (lattice(11, x, z) * 4);
-                    int vx = x + side * off * rx, vz = z + side * off * rz;
-                    if (viable(vx, vz, level(ground(x, z)))) {
-                        picks.add(new long[]{i, key(vx, vz)});
-                        side = -side;
-                        i += 16 + (int) (lattice(13, x, z) * 10);
-                        continue;
-                    }
+    private boolean revalidate() {
+        revalidated = true;
+        LongOpenHashSet chunks = new LongOpenHashSet();
+        for (HousePaths.Cell c : survey.cells()) chunks.add(ChunkPos.pack(c.x() >> 4, c.z() >> 4));
+        boolean changed = false;
+        for (long ch : chunks) {
+            LevelChunk c = level.getChunkSource().getChunkNow(ChunkPos.getX(ch), ChunkPos.getZ(ch));
+            ColumnSnapshot.Chunk old = snap.chunks.get(ch);
+            if (c == null || old == null || old == ColumnSnapshot.Chunk.MISSING) continue;
+            ColumnSnapshot.Chunk now = ColumnSnapshot.capture(c, minY);
+            if (!Arrays.equals(now.ground(), old.ground()) || !Arrays.equals(now.road(), old.road())) {
+                snap.chunks.put(ch, now);
+                snap.live.put(ch, c);
+                view.forget(ChunkPos.getX(ch), ChunkPos.getZ(ch));
+                changed = true;
+            }
+        }
+        for (RouteSolver.Bore b : finalBores) {
+            boolean ready = true;
+            int rx = -RouteSolver.DZ[b.d()], rz = RouteSolver.DX[b.d()];
+            for (int m = 1; m < b.len() && ready; m++)
+                for (int l = -2; l <= 2; l += 4)
+                    if (!level.hasChunkAt(new BlockPos(b.x() + RouteSolver.DX[b.d()] * m + l * rx, b.y(), b.z() + RouteSolver.DZ[b.d()] * m + l * rz))) ready = false;
+            if (ready && !Tunnels.safe(level, b.x(), b.z(), b.d(), b.y(), b.len())) {
+                synchronized (unsafe) {
+                    unsafe.add(b.id());
+                }
+                changed = true;
+            }
+        }
+        if (!changed) return false;
+        stats.candLines.add("CR-STAKE-RESURVEY ground changed under the route");
+        survey = null;
+        failure = null;
+        done = false;
+        Thread.ofVirtual().name("CountryRoads-survey-" + IDS.incrementAndGet()).start(this);
+        return true;
+    }
+
+    int requestedCount() {
+        return stats.chunksReq;
+    }
+
+    // ---------------------------------------------------------------- worker
+
+    @Override
+    public boolean cancelled() {
+        return cancelled;
+    }
+
+    @Override
+    public void prefetch(long[] chunks, boolean load) {
+        if (chunks.length == 0) return;
+        if (load) {
+            loads.addAndGet(chunks.length);
+            wanted.add(chunks);
+        } else looking.add(chunks);
+    }
+
+    @Override
+    public long[] need(long[] chunks, boolean load) throws InterruptedException {
+        if (load) loads.addAndGet(chunks.length);
+        CompletableFuture<long[]> f = new CompletableFuture<>();
+        waiters.add(new Waiter(chunks, load, new LongOpenHashSet(), f));
+        long t0 = System.nanoTime();
+        long[] absent = await(f, Long.MAX_VALUE);
+        stats.waits++;
+        stats.waitNanos += System.nanoTime() - t0;
+        return absent == null ? new long[0] : absent;
+    }
+
+    /** Waits for the server thread (or a planner) without holding a compute turn; null when the deadline passed first. */
+    private <T> T await(CompletableFuture<T> f, long deadline) throws InterruptedException {
+        COMPUTE.release();
+        holding = false;
+        try {
+            while (System.nanoTime() < deadline) {
+                if (cancelled) throw new CancellationException();
+                try {
+                    return f.get(50, TimeUnit.MILLISECONDS);
+                } catch (TimeoutException ignored) {
+                } catch (java.util.concurrent.ExecutionException e) {
+                    return null;
                 }
             }
-            i += 3;
+            return null;
+        } finally {
+            COMPUTE.acquire();
+            holding = true;
         }
-        // waypoints stay in order with the bends between them
-        List<long[]> all = new ArrayList<>(picks);
-        for (int q = 0; q < n; q++) {
-            long col = chain.get(q)[0];
-            if (waypointCols.contains(col)) all.add(new long[]{q, col});
+    }
+
+    @Override
+    public void run() {
+        try {
+            COMPUTE.acquire();
+            holding = true;
+            compute();
+        } catch (CancellationException | InterruptedException ignored) {
+        } catch (Throwable t) {
+            CountryRoads.LOG.error("House path survey from {} failed", stake, t);
+            survey = null;
+            failure = "countryroads.stake.no_road";
+            failureArg = RADIUS;
+        } finally {
+            if (holding) {
+                holding = false;
+                COMPUTE.release();
+            }
+            done = true;
         }
-        all.sort((a, b) -> Long.compare(a[0], b[0]));
-        for (long[] a : all) out.add(a[1]);
+    }
+
+    private void compute() throws InterruptedException {
+        long t0 = System.nanoTime();
+        LongOpenHashSet goals = new LongOpenHashSet(loadedGoals);
+        goals.addAll(LongArrayList.wrap(pathGoals));
+        goals.addAll(planGoals(goals.isEmpty()));
+        goals.remove(doorKey);
+        long tGoals = System.nanoTime();
+        if (goals.isEmpty()) {
+            fail("countryroads.stake.no_road", RADIUS);
+            return;
+        }
+        RouteSolver s = new RouteSolver(view, this, sx, sz);
+        int[] all = s.distanceField(goals);
+        Clusters clusters = new Clusters(goals);
+        long[] toRoad = line(nearest(goals));
+        int unloaded = 0;
+        for (long ch : toRoad) if (!loadedAtStart.contains(ch)) unloaded++;
+        CoarsePlanner coarse = null;
+        RoadNetwork net = unloaded > COARSE_ABOVE ? RoadNetwork.get(level) : null;
+        if (net != null) {
+            // far from loaded land: plan the corridor on the generator's terrain first, fetch only that, in one batch
+            long tc = System.nanoTime();
+            coarse = new CoarsePlanner(view, net.terrain, sx, sz, RADIUS);
+            LongOpenHashSet corridor = corridor(coarse, goals, CORRIDOR);
+            if (corridor != null) {
+                s.allowed = corridor;
+                LongOpenHashSet fetch = new LongOpenHashSet(corridor);
+                fetch.removeAll(loadedAtStart);
+                prefetch(nearFirst(fetch), true);
+            }
+            stats.candLines.add(String.format(java.util.Locale.ROOT, "CR-STAKE-COARSE chunks=%d samples=%d ms=%d unloadedOnLine=%d",
+                corridor == null ? -1 : corridor.size(), coarse.samples, (System.nanoTime() - tc) / 1_000_000, unloaded));
+        } else prefetch(toRoad, true);
+
+        // ---- the direct route: the player's waypoints in order, then candidates for the last leg
+        boolean[] used = s.newUsed();
+        used[s.doorIdx] = true;
+        List<long[]> acc = new ArrayList<>();
+        long start = doorKey;
+        int inDir = RouteSolver.START, inLevel = 0;
+        LongOpenHashSet forbidden;
+        synchronized (unsafe) {
+            forbidden = new LongOpenHashSet(unsafe);
+        }
+        List<RouteSolver.Bore> directBores = new ArrayList<>();
+        for (int i = 0; i < waypoints.size(); i++) {
+            RouteSolver.Route r = solve(s, start, inDir, inLevel, used, RouteSolver.Goal.column(waypoints.get(i)), true, forbidden, null);
+            if (r == null) {
+                fail("countryroads.stake.no_waypoint", i + 1);
+                return;
+            }
+            acc.addAll(r.part());
+            directBores.addAll(r.bores());
+            for (long[] e : r.part()) used[s.idx(ChunkPos.getX(e[0]), ChunkPos.getZ(e[0]))] = true;
+            inLevel = r.part().size() >= 2 ? level(view, r.part().get(r.part().size() - 2)[0]) : level(view, start);
+            inDir = r.endDir();
+            start = r.endKey();
+        }
+        boolean[] usedBefore = used.clone();
+        List<Candidate> cands = new ArrayList<>();
+        RouteSolver.Route best = solve(s, start, inDir, inLevel, used, RouteSolver.Goal.roads(all, -1), true, forbidden, null);
+        if (best == null && s.allowed != null) {
+            // the corridor was too narrow (a cliff or lake the coarse terrain did not show): wider, then everywhere
+            LongOpenHashSet wide = corridor(coarse, goals, CORRIDOR_WIDE);
+            s.allowed = wide;
+            if (wide != null) best = solve(s, start, inDir, inLevel, used, RouteSolver.Goal.roads(all, -1), true, forbidden, null);
+            if (best == null) {
+                s.allowed = null;
+                best = solve(s, start, inDir, inLevel, used, RouteSolver.Goal.roads(all, -1), true, forbidden, null);
+            }
+            stats.candLines.add("CR-STAKE-COARSE widened " + (wide == null ? "-" : wide.size()) + (s.allowed == null ? " then unrestricted" : ""));
+        }
+        if (best == null) {
+            fail("countryroads.stake.no_road", RADIUS);
+            return;
+        }
+        cands.add(new Candidate("nearest", best));
+        // other roads close enough to win
+        int bestCluster = clusters.near(best.endKey());
+        int startIdx = s.idx(ChunkPos.getX(start), ChunkPos.getZ(start));
+        List<int[]> others = new ArrayList<>();
+        for (int c = 0; c < clusters.count; c++) {
+            if (c == bestCluster) continue;
+            int[] f = s.distanceField(clusters.members(c));
+            // a route costs about EST per block of distance: roads that clearly cannot win are not searched
+            if (f[startIdx] == Integer.MAX_VALUE || (long) f[startIdx] * EST > best.cost() * 13 / 10) continue;
+            others.add(new int[]{f[startIdx], c});
+            clusters.fields[c] = f;
+        }
+        others.sort((a, b) -> Integer.compare(a[0], b[0]));
+        for (int k = 0; k < others.size() && cands.size() < MAX_CANDIDATES - 1; k++) {
+            RouteSolver.Route r = solve(s, start, inDir, inLevel, used, RouteSolver.Goal.roads(clusters.fields[others.get(k)[1]], 4), true, forbidden, null, false);
+            if (r != null && !known(cands, r)) cands.add(new Candidate("road" + (k + 2), r));
+        }
+        // a route kept apart from the first
+        int[] penalty = new int[s.w * s.w];
+        for (long[] e : best.part()) {
+            int x = ChunkPos.getX(e[0]), z = ChunkPos.getZ(e[0]);
+            for (int dx = -2; dx <= 2; dx++)
+                for (int dz = -2 + Math.abs(dx); dz <= 2 - Math.abs(dx); dz++)
+                    if (view.inside(x + dx, z + dz)) penalty[s.idx(x + dx, z + dz)] = PENALTY;
+        }
+        RouteSolver.Route apart = solve(s, start, inDir, inLevel, used, RouteSolver.Goal.roads(all, -1), true, forbidden, penalty, false);
+        if (apart != null) {
+            int shared = 0;
+            for (long[] e : apart.part()) if (penalty[s.idx(ChunkPos.getX(e[0]), ChunkPos.getZ(e[0]))] > 0) shared++;
+            if (shared < apart.part().size() * 6 / 10 && !known(cands, apart)) cands.add(new Candidate("apart", apart));
+        }
+        // over the hill instead of through it
+        if (!best.bores().isEmpty()) {
+            RouteSolver.Route over = solve(s, start, inDir, inLevel, used, RouteSolver.Goal.roads(all, -1), false, forbidden, null, false);
+            if (over != null && !known(cands, over)) cands.add(new Candidate("over", over));
+        }
+        Candidate win = null;
+        for (Candidate c : cands) {
+            List<long[]> chain = new ArrayList<>(acc);
+            chain.addAll(c.route.part());
+            // the plan reads the worn band beside the line (and the wandering pass its bends): those columns first
+            s.ensureAround(chain, 7, c == cands.get(0));
+            c.cost = s.routeCost(chain, c.route.endKey());
+            HousePaths.Survey sv = PathPlan.build(view, sx, sz, stakeY, chain, c.route.endKey());
+            if (sv == null) {
+                if (c == cands.get(0)) {
+                    fail("countryroads.stake.on_road", 0);
+                    return;
+                }
+                continue;
+            }
+            c.score = c.cost + score(sv);
+            int[] st = stairs(sv);
+            stats.candLines.add(String.format(java.util.Locale.ROOT, "CR-STAKE-CAND %s cost=%d score=%d length=%d tunnel=%d stairs=%d run=%d bill=%d/%d/%d fetched=%d",
+                c.kind, c.cost, c.score, sv.length(), sv.tunnelCells(), st[0], st[1], sv.earth(), sv.planks(), sv.torches(), c.loaded));
+            if (win == null || c.score < win.score) win = c;
+        }
+        stats.candidates = cands.size();
+        stats.candLines.add("CR-STAKE-WINNER " + win.kind);
+        long tCands = System.nanoTime();
+        List<long[]> direct = new ArrayList<>(acc);
+        direct.addAll(win.route.part());
+        directBores.addAll(win.route.bores());
+        List<RouteSolver.Bore> bores = directBores;
+        stats.costDirect = win.cost;
+
+        // ---- the wandering pass: bends off the straight stretches, the player's waypoints between them
+        List<long[]> chain = direct;
+        long end = win.route.endKey();
+        List<Long> vias = s.meander(direct, waypoints, usedBefore);
+        if (!vias.isEmpty()) {
+            boolean[] used2 = s.newUsed();
+            used2[s.doorIdx] = true;
+            List<long[]> acc2 = new ArrayList<>();
+            List<RouteSolver.Bore> bores2 = new ArrayList<>();
+            long st = doorKey;
+            int dir = RouteSolver.START, lvl = inLevel;
+            boolean ok = true;
+            for (long v : vias) {
+                RouteSolver.Route r = solve(s, st, dir, lvl, used2, RouteSolver.Goal.column(v), true, forbidden, null);
+                if (r == null) {
+                    ok = false;
+                    break;
+                }
+                acc2.addAll(r.part());
+                bores2.addAll(r.bores());
+                for (long[] e : r.part()) used2[s.idx(ChunkPos.getX(e[0]), ChunkPos.getZ(e[0]))] = true;
+                lvl = r.part().size() >= 2 ? level(view, r.part().get(r.part().size() - 2)[0]) : level(view, st);
+                dir = r.endDir();
+                st = r.endKey();
+            }
+            RouteSolver.Route last = ok ? solve(s, st, dir, lvl, used2, RouteSolver.Goal.roads(all, -1), true, forbidden, null) : null;
+            if (last != null) {
+                acc2.addAll(last.part());
+                bores2.addAll(last.bores());
+                chain = acc2;
+                end = last.endKey();
+                bores = bores2;
+            }
+        }
+        stats.costFinal = s.routeCost(chain, end);
+        stats.candLines.add(String.format(java.util.Locale.ROOT, "CR-STAKE-PHASES goals=%dms (loaded %d, paths %d, all %d) candidates=%dms wander=%dms",
+            (tGoals - t0) / 1_000_000, loadedGoals.length, pathGoals.length, goals.size(), (tCands - tGoals) / 1_000_000, (System.nanoTime() - tCands) / 1_000_000));
+        HousePaths.Survey sv = PathPlan.build(view, sx, sz, stakeY, chain, end);
+        if (sv == null) {
+            fail("countryroads.stake.on_road", 0);
+            return;
+        }
+        finalBores = bores;
+        survey = sv;
+    }
+
+    /** A candidate route equal to one already in the list (another road's goal or the apart search can land on the same line). */
+    private static boolean known(List<Candidate> cands, RouteSolver.Route r) {
+        for (Candidate c : cands) {
+            List<long[]> a = c.route.part(), b = r.part();
+            if (c.route.endKey() != r.endKey() || a.size() != b.size()) continue;
+            boolean same = true;
+            for (int i = 0; i < a.size() && same; i++) same = a.get(i)[0] == b.get(i)[0];
+            if (same) return true;
+        }
+        return false;
+    }
+
+    private final class Candidate {
+        final String kind;
+        final RouteSolver.Route route;
+        final int loaded;
+        long cost, score;
+
+        Candidate(String kind, RouteSolver.Route route) {
+            this.kind = kind;
+            this.route = route;
+            this.loaded = loads.getAndSet(0);
+        }
+    }
+
+    /** What the plan adds to the route cost when candidates are compared: stairs, the longest flight, the bill. */
+    private static long score(HousePaths.Survey sv) {
+        int[] st = stairs(sv);
+        return 6L * st[0] + 15L * st[1] + sv.earth() + 2L * sv.planks() + 8L * sv.torches();
+    }
+
+    /** {stair cells, longest run of stair cells} along the walked line. */
+    private static int[] stairs(HousePaths.Survey sv) {
+        int n = 0, run = 0, longest = 0;
+        for (HousePaths.Cell c : sv.cells()) {
+            if (c.edge()) continue;
+            if (c.stair() >= 0) {
+                n++;
+                longest = Math.max(longest, ++run);
+            } else run = 0;
+        }
+        return new int[]{n, longest};
+    }
+
+    private RouteSolver.Route solve(RouteSolver s, long start, int inDir, int inLevel, boolean[] used, RouteSolver.Goal goal, boolean bores,
+                                    LongOpenHashSet forbidden, int[] penalty) throws InterruptedException {
+        return solve(s, start, inDir, inLevel, used, goal, bores, forbidden, penalty, true);
+    }
+
+    private RouteSolver.Route solve(RouteSolver s, long start, int inDir, int inLevel, boolean[] used, RouteSolver.Goal goal, boolean bores,
+                                    LongOpenHashSet forbidden, int[] penalty, boolean load) throws InterruptedException {
+        RouteSolver.Route r = s.solve(start, inDir, inLevel, used, goal, bores, forbidden, penalty, load);
+        stats.expansions += s.expansions;
+        return r;
+    }
+
+    private void fail(String key, int arg) {
+        survey = null;
+        failure = key;
+        failureArg = arg;
+        if (player == null) CountryRoads.LOG.info("CR-STAKE-DEBUG expansions=" + stats.expansions);
+    }
+
+    private static int level(Terrain t, long k) {
+        return Terrain.level(t.ground(ChunkPos.getX(k), ChunkPos.getZ(k)));
+    }
+
+    /**
+     * Planned road centrelines in the window (open-sky parts, outside the villages at either end). Waits briefly for
+     * roads not planned yet, longer when nothing else is known (a fresh area: without them there is no goal at all).
+     */
+    private LongOpenHashSet planGoals(boolean nothingElse) throws InterruptedException {
+        LongOpenHashSet out = new LongOpenHashSet();
+        RoadNetwork n = RoadNetwork.get(level);
+        if (n == null) return out;
+        List<Edge> edges = n.edgesNear(sx - RADIUS, sz - RADIUS, sx + RADIUS, sz + RADIUS, 32);
+        List<CompletableFuture<EdgePlan>> plans = new ArrayList<>();
+        for (Edge e : edges) plans.add(n.plan(e));
+        CompletableFuture<Void> all = CompletableFuture.allOf(plans.toArray(CompletableFuture[]::new));
+        if (!all.isDone()) await(all, System.nanoTime() + (nothingElse ? PLAN_WAIT_LONG_MS : PLAN_WAIT_MS) * 1_000_000L);
+        for (CompletableFuture<EdgePlan> f : plans) {
+            EdgePlan p = f.isDone() && !f.isCompletedExceptionally() ? f.join() : null;
+            if (p == null) continue;
+            BlockPos a = p.edge.a().pos(), b = p.edge.b().pos();
+            for (int i = 0; i < p.length(); i++) {
+                if (p.kind[i] == EdgePlan.TUNNEL) continue;
+                int x = (int) Math.floor(p.x[i]), z = (int) Math.floor(p.z[i]);
+                if (Math.max(Math.abs(x - sx), Math.abs(z - sz)) > RADIUS) continue;
+                if (Math.hypot(x - a.getX(), z - a.getZ()) < 32 || Math.hypot(x - b.getX(), z - b.getZ()) < 32) continue;
+                out.add(RouteSolver.key(x, z));
+            }
+        }
         return out;
     }
 
-    /** A bend point must be open ground, no tree, no water, and about as high as the walked line. */
-    private boolean viable(int x, int z, int lvl) {
-        if (Math.max(Math.abs(x - sx), Math.abs(z - sz)) > RADIUS - 8) return false;
-        if (used.contains(key(x, z)) || RoadColumns.isRoad(level, x, z)) return false;
-        if (level.getChunkSource().getChunkNow(x >> 4, z >> 4) == null) return false;
-        int g = ground(x, z);
-        if (g < -1000 || g >= 100000 || Math.abs(g - lvl) > 3) return false;
-        return treeCost(x, z, g) == 0;
+    /** The corridor of every leg (door, waypoints in order, the road), with the chunks loaded anyway. */
+    private LongOpenHashSet corridor(CoarsePlanner coarse, LongOpenHashSet goals, int half) {
+        LongOpenHashSet out = new LongOpenHashSet(loadedAtStart);
+        int fx = sx, fz = sz;
+        for (long w : waypoints) {
+            LongOpenHashSet leg = coarse.corridor(fx, fz, List.of(w), half, COARSE_ROUTES);
+            if (leg == null) return null;
+            out.addAll(leg);
+            fx = ChunkPos.getX(w);
+            fz = ChunkPos.getZ(w);
+        }
+        LongOpenHashSet last = coarse.corridor(fx, fz, goals, half, COARSE_ROUTES);
+        if (last == null) return null;
+        out.addAll(last);
+        return out;
     }
 
-    private void ticket(int cx, int cz) {
-        level.getChunkSource().addTicketWithRadius(TicketType.PORTAL, new ChunkPos(cx, cz), 0);
+    /** Chunks ordered from the door outward (fetched in that order). */
+    private long[] nearFirst(LongOpenHashSet chunks) {
+        long[] a = chunks.toLongArray();
+        long[] k = new long[a.length];
+        for (int i = 0; i < a.length; i++) {
+            int d = Math.abs(ChunkPos.getX(a[i]) - (sx >> 4)) + Math.abs(ChunkPos.getZ(a[i]) - (sz >> 4));
+            k[i] = ((long) d << 32) | i;
+        }
+        Arrays.sort(k);
+        long[] out = new long[a.length];
+        for (int i = 0; i < a.length; i++) out[i] = a[(int) k[i]];
+        return out;
     }
 
-    private long minBlocked() {
-        long m = Long.MAX_VALUE;
-        for (long[] b : blocked) m = Math.min(m, b[0]);
-        return m;
-    }
-
-    /** Edges that were waiting for a chunk go on as soon as it is loaded. */
-    private void retryBlocked() {
-        if (blocked.isEmpty()) return;
-        List<long[]> ready = new ArrayList<>();
-        for (Iterator<long[]> it = blocked.iterator(); it.hasNext(); ) {
-            long[] b = it.next();
-            int nx = ChunkPos.getX(b[1]) + DX[(int) b[2]], nz = ChunkPos.getZ(b[1]) + DZ[(int) b[2]];
-            if (level.getChunkSource().getChunkNow(nx >> 4, nz >> 4) != null) {
-                ready.add(b);
-                it.remove();
+    private long nearest(LongOpenHashSet goals) {
+        long best = 0;
+        int bd = Integer.MAX_VALUE;
+        for (long g : goals) {
+            int d = Math.abs(ChunkPos.getX(g) - sx) + Math.abs(ChunkPos.getZ(g) - sz);
+            if (d < bd) {
+                bd = d;
+                best = g;
             }
         }
-        if (!ready.isEmpty()) waited = 0;
-        for (long[] b : ready) expand(b[1], ChunkPos.getX(b[1]), ChunkPos.getZ(b[1]), arrive.get(b[1]), (int) b[3], (int) b[2]);
+        return best;
     }
 
-    private int prevLevel(long k) {
-        if (!parent.containsKey(k)) return inLevel;
-        long p = parent.get(k);
-        return level(ground(ChunkPos.getX(p), ChunkPos.getZ(p)));
-    }
-
-    private void expand(long k, int x, int z, int d0, int c, int d) {
-        int nx = x + DX[d], nz = z + DZ[d];
-        long nk = key(nx, nz);
-        if (Math.max(Math.abs(nx - sx), Math.abs(nz - sz)) > RADIUS || nk == doorKey || used.contains(nk)) return;
-        if (level.getChunkSource().getChunkNow(nx >> 4, nz >> 4) == null) {
-            long chunk = ChunkPos.pack(nx >> 4, nz >> 4);
-            if (requested.add(chunk)) ticket(nx >> 4, nz >> 4);
-            blocked.add(new long[]{c + 10, k, d, c});
-            return;
-        }
-        int ny = ground(nx, nz);
-        int from = ground(x, z);
-        int walkFrom = level(from);
-        boolean fromWet = from >= 100000;
-        if (ny >= -1000 && ny < 100000 && !fromWet && ny - walkFrom >= 1) tryBore(k, x, z, d0, c, d, walkFrom);
-        if (ny < -1000) return;
-        boolean wet = ny >= 100000;
-        int walkTo = level(ny);
-        int dy = walkTo - walkFrom;
-        if (Math.abs(dy) > 1) return;
-        int bend = 0;
-        if (d0 != START && d0 != d) {
-            // a corner belongs on level ground: a stair at a bend would end in a wall
-            if (prevLevel(k) != walkFrom || walkTo != walkFrom) bend = BEND_ON_SLOPE;
-        }
-        int add = 10 + bend + (int) (lattice(31, nx * 7 + d, nz) * JITTER) + (dy != 0 ? climbPenalty(k) : 0) + treeCost(nx, nz, walkTo)
-            + wobble(nx, nz) + (d0 != START && d0 != d ? TURN : 0) + 8 * Math.abs(dy) + (wet ? 30 : 0);
-        if (dy < 0 && x == sx && z == sz) add += END_STEP;
-        else if (dy > 0 && RoadColumns.isOpenRoad(level, nx, nz)) add += END_STEP;
-        int total = c + add;
-        if (total >= cost.get(nk)) return;
-        cost.put(nk, total);
-        parent.put(nk, k);
-        arrive.put(nk, d);
-        bore.remove(nk);
-        open.add(new long[]{total, nk});
-    }
-
-    /**
-     * A straight tunnel at the walked level through the hill ahead: columns whose ground is at least ROOF above the
-     * path get a roof; the bore ends where the ground comes back down to the level. Needs MIN_ROOFED roofed columns,
-     * and the rock must be safe to cut.
-     */
-    private void tryBore(long k, int x, int z, int d0, int c, int d, int y) {
-        int exit = -1, roofed = 0;
-        for (int m = 1; m <= Tunnels.MAX_LEN; m++) {
-            int cx = x + DX[d] * m, cz = z + DZ[d] * m;
-            if (level.getChunkSource().getChunkNow(cx >> 4, cz >> 4) == null) return;
-            int g = ground(cx, cz);
-            if (g < -1000 || g >= 100000 || g < y - 1) return;
-            if (g <= y + 1) {
-                if (roofed >= Tunnels.MIN_ROOFED) {
-                    exit = m;
-                    break;
+    /** The chunks along the straight line from the door to a column, one chunk either side. */
+    private long[] line(long to) {
+        LongLinkedOpenHashSet out = new LongLinkedOpenHashSet();
+        int tx = ChunkPos.getX(to), tz = ChunkPos.getZ(to);
+        int steps = Math.max(1, Math.max(Math.abs(tx - sx), Math.abs(tz - sz)) / 8);
+        for (int i = 0; i <= steps; i++) {
+            int x = sx + (tx - sx) * i / steps, z = sz + (tz - sz) * i / steps;
+            for (int dx = -1; dx <= 1; dx++)
+                for (int dz = -1; dz <= 1; dz++) {
+                    int cx = (x >> 4) + dx, cz = (z >> 4) + dz;
+                    if (snap.get(cx, cz) == null) out.add(ChunkPos.pack(cx, cz));
                 }
-                if (roofed > 0 || m > 10) return;
-            } else if (g >= y + Tunnels.ROOF) roofed++;
-            else if (roofed == 0 && m > 10) return;
         }
-        if (exit < 0) return;
-        long ek = key(x + DX[d] * exit, z + DZ[d] * exit);
-        if (used.contains(ek)) return;
-        for (int m = 1; m < exit; m++) if (used.contains(key(x + DX[d] * m, z + DZ[d] * m))) return;
-        if (!Tunnels.safe(level, x, z, d, y, exit)) return;
-        // a bore must not run under (or through) the stretch that led here
-        Set<Long> cols = new HashSet<>();
-        for (int m = 1; m <= exit; m++) cols.add(key(x + DX[d] * m, z + DZ[d] * m));
-        for (long a = k; ; ) {
-            if (cols.contains(a)) return;
-            if (!parent.containsKey(a)) break;
-            a = parent.get(a);
+        return out.toLongArray();
+    }
+
+    /** Goal columns grouped into roads: columns whose chunks lie within 3 chunks of each other share a group. */
+    private static final class Clusters {
+        final int count;
+        final int[][] fields;
+        private final Long2IntOpenHashMap of = new Long2IntOpenHashMap();
+        private final List<List<Long>> members = new ArrayList<>();
+
+        Clusters(LongOpenHashSet goals) {
+            Long2IntOpenHashMap bin = new Long2IntOpenHashMap();
+            bin.defaultReturnValue(-1);
+            List<Long> bins = new ArrayList<>();
+            for (long g : goals) {
+                long b = ChunkPos.pack(ChunkPos.getX(g) >> 4, ChunkPos.getZ(g) >> 4);
+                if (bin.putIfAbsent(b, bins.size()) == -1) bins.add(b);
+            }
+            int[] parent = new int[bins.size()];
+            for (int i = 0; i < parent.length; i++) parent[i] = i;
+            for (int i = 0; i < bins.size(); i++) {
+                int bx = ChunkPos.getX(bins.get(i)), bz = ChunkPos.getZ(bins.get(i));
+                for (int dx = -3; dx <= 3; dx++)
+                    for (int dz = -3; dz <= 3; dz++) {
+                        int j = bin.get(ChunkPos.pack(bx + dx, bz + dz));
+                        if (j >= 0) parent[find(parent, i)] = find(parent, j);
+                    }
+            }
+            Long2IntOpenHashMap id = new Long2IntOpenHashMap();
+            id.defaultReturnValue(-1);
+            of.defaultReturnValue(-1);
+            for (long g : goals) {
+                int root = find(parent, bin.get(ChunkPos.pack(ChunkPos.getX(g) >> 4, ChunkPos.getZ(g) >> 4)));
+                int c = id.get(root);
+                if (c < 0) {
+                    c = members.size();
+                    id.put(root, c);
+                    members.add(new ArrayList<>());
+                }
+                members.get(c).add(g);
+                of.put(g, c);
+            }
+            count = members.size();
+            fields = new int[count][];
         }
-        int bend = d0 != START && d0 != d ? (prevLevel(k) != y ? BEND_ON_SLOPE : TURN) : 0;
-        int total = c + bend + borePer * exit + boreFixed;
-        if (total >= cost.get(ek)) return;
-        cost.put(ek, total);
-        parent.put(ek, k);
-        arrive.put(ek, d);
-        bore.put(ek, exit);
-        open.add(new long[]{total, ek});
-    }
 
-    /** Climbing several of the last few cells in a row is dear: on a slope the route zigzags across it with flat stretches between the rises. */
-    private int climbPenalty(long k) {
-        int cnt = 0;
-        long a = k;
-        for (int q = 0; q < 4; q++) {
-            if (!parent.containsKey(a)) break;
-            long pa = parent.get(a);
-            if (level(ground(ChunkPos.getX(a), ChunkPos.getZ(a))) != level(ground(ChunkPos.getX(pa), ChunkPos.getZ(pa)))) cnt++;
-            a = pa;
+        private static int find(int[] p, int i) {
+            while (p[i] != i) i = p[i] = p[p[i]];
+            return i;
         }
-        return 6 * cnt;
-    }
 
-    /** Leaves where the path would have to cut them, or a trunk beside it: dear, so the route goes round trees rather than through their canopy. */
-    int treeCost(int x, int z, int walkY) {
-        long k = key(x, z);
-        int v = trees.get(k);
-        if (v == UNKNOWN) {
-            v = 0;
-            for (int dy = 1; dy <= HousePaths.LEAF_ROOM; dy++)
-                if (level.getBlockState(new BlockPos(x, walkY + dy, z)).is(BlockTags.LEAVES)) v += 14;
-            for (Direction dd : DIRS)
-                if (level.getBlockState(new BlockPos(x + dd.getStepX(), walkY + 1, z + dd.getStepZ())).is(BlockTags.LOGS)) v += 8;
-            trees.put(k, v);
+        List<Long> members(int c) {
+            return members.get(c);
         }
-        return v;
-    }
 
-    static double lattice(long seed, int a, int b) {
-        long h = a * 0x9E3779B97F4A7C15L ^ b * 0xC2B2AE3D27D4EB4FL ^ seed;
-        h ^= h >>> 29;
-        h *= 0xBF58476D1CE4E5B9L;
-        h ^= h >>> 32;
-        return (h & 0xFFFF) / 65535.0;
-    }
-
-    private static double smooth(double t) {
-        return t * t * (3 - 2 * t);
-    }
-
-    private static double noise2(int x, int z, double scale, long seed) {
-        double fx = x / scale, fz = z / scale;
-        int x0 = (int) Math.floor(fx), z0 = (int) Math.floor(fz);
-        double tx = smooth(fx - x0), tz = smooth(fz - z0);
-        double a = lattice(seed, x0, z0) * (1 - tx) + lattice(seed, x0 + 1, z0) * tx, b = lattice(seed, x0, z0 + 1) * (1 - tx) + lattice(seed, x0 + 1, z0 + 1) * tx;
-        return a * (1 - tz) + b * tz;
-    }
-
-    /** Extra route cost 0..WOBBLE from two octaves of smooth noise (about 14 and 5 blocks across). */
-    static int wobble(int x, int z) {
-        return (int) ((0.65 * noise2(x, z, 14, 7) + 0.35 * noise2(x, z, 5, 19)) * WOBBLE);
-    }
-
-    /** Smooth 1D value noise 0..1 along the path, period about 7 cells. */
-    static double along(long seed, int i) {
-        double f = i / 7.0;
-        int i0 = (int) Math.floor(f);
-        double t = smooth(f - i0);
-        return lattice(seed, i0, 0) * (1 - t) + lattice(seed, i0 + 1, 0) * t;
-    }
-
-    /** Surface block Y of a column the path may use (+100000 for water: a deck goes on top), CLOSED when it may not be used. */
-    int ground(int x, int z) {
-        long k = key(x, z);
-        int v = ground.get(k);
-        if (v == UNKNOWN) {
-            v = passable(x, z);
-            if (v != CLOSED || level.getChunkSource().getChunkNow(x >> 4, z >> 4) != null) ground.put(k, v);
+        /** The group of the goal nearest a road column the route ended on (the painted road is a little wider than its line). */
+        int near(long end) {
+            int x = ChunkPos.getX(end), z = ChunkPos.getZ(end);
+            for (int r = 0; r <= 6; r++)
+                for (int dx = -r; dx <= r; dx++) {
+                    int dz = r - Math.abs(dx);
+                    int c = of.get(ChunkPos.pack(x + dx, z + dz));
+                    if (c >= 0) return c;
+                    c = of.get(ChunkPos.pack(x + dx, z - dz));
+                    if (c >= 0) return c;
+                }
+            return -1;
         }
-        return v;
-    }
-
-    private int passable(int x, int z) {
-        if (level.getChunkSource().getChunkNow(x >> 4, z >> 4) == null) return CLOSED;
-        int top = level.getHeight(Heightmap.Types.MOTION_BLOCKING_NO_LEAVES, x, z) - 1;
-        BlockState s = level.getBlockState(new BlockPos(x, top, z));
-        if (s.is(Stake.BLOCK)) {
-            // a waypoint (or another door) stands here: the ground is the block under it
-            top--;
-            s = level.getBlockState(new BlockPos(x, top, z));
-        }
-        if (s.is(Blocks.WATER)) {
-            int below = top;
-            while (below > level.getMinY() && level.getBlockState(new BlockPos(x, below, z)).is(Blocks.WATER) && top - below < 6) below--;
-            return top - below >= 6 ? CLOSED : top + 100000;
-        }
-        if (!s.getFluidState().isEmpty() || s.is(BlockTags.LOGS) || (Retrofit.isCrafted(s) && !RoadColumns.isRoad(level, x, z))) return CLOSED;
-        if (x == sx && z == sz) return stake.getY() - 1;
-        return top;
     }
 }

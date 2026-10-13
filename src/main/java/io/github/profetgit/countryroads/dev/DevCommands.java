@@ -44,6 +44,39 @@ public final class DevCommands {
         return !TASKS.isEmpty();
     }
 
+    /** Distance from (x, z) to the nearest planned open road column (plans within 832 blocks; waits for them). */
+    private static int nearRoad(CommandSourceStack src, int x, int z) {
+        var level = src.getLevel();
+        var n = io.github.profetgit.countryroads.plan.RoadNetwork.get(level);
+        if (n == null) return 0;
+        java.util.Set<io.github.profetgit.countryroads.plan.Edge> edges = new java.util.LinkedHashSet<>();
+        for (int rx = (x - 832) >> 9; rx <= (x + 832) >> 9; rx++)
+            for (int rz = (z - 832) >> 9; rz <= (z + 832) >> 9; rz++) edges.addAll(n.edgesInRegion(rx, rz));
+        java.util.List<java.util.concurrent.CompletableFuture<io.github.profetgit.countryroads.plan.EdgePlan>> fs = new java.util.ArrayList<>();
+        for (var e : edges) fs.add(n.plan(e));
+        queue(() -> {
+            for (var f : fs) if (!f.isDone()) return false;
+            double best = Double.MAX_VALUE;
+            int bx = 0, bz = 0;
+            for (var f : fs) {
+                var p = f.join();
+                if (p == null) continue;
+                for (int i = 0; i < p.length(); i++) {
+                    if (p.kind[i] == io.github.profetgit.countryroads.plan.EdgePlan.TUNNEL) continue;
+                    double dd = Math.hypot(p.x[i] - x, p.z[i] - z);
+                    if (dd < best) {
+                        best = dd;
+                        bx = (int) Math.floor(p.x[i]);
+                        bz = (int) Math.floor(p.z[i]);
+                    }
+                }
+            }
+            CountryRoads.LOG.info("CR-NEARROAD " + x + "," + z + " dist=" + (int) best + " at=" + bx + "," + bz + " edges=" + fs.size());
+            return true;
+        });
+        return 1;
+    }
+
     public static void register(CommandDispatcher<CommandSourceStack> d) {
         d.register(Commands.literal("countryroads")
             .requires(Commands.hasPermission(Commands.LEVEL_GAMEMASTERS))
@@ -103,9 +136,62 @@ public final class DevCommands {
                     .executes(c -> StakeTest.run(c.getSource(), IntegerArgumentType.getInteger(c, "x"), IntegerArgumentType.getInteger(c, "z"), false))
                     .then(Commands.literal("keep")
                         .executes(c -> StakeTest.run(c.getSource(), IntegerArgumentType.getInteger(c, "x"), IntegerArgumentType.getInteger(c, "z"), true)))
+                    .then(Commands.literal("warm")
+                        .executes(c -> StakeTest.run(c.getSource(), IntegerArgumentType.getInteger(c, "x"), IntegerArgumentType.getInteger(c, "z"), false, Integer.MIN_VALUE, 0, StakeTest.WARM)))
+                    .then(Commands.literal("cancel")
+                        .executes(c -> StakeTest.special(c.getSource(), IntegerArgumentType.getInteger(c, "x"), IntegerArgumentType.getInteger(c, "z"), "cancel")))
+                    .then(Commands.literal("multi")
+                        .executes(c -> StakeTest.special(c.getSource(), IntegerArgumentType.getInteger(c, "x"), IntegerArgumentType.getInteger(c, "z"), "multi")))
+                    .then(Commands.literal("cold")
+                        .executes(c -> StakeTest.run(c.getSource(), IntegerArgumentType.getInteger(c, "x"), IntegerArgumentType.getInteger(c, "z"), false, Integer.MIN_VALUE, 0, StakeTest.COLD)))
                     .then(Commands.literal("via").then(Commands.argument("vx", IntegerArgumentType.integer()).then(Commands.argument("vz", IntegerArgumentType.integer())
                         .executes(c -> StakeTest.run(c.getSource(), IntegerArgumentType.getInteger(c, "x"), IntegerArgumentType.getInteger(c, "z"), false,
                             IntegerArgumentType.getInteger(c, "vx"), IntegerArgumentType.getInteger(c, "vz")))))))))
+            .then(Commands.literal("nearroad")
+                .then(Commands.argument("x", IntegerArgumentType.integer()).then(Commands.argument("z", IntegerArgumentType.integer())
+                    .executes(c -> nearRoad(c.getSource(), IntegerArgumentType.getInteger(c, "x"), IntegerArgumentType.getInteger(c, "z"))))))
+            .then(Commands.literal("capturebench")
+                .then(Commands.argument("x", IntegerArgumentType.integer()).then(Commands.argument("z", IntegerArgumentType.integer())
+                    .executes(c -> {
+                        int x = IntegerArgumentType.getInteger(c, "x"), z = IntegerArgumentType.getInteger(c, "z");
+                        var level = c.getSource().getLevel();
+                        queue(() -> {
+                            for (int cx = (x >> 4) - 8; cx <= (x >> 4) + 8; cx++)
+                                for (int cz = (z >> 4) - 8; cz <= (z >> 4) + 8; cz++)
+                                    if (level.getChunkSource().getChunkNow(cx, cz) == null) {
+                                        level.getChunkSource().addTicketWithRadius(net.minecraft.server.level.TicketType.PLAYER_LOADING, new net.minecraft.world.level.ChunkPos(cx, cz), 0);
+                                        return false;
+                                    }
+                            CountryRoads.LOG.info(io.github.profetgit.countryroads.path.HousePaths.captureBench(level, x, z, 128));
+                            CountryRoads.LOG.info(io.github.profetgit.countryroads.path.HousePaths.snapCheck(level, x, z, 120));
+                            return true;
+                        });
+                        return 1;
+                    }))))
+            .then(Commands.literal("boresafe")
+                .then(Commands.argument("x", IntegerArgumentType.integer()).then(Commands.argument("z", IntegerArgumentType.integer())
+                    .then(Commands.argument("d", IntegerArgumentType.integer(0, 3)).then(Commands.argument("len", IntegerArgumentType.integer(1, 64))
+                        .executes(c -> {
+                            int x = IntegerArgumentType.getInteger(c, "x"), z = IntegerArgumentType.getInteger(c, "z");
+                            int dir = IntegerArgumentType.getInteger(c, "d"), len = IntegerArgumentType.getInteger(c, "len");
+                            var level = c.getSource().getLevel();
+                            queue(() -> {
+                                for (int cx = (x >> 4) - 2; cx <= (x >> 4) + 2; cx++)
+                                    for (int cz = (z >> 4) - 2; cz <= (z >> 4) + 5; cz++)
+                                        if (level.getChunkSource().getChunkNow(cx, cz) == null) {
+                                            level.getChunkSource().addTicketWithRadius(net.minecraft.server.level.TicketType.PLAYER_LOADING, new net.minecraft.world.level.ChunkPos(cx, cz), 0);
+                                            return false;
+                                        }
+                                CountryRoads.LOG.info(io.github.profetgit.countryroads.path.HousePaths.boreSafe(level, x, z, dir, len));
+                                return true;
+                            });
+                            return 1;
+                        }))))))
+            .then(Commands.literal("surveyweight")
+                .then(Commands.argument("w", com.mojang.brigadier.arguments.DoubleArgumentType.doubleArg(0, 5)).executes(c -> {
+                    io.github.profetgit.countryroads.path.HousePaths.surveyWeight(com.mojang.brigadier.arguments.DoubleArgumentType.getDouble(c, "w"));
+                    return 1;
+                })))
             .then(Commands.literal("borecost")
                 .then(Commands.argument("per", IntegerArgumentType.integer(0, 200)).then(Commands.argument("fixed", IntegerArgumentType.integer(0, 1000)).executes(c -> {
                     io.github.profetgit.countryroads.path.HousePaths.boreCost(IntegerArgumentType.getInteger(c, "per"), IntegerArgumentType.getInteger(c, "fixed"));

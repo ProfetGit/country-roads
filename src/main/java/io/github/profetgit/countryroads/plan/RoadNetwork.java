@@ -222,6 +222,18 @@ public final class RoadNetwork {
         return out;
     }
 
+    /** Edges whose road can come within margin of the block box (the filter plansNear uses), without planning them. */
+    public List<Edge> edgesNear(int x0, int z0, int x1, int z1, int margin) {
+        java.util.Set<Edge> out = new java.util.LinkedHashSet<>();
+        for (int rx = x0 >> REGION_SHIFT; rx <= x1 >> REGION_SHIFT; rx++)
+            for (int rz = z0 >> REGION_SHIFT; rz <= z1 >> REGION_SHIFT; rz++)
+                for (Edge e : edgesInRegion(rx, rz)) {
+                    double minor = e.length() / 2 * Math.sqrt(Planner.ELLIPSE * Planner.ELLIPSE - 1) + margin;
+                    if (boxSegmentDistance(x0, z0, x1, z1, e) <= minor) out.add(e);
+                }
+        return new ArrayList<>(out);
+    }
+
     /** The plan whose wayside camp starts in this chunk, if any. */
     public EdgePlan campAt(int cx, int cz) {
         if (!camps.available()) return null;

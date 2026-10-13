@@ -18,16 +18,21 @@ import net.minecraft.world.level.levelgen.Heightmap;
 final class StakeTest {
     private StakeTest() {}
 
+    /** Blocks force-loaded around the stake before the survey: the default, warm (the whole survey window) and cold (only the stake's chunks). */
+    static final int PRELOAD = 170, WARM = 330, COLD = 0;
+
     static int run(CommandSourceStack src, int x, int z, boolean keep) {
-        return run(src, x, z, keep, Integer.MIN_VALUE, 0);
+        return run(src, x, z, keep, Integer.MIN_VALUE, 0, PRELOAD);
     }
 
     static int run(CommandSourceStack src, int x, int z, boolean keep, int viaX, int viaZ) {
+        return run(src, x, z, keep, viaX, viaZ, PRELOAD);
+    }
+
+    static int run(CommandSourceStack src, int x, int z, boolean keep, int viaX, int viaZ, int preload) {
         ServerLevel level = src.getLevel();
-        int r = 170, cr = (r >> 4) + 1;
-        for (int dx = -cr; dx <= cr; dx++)
-            for (int dz = -cr; dz <= cr; dz++) level.setChunkForced((x >> 4) + dx, (z >> 4) + dz, true);
-        int[] phase = {-1};
+        int r = preload, cr = (r >> 4) + 1;
+        int[] phase = {-2}, settle = {0, 0};
         int[] built = new int[2];
         BlockPos[] stakeRef = new BlockPos[1], viaRef = new BlockPos[1];
         int[][] before = new int[1][];
@@ -35,17 +40,29 @@ final class StakeTest {
         @SuppressWarnings("unchecked")
         java.util.List<HousePaths.Cell>[] cells = new java.util.List[1];
         DevCommands.queue(() -> {
+            if (phase[0] == -2) {
+                // tickets only once this test's turn comes: tests run one after another and may share chunks
+                for (int dx = -cr; dx <= cr; dx++)
+                    for (int dz = -cr; dz <= cr; dz++) hold(level, (x >> 4) + dx, (z >> 4) + dz, true);
+                phase[0] = -1;
+                return false;
+            }
             if (phase[0] == -1) {
                 for (int dx = -cr; dx <= cr; dx++)
                     for (int dz = -cr; dz <= cr; dz++)
                         if (level.getChunkSource().getChunkNow((x >> 4) + dx, (z >> 4) + dz) == null) return false;
+                // let the server settle after the preload, so the survey is timed on a quiet server
+                var server = level.getServer();
+                long last = server.getTickTimesNanos()[server.getTickCount() % 100];
+                settle[0] = last < 30_000_000L ? settle[0] + 1 : 0;
+                if (settle[0] < 40 && ++settle[1] < 1200) return false;
                 int y = level.getHeight(Heightmap.Types.MOTION_BLOCKING_NO_LEAVES, x, z);
                 stakeRef[0] = new BlockPos(x, y, z);
                 level.setBlock(stakeRef[0], Stake.BLOCK.defaultBlockState(), 3);
                 HousePaths.survey(level, stakeRef[0], null);
                 if (viaX != Integer.MIN_VALUE) {
                     for (int dx = -1; dx <= 1; dx++)
-                        for (int dz = -1; dz <= 1; dz++) level.setChunkForced((viaX >> 4) + dx, (viaZ >> 4) + dz, true);
+                        for (int dz = -1; dz <= 1; dz++) hold(level, (viaX >> 4) + dx, (viaZ >> 4) + dz, true);
                     int vy = level.getHeight(Heightmap.Types.MOTION_BLOCKING_NO_LEAVES, viaX, viaZ);
                     BlockPos vp = new BlockPos(viaX, vy, viaZ);
                     level.setBlock(vp, Stake.BLOCK.defaultBlockState(), 3);
@@ -58,6 +75,19 @@ final class StakeTest {
             BlockPos stake = stakeRef[0];
             if (HousePaths.busy()) return false;
             StakeBlockEntity be = (StakeBlockEntity) level.getBlockEntity(stake);
+            if (phase[0] == 0) {
+                var st = io.github.profetgit.countryroads.path.SurveyStats.last;
+                if (st != null) {
+                    CountryRoads.LOG.info(st.line() + " at=" + x + "," + z + " preload=" + preload);
+                    synchronized (st.candLines) {
+                        for (String cl : st.candLines) CountryRoads.LOG.info(cl);
+                    }
+                    CountryRoads.LOG.info("CR-STAKE-COST direct=" + st.costDirect + " final=" + st.costFinal + " length=" + (be != null && be.survey != null ? be.survey.length() : -1)
+                        + " tunnelCells=" + (be != null && be.survey != null ? be.survey.tunnelCells() : -1));
+                }
+                for (int dx = -cr; dx <= cr; dx++)
+                    for (int dz = -cr; dz <= cr; dz++) hold(level, (x >> 4) + dx, (z >> 4) + dz, false);
+            }
             switch (phase[0]++) {
                 case 0 -> {
                     if (be == null || be.status != StakeBlockEntity.PREVIEW) {
@@ -118,6 +148,16 @@ final class StakeTest {
                         else if (e.state().is(net.minecraft.tags.BlockTags.LEAVES)) leavesCut++;
                     }
                     CountryRoads.LOG.info("CR-STAKE-TREES logs removed " + logsCut + " (must be 0), leaves removed " + leavesCut);
+                    int shownLogs = 0;
+                    for (var e : be.journal) {
+                        if (!e.state().is(net.minecraft.tags.BlockTags.LOGS) || shownLogs++ >= 4) continue;
+                        String what = "no cell";
+                        for (var c : cells[0])
+                            if (c.x() == e.pos().getX() && c.z() == e.pos().getZ())
+                                what = "cell y=" + c.y() + (c.edge() ? " edge" : " centre") + (c.fringe() ? " fringe" : "") + " stair=" + c.stair() + " tun=" + c.tun() + " water=" + c.water();
+                        CountryRoads.LOG.info("CR-STAKE-LOGCUT " + e.pos().toShortString() + " was " + e.state().getBlock().getDescriptionId().replace("block.minecraft.", "")
+                            + " now " + level.getBlockState(e.pos()).getBlock().getDescriptionId().replace("block.minecraft.", "") + " " + what);
+                    }
                     if (viaRef[0] != null) {
                         boolean onRoute = false;
                         for (var c : cells[0]) if (!c.edge() && c.x() == viaRef[0].getX() && c.z() == viaRef[0].getZ()) onRoute = true;
@@ -126,10 +166,13 @@ final class StakeTest {
                     int[] mid = snapshot(level, cells[0]);
                     int changed = diff(before[0], mid);
                     HousePaths.takeUp(level, stake);
+                    // a waypoint stake is used up by the build (it comes back as an item): put it back for the comparison
+                    if (viaRef[0] != null) level.setBlock(viaRef[0], Stake.BLOCK.defaultBlockState(), 3);
                     int[] after = snapshot(level, cells[0]);
                     int left = diff(before[0], after);
                     if (left > 0) explain(level, cells[0], beforeStates[0]);
                     level.setBlock(stake, Blocks.AIR.defaultBlockState(), 3);
+                    if (viaRef[0] != null) level.setBlock(viaRef[0], Blocks.AIR.defaultBlockState(), 3);
                     CountryRoads.LOG.info("CR-STAKE " + (built[0] > 0 && changed > 0 && left == 0 ? "PASS" : "FAIL") + " cells=" + built[0]
                         + " journal=" + built[1] + " changedColumns=" + changed + " notRestored=" + left);
                     return true;
@@ -140,6 +183,76 @@ final class StakeTest {
             }
         });
         return 1;
+    }
+
+    /**
+     * Cancel: a survey is started (nothing preloaded, so it is fetching chunks) and the stake broken a few ticks in.
+     * PASS when no survey is left, it held no tickets afterwards and no preview came. Multi: three stakes 48 blocks
+     * apart survey at once; PASS when all three end with a preview.
+     */
+    static int special(CommandSourceStack src, int x, int z, String mode) {
+        ServerLevel level = src.getLevel();
+        int n = mode.equals("multi") ? 3 : 1;
+        BlockPos[] stakes = new BlockPos[n];
+        int[] age = {0}, broke = {0};
+        DevCommands.queue(() -> {
+            if (age[0] == 0) {
+                for (int i = 0; i < n; i++) {
+                    int sx = x + (i == 1 ? 48 : 0), sz = z + (i == 2 ? 48 : 0);
+                    for (int dx = -1; dx <= 1; dx++)
+                        for (int dz = -1; dz <= 1; dz++) hold(level, (sx >> 4) + dx, (sz >> 4) + dz, true);
+                }
+            }
+            age[0]++;
+            if (stakes[0] == null) {
+                for (int i = 0; i < n; i++) {
+                    int sx = x + (i == 1 ? 48 : 0), sz = z + (i == 2 ? 48 : 0);
+                    if (level.getChunkSource().getChunkNow(sx >> 4, sz >> 4) == null) return false;
+                }
+                for (int i = 0; i < n; i++) {
+                    int sx = x + (i == 1 ? 48 : 0), sz = z + (i == 2 ? 48 : 0);
+                    stakes[i] = new BlockPos(sx, level.getHeight(Heightmap.Types.MOTION_BLOCKING_NO_LEAVES, sx, sz), sz);
+                    level.setBlock(stakes[i], Stake.BLOCK.defaultBlockState(), 3);
+                    HousePaths.survey(level, stakes[i], null);
+                }
+                age[0] = 1;
+                return false;
+            }
+            if (mode.equals("cancel")) {
+                if (broke[0] == 0 && (HousePaths.surveyTickets() > 0 || age[0] > 2400)) {
+                    broke[0] = age[0];
+                    int heldBefore = HousePaths.surveyTickets();
+                    HousePaths.takeUp(level, stakes[0]);
+                    level.setBlock(stakes[0], Blocks.AIR.defaultBlockState(), 3);
+                    CountryRoads.LOG.info("CR-STAKE-CANCEL broke the stake while surveying (tickets held " + heldBefore + ")");
+                }
+                if (broke[0] == 0 || age[0] < broke[0] + 100) return false;
+                boolean ok = !HousePaths.busy() && HousePaths.surveyTickets() == 0;
+                CountryRoads.LOG.info("CR-STAKE-CANCEL " + (ok ? "PASS" : "FAIL") + " busy=" + HousePaths.busy() + " ticketsLeft=" + HousePaths.surveyTickets());
+            } else {
+                if (HousePaths.busy() && age[0] < 4000) return false;
+                int previews = 0;
+                for (BlockPos s : stakes)
+                    if (level.getBlockEntity(s) instanceof StakeBlockEntity be && be.status == StakeBlockEntity.PREVIEW) previews++;
+                CountryRoads.LOG.info("CR-STAKE-MULTI " + (previews == n ? "PASS" : "FAIL") + " previews=" + previews + "/" + n + " ticks=" + age[0]
+                    + " ticketsLeft=" + HousePaths.surveyTickets());
+                for (BlockPos s : stakes) level.setBlock(s, Blocks.AIR.defaultBlockState(), 3);
+            }
+            for (int i = 0; i < n; i++) {
+                int sx = x + (i == 1 ? 48 : 0), sz = z + (i == 2 ? 48 : 0);
+                for (int dx = -1; dx <= 1; dx++)
+                    for (int dz = -1; dz <= 1; dz++) hold(level, (sx >> 4) + dx, (sz >> 4) + dz, false);
+            }
+            return true;
+        });
+        return 1;
+    }
+
+    /** Keeps a chunk loaded (not ticking) for the test, or lets it go. */
+    private static void hold(ServerLevel level, int cx, int cz, boolean on) {
+        var pos = new net.minecraft.world.level.ChunkPos(cx, cz);
+        if (on) level.getChunkSource().addTicketWithRadius(net.minecraft.server.level.TicketType.PLAYER_LOADING, pos, 0);
+        else level.getChunkSource().removeTicketWithRadius(net.minecraft.server.level.TicketType.PLAYER_LOADING, pos, 0);
     }
 
     /**

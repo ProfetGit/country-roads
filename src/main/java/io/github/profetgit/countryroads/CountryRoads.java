@@ -22,12 +22,15 @@ public final class CountryRoads implements ModInitializer {
         CommandRegistrationCallback.EVENT.register((dispatcher, context, selection) -> DevCommands.register(dispatcher));
         RoadColumns.init();
         io.github.profetgit.countryroads.path.Stake.init();
+        io.github.profetgit.countryroads.path.HousePaths.init();
         ServerTickEvents.END_SERVER_TICK.register(io.github.profetgit.countryroads.path.HousePaths::tick);
         ServerTickEvents.END_SERVER_TICK.register(server -> DevCommands.tick());
         ServerTickEvents.END_LEVEL_TICK.register(RoadSpeed::tick);
         ServerTickEvents.END_SERVER_TICK.register(server -> Retrofit.tick());
         ServerChunkEvents.CHUNK_LOAD.register(Retrofit::onLoad);
+        ServerLifecycleEvents.SERVER_STOPPING.register(server -> io.github.profetgit.countryroads.path.HousePaths.stop());
         ServerLifecycleEvents.SERVER_STOPPED.register(server -> RoadNetwork.clear());
+        ServerLifecycleEvents.END_DATA_PACK_RELOAD.register((server, resources, ok) -> io.github.profetgit.countryroads.path.HousePaths.reloaded());
         LOG.info("Country Roads loaded");
     }
 }

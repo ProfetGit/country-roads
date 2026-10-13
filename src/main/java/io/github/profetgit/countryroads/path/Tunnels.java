@@ -33,19 +33,25 @@ final class Tunnels {
         for (int m = 1; m < len; m++) {
             int cx = x + DX[d] * m, cz = z + DZ[d] * m;
             if (RoadColumns.isRoad(level, cx, cz)) return false;
-            for (int l = -2; l <= 2; l++)
+            for (int l = -2; l <= 2; l++) {
+                SurveyStats.touch(level, cx + l * rx, cz + l * rz);
                 for (int yy = y - 1; yy <= y + 5; yy++) {
                     BlockState s = level.getBlockState(p.set(cx + l * rx, yy, cz + l * rz));
                     if (!s.getFluidState().isEmpty() || Retrofit.isCrafted(s)) return false;
                     if (Math.abs(l) <= 1 && yy > y && yy <= y + ROOF && (s.is(BlockTags.LOGS) || s.is(BlockTags.LEAVES))) return false;
                 }
+            }
         }
         return true;
     }
 
-    /** A frame or portal block goes in unless the column is itself part of the path (another stretch or a bend can pass close by). */
+    /**
+     * A frame or portal block goes in unless the column is itself part of the path (another stretch or a bend can pass
+     * close by), or a tree stands there: logs are never cut (a portal post once replaced the trunk beside it).
+     */
     private static void put(ServerLevel level, StakeBlockEntity be, BlockPos pos, BlockState state, java.util.Set<Long> cols) {
         if (cols.contains(net.minecraft.world.level.ChunkPos.pack(pos.getX(), pos.getZ()))) return;
+        if (level.getBlockState(pos).is(BlockTags.LOGS)) return;
         HousePaths.change(level, be, pos, state);
     }
 

@@ -45,8 +45,8 @@ import net.minecraft.world.level.levelgen.Heightmap;
  * stake restores every block it changed and refunds what was paid.
  */
 public final class HousePaths {
-    static final int PREVIEW_TICKS = 2400, CONTAINER_REACH = 8, WAYPOINT_RADIUS = 128;
-    static final long SLICE_NANOS = 2_000_000;
+    static final int PREVIEW_TICKS = 2400, CONTAINER_REACH = 8, WAYPOINT_RADIUS = 128, PREVIEW_REACH = 96;
+    static final long SLICE_NANOS = 1_500_000, SLICE_IDLE_NANOS = 4_000_000;
     /**
      * Path blocks go in (and come back out) exactly, without neighbour updates: a full update would break the top half
      * of tall grass before it is journaled, and turn path under a slab into dirt.
@@ -82,6 +82,16 @@ public final class HousePaths {
     private static void tell(ServerPlayer player, Component message, boolean overlay) {
         if (player != null) player.sendSystemMessage(message, overlay);
         else io.github.profetgit.countryroads.CountryRoads.LOG.info("CR-STAKE-MSG " + message.getString());
+    }
+
+    /** Mod init: the survey's chunk ticket type is registered with the other types. */
+    public static void init() {
+        PathSearch.init();
+    }
+
+    /** Survey chunk tickets held right now (all surveys). */
+    public static int surveyTickets() {
+        return PathSearch.held;
     }
 
     public static boolean busy() {
@@ -130,8 +140,130 @@ public final class HousePaths {
         return best;
     }
 
+    /** Stops the surveys of a stake (their tickets go, a late result is dropped). */
+    private static void cancelSurveys(BlockPos stake) {
+        SURVEYS.removeIf(j -> {
+            if (!j.stake.equals(stake)) return false;
+            j.cancel();
+            return true;
+        });
+    }
+
+    /** Dev: time the column capture over the loaded chunks within r blocks of (x, z), several rounds. */
+    public static String captureBench(ServerLevel level, int x, int z, int r) {
+        StringBuilder sb = new StringBuilder("CR-CAPTURE");
+        for (int round = 0; round < 6; round++) {
+            int n = 0;
+            long t0 = System.nanoTime();
+            for (int cx = (x - r) >> 4; cx <= (x + r) >> 4; cx++)
+                for (int cz = (z - r) >> 4; cz <= (z + r) >> 4; cz++) {
+                    var c = level.getChunkSource().getChunkNow(cx, cz);
+                    if (c == null) continue;
+                    ColumnSnapshot.capture(c, level.getMinY());
+                    n++;
+                }
+            sb.append(String.format(java.util.Locale.ROOT, " r%d=%d chunks %.1fus", round, n, n == 0 ? 0 : (System.nanoTime() - t0) / 1000.0 / n));
+        }
+        return sb.toString();
+    }
+
+    /**
+     * Dev: compares the snapshot with live reads (the old survey's) for every column within r of (x, z) whose chunks
+     * are loaded: ground and tree cost. Prints CR-SNAPCHECK with the mismatch counts and the first few.
+     */
+    public static String snapCheck(ServerLevel level, int x, int z, int r) {
+        ColumnSnapshot snap = new ColumnSnapshot();
+        for (int cx = (x - r - 1) >> 4; cx <= (x + r + 1) >> 4; cx++)
+            for (int cz = (z - r - 1) >> 4; cz <= (z + r + 1) >> 4; cz++) {
+                var c = level.getChunkSource().getChunkNow(cx, cz);
+                if (c != null) snap.chunks.put(ChunkPos.pack(cx, cz), ColumnSnapshot.capture(c, level.getMinY()));
+            }
+        ColumnSnapshot.View view = new ColumnSnapshot.View(snap, x, z, r + 2, List.of());
+        int cols = 0, badGround = 0, badTree = 0;
+        StringBuilder ex = new StringBuilder();
+        for (int qx = x - r; qx <= x + r; qx++)
+            for (int qz = z - r; qz <= z + r; qz++) {
+                if (snap.get(qx >> 4, qz >> 4) == null) continue;
+                cols++;
+                int live = liveGround(level, qx, qz), g = view.ground(qx, qz);
+                if (live != g) {
+                    if (badGround++ < 4) ex.append(" ground ").append(qx).append(',').append(qz).append(" live=").append(live).append(" snap=").append(g);
+                    continue;
+                }
+                if (!Terrain.usable(g)) continue;
+                int walk = Terrain.level(g);
+                boolean nbLoaded = true;
+                for (Direction dd : DIRS) if (snap.get((qx + dd.getStepX()) >> 4, (qz + dd.getStepZ()) >> 4) == null) nbLoaded = false;
+                if (!nbLoaded) continue;
+                for (int w = walk - 1; w <= walk + 1; w++) {
+                    int lt = liveTree(level, qx, qz, w), st = view.treeCost(qx, qz, w);
+                    if (lt != st) {
+                        if (badTree++ < 4) {
+                            ex.append(" tree ").append(qx).append(',').append(qz).append(" walk=").append(w).append(" live=").append(lt).append(" snap=").append(st);
+                            for (Direction dd : DIRS) {
+                                BlockPos np = new BlockPos(qx + dd.getStepX(), w + 1, qz + dd.getStepZ());
+                                if (!level.getBlockState(np).is(BlockTags.LOGS)) continue;
+                                int top = level.getHeight(Heightmap.Types.MOTION_BLOCKING_NO_LEAVES, np.getX(), np.getZ()) - 1;
+                                ex.append(" [log at y").append(w + 1).append(", column top y").append(top).append('=')
+                                    .append(level.getBlockState(np.atY(top)).getBlock().getDescriptionId().replace("block.minecraft.", "")).append(']');
+                            }
+                        }
+                    }
+                }
+            }
+        return "CR-SNAPCHECK " + (badGround == 0 && badTree == 0 ? "PASS" : "FAIL") + " columns=" + cols + " ground=" + badGround + " tree=" + badTree + ex;
+    }
+
+    /** The old survey's ground rule, read live (PathSearch.passable before the snapshot). */
+    private static int liveGround(ServerLevel level, int x, int z) {
+        int top = level.getHeight(Heightmap.Types.MOTION_BLOCKING_NO_LEAVES, x, z) - 1;
+        BlockState s = level.getBlockState(new BlockPos(x, top, z));
+        if (s.is(Stake.BLOCK)) {
+            top--;
+            s = level.getBlockState(new BlockPos(x, top, z));
+        }
+        if (s.is(Blocks.WATER)) {
+            int below = top;
+            while (below > level.getMinY() && level.getBlockState(new BlockPos(x, below, z)).is(Blocks.WATER) && top - below < 6) below--;
+            return top - below >= 6 ? Terrain.CLOSED : top + Terrain.WET;
+        }
+        if (!s.getFluidState().isEmpty() || s.is(BlockTags.LOGS) || (Retrofit.isCrafted(s) && !RoadColumns.isRoad(level, x, z))) return Terrain.CLOSED;
+        return top;
+    }
+
+    /** The old survey's tree cost, read live. */
+    private static int liveTree(ServerLevel level, int x, int z, int walkY) {
+        int v = 0;
+        for (int dy = 1; dy <= LEAF_ROOM; dy++) if (level.getBlockState(new BlockPos(x, walkY + dy, z)).is(BlockTags.LEAVES)) v += 14;
+        for (Direction dd : DIRS) if (level.getBlockState(new BlockPos(x + dd.getStepX(), walkY + 1, z + dd.getStepZ())).is(BlockTags.LOGS)) v += 8;
+        return v;
+    }
+
+    /** Dev: is a bore safe (Tunnels.safe at the column's walking level), and what the heights along it are. */
+    public static String boreSafe(ServerLevel level, int x, int z, int d, int len) {
+        int y = Terrain.level(liveGround(level, x, z));
+        StringBuilder sb = new StringBuilder("CR-BORESAFE " + x + "," + z + " d=" + d + " y=" + y + " len=" + len + " safe=" + Tunnels.safe(level, x, z, d, y, len) + " ground:");
+        for (int m = 1; m <= len; m++) sb.append(' ').append(Terrain.level(liveGround(level, x + DX[d] * m, z + DZ[d] * m)) - y);
+        return sb.toString();
+    }
+
+    /** Data packs reloaded: block tags may have changed. */
+    public static void reloaded() {
+        ColumnSnapshot.forgetKinds();
+    }
+
+    /** The server is stopping: nothing carries over to the next world. */
+    public static void stop() {
+        for (PathSearch j : SURVEYS) j.cancel();
+        SURVEYS.clear();
+        ColumnSnapshot.forgetKinds();
+        ROLLOUTS.clear();
+        PREVIEWS.clear();
+        OWNERS.clear();
+    }
+
     public static void survey(ServerLevel level, BlockPos stake, ServerPlayer player) {
-        SURVEYS.removeIf(j -> j.stake.equals(stake));
+        cancelSurveys(stake);
         PREVIEWS.remove(stake);
         List<BlockPos> waypoints = new ArrayList<>();
         if (level.getBlockEntity(stake) instanceof StakeBlockEntity be) {
@@ -191,7 +323,7 @@ public final class HousePaths {
     /** The stake is being broken: put back every block the path changed and give back the materials. */
     public static void takeUp(ServerLevel level, BlockPos stake) {
         PREVIEWS.remove(stake);
-        SURVEYS.removeIf(j -> j.stake.equals(stake));
+        cancelSurveys(stake);
         ROLLOUTS.removeIf(r -> r.stake.equals(stake));
         if (level.getBlockEntity(stake) instanceof StakeBlockEntity first) {
             if (first.role == StakeBlockEntity.WAYPOINT) {
@@ -216,7 +348,11 @@ public final class HousePaths {
             StakeBlockEntity.Entry e = be.journal.get(i);
             level.setBlock(e.pos(), e.state(), EXACT);
         }
-        for (long c : be.columns) RoadColumns.mark(level, ChunkPos.getX(c), ChunkPos.getZ(c), false);
+        HousePathIndex index = HousePathIndex.of(level);
+        for (long c : be.columns) {
+            RoadColumns.mark(level, ChunkPos.getX(c), ChunkPos.getZ(c), false);
+            index.set(ChunkPos.getX(c), ChunkPos.getZ(c), false);
+        }
         for (ItemStack st : be.paid) {
             ItemStack back = st.copy();
             if (back.is(Items.TORCH)) {
@@ -233,12 +369,32 @@ public final class HousePaths {
     }
 
     public static void tick(net.minecraft.server.MinecraftServer server) {
-        long until = System.nanoTime() + SLICE_NANOS;
+        // surveys get a little more of a tick the server has to spare
+        long last = server.getTickTimesNanos()[server.getTickCount() % 100];
+        long until = System.nanoTime() + (last < 20_000_000L ? SLICE_IDLE_NANOS : SLICE_NANOS);
+        for (PathSearch j : SURVEYS) j.stats.tickTimes.add(server.getTickTimesNanos()[server.getTickCount() % 100]);
         for (Iterator<PathSearch> it = SURVEYS.iterator(); it.hasNext() && System.nanoTime() < until; ) {
             PathSearch j = it.next();
-            if (j.step(until)) {
+            long t0 = System.nanoTime(), a0 = SurveyStats.allocated();
+            SurveyStats.active = j.stats;
+            boolean done = j.step(until);
+            SurveyStats.active = null;
+            long dt = System.nanoTime() - t0;
+            j.stats.mainNanos += dt;
+            j.stats.mainMaxNanos = Math.max(j.stats.mainMaxNanos, dt);
+            j.stats.allocBytes += SurveyStats.allocated() - a0;
+            j.stats.ticks++;
+            if (done) {
                 it.remove();
+                t0 = System.nanoTime();
+                SurveyStats.active = j.stats;
                 finished(j);
+                SurveyStats.active = null;
+                j.stats.mainNanos += System.nanoTime() - t0;
+                j.stats.endNanos = System.nanoTime();
+                j.stats.chunksReq = j.requestedCount();
+                j.stats.outcome = j.survey != null ? "OK" : String.valueOf(j.failure);
+                SurveyStats.last = j.stats;
             }
         }
         for (Iterator<Rollout> it = ROLLOUTS.iterator(); it.hasNext(); ) {
@@ -258,8 +414,13 @@ public final class HousePaths {
                         for (int dy = 1; dy <= 4; dy++) p.level.sendParticles(p.player, blue, true, false, w.getX() + 0.5, w.getY() + dy * 0.5, w.getZ() + 0.5, 1, 0.05, 0.1, 0.05, 0);
                 }
                 DustParticleOptions dust = new DustParticleOptions(0xF5D76E, 1.1f);
-                for (Cell c : p.cells)
+                double px = p.player.getX(), pz = p.player.getZ();
+                for (Cell c : p.cells) {
+                    // cells far from the player would not be seen: no packet for them
+                    double dx = c.x + 0.5 - px, dz = c.z + 0.5 - pz;
+                    if (dx * dx + dz * dz > PREVIEW_REACH * PREVIEW_REACH) continue;
                     p.level.sendParticles(p.player, dust, true, false, c.x + 0.5, c.y + 1.15, c.z + 0.5, 1, 0.15, 0.02, 0.15, 0);
+                }
             }
         }
     }
@@ -272,7 +433,7 @@ public final class HousePaths {
             return;
         }
         Survey sv = j.survey;
-        if (j.level.getBlockEntity(j.stake) instanceof StakeBlockEntity be && be.status != StakeBlockEntity.BUILT) {
+        if (j.level.hasChunkAt(j.stake) && j.level.getBlockEntity(j.stake) instanceof StakeBlockEntity be && be.status != StakeBlockEntity.BUILT) {
             be.status = StakeBlockEntity.PREVIEW;
             be.survey = sv;
             if (j.player != null) PREVIEWS.put(j.stake, new Preview(j.level, j.stake, j.player, sv.cells, j.level.getGameTime() + PREVIEW_TICKS));
@@ -321,10 +482,7 @@ public final class HousePaths {
         var biome = level.getBiome(at);
         if (c.tun >= 1) {
             Tunnels.carve(level, be, c, cols);
-            if (!RoadColumns.isRoad(level, c.x, c.z)) {
-                RoadColumns.mark(level, c.x, c.z, true);
-                be.columns.add(key(c.x, c.z));
-            }
+            markPath(level, be, c.x, c.z);
             return;
         }
         BlockState surface;
@@ -352,19 +510,29 @@ public final class HousePaths {
             if (s.isAir() || s.is(BlockTags.LOGS) || s.is(Stake.BLOCK)) continue;
             if (s.is(BlockTags.LEAVES) ? dy <= LEAF_ROOM : !Retrofit.isCrafted(s)) change(level, be, q, Blocks.AIR.defaultBlockState());
         }
-        if (!RoadColumns.isRoad(level, c.x, c.z)) {
-            RoadColumns.mark(level, c.x, c.z, true);
-            be.columns.add(key(c.x, c.z));
-        }
+        markPath(level, be, c.x, c.z);
         if (quiet) return;
         level.sendParticles(new BlockParticleOption(ParticleTypes.BLOCK, surface), c.x + 0.5, y + 1.05, c.z + 0.5, 6, 0.3, 0.05, 0.3, 0);
         if (((c.x + c.z) & 3) == 0)
             level.playSound(null, at, surface.getSoundType().getPlaceSound(), SoundSource.BLOCKS, 0.5f, 0.9f + ((h >>> 40) & 7) * 0.03f);
     }
 
+    /** A path column joins the road columns (other stakes can connect to it) and the index surveys read. */
+    private static void markPath(ServerLevel level, StakeBlockEntity be, int x, int z) {
+        if (RoadColumns.isRoad(level, x, z)) return;
+        RoadColumns.mark(level, x, z, true);
+        HousePathIndex.of(level).set(x, z, true);
+        be.columns.add(key(x, z));
+    }
+
     public static void boreCost(int per, int fixed) {
-        PathSearch.borePer = per;
-        PathSearch.boreFixed = fixed;
+        RouteSolver.borePer = per;
+        RouteSolver.boreFixed = fixed;
+    }
+
+    /** Weight of the survey's distance estimate (0 = plain Dijkstra, for comparing routes with the old search). */
+    public static void surveyWeight(double w) {
+        RouteSolver.weight = w;
     }
 
     public static boolean isFrame(Cell c) {

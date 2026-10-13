@@ -1,6 +1,5 @@
 package io.github.profetgit.countryroads.path;
 
-import io.github.profetgit.countryroads.world.RoadColumns;
 import java.util.ArrayList;
 import java.util.HashSet;
 import java.util.List;
@@ -48,14 +47,14 @@ final class PathPlan {
         return new Plan(y, stair);
     }
 
-    /** The finished survey for a route (door end first, as PathSearch.extract gives it), or null when the stake is already on the road. */
-    static HousePaths.Survey build(PathSearch j, List<long[]> acc, long endKey) {
+    /** The finished survey for a route (door end first, as the solver's legs give it), or null when the stake is already on the road. */
+    static HousePaths.Survey build(Terrain t, int sx, int sz, int stakeY, List<long[]> acc, long endKey) {
         int n = acc.size();
         if (n == 0) return null;
         int[] xs = new int[n], zs = new int[n], ty = new int[n], dir = new int[n + 1], tm = new int[n];
         boolean[] wet = new boolean[n], fixed = new boolean[n];
         Set<Long> used = new HashSet<>();
-        int px = j.sx, pz = j.sz, lastLevel = j.stake.getY() - 1;
+        int px = sx, pz = sz, lastLevel = stakeY - 1;
         for (int i = 0; i < n; i++) {
             long col = acc.get(i)[0];
             xs[i] = ChunkPos.getX(col);
@@ -68,17 +67,17 @@ final class PathPlan {
                 ty[i] = lastLevel;
                 fixed[i] = true;
             } else {
-                int g = j.ground(xs[i], zs[i]);
+                int g = t.ground(xs[i], zs[i]);
                 wet[i] = g >= 100000;
-                ty[i] = PathSearch.level(g);
+                ty[i] = Terrain.level(g);
                 lastLevel = ty[i];
                 fixed[i] = wet[i];
             }
             used.add(col);
         }
         dir[n] = dirOf(ChunkPos.getX(endKey) - px, ChunkPos.getZ(endKey) - pz);
-        int roadY = PathSearch.level(j.ground(ChunkPos.getX(endKey), ChunkPos.getZ(endKey)));
-        Plan plan = plan(ty, fixed, j.stake.getY() - 1, roadY, dir);
+        int roadY = Terrain.level(t.ground(ChunkPos.getX(endKey), ChunkPos.getZ(endKey)));
+        Plan plan = plan(ty, fixed, stakeY - 1, roadY, dir);
 
         // tunnel cells: open cut where the ground is not high enough to roof, portals at the first and last roofed cell
         int[] tun = new int[n], tidx = new int[n];
@@ -92,7 +91,7 @@ final class PathPlan {
             while (i < n && tm[i] > 0 && (i == a || tm[i] == tm[i - 1] + 1)) i++;
             int first = -1, last = -1, run = 0;
             for (int q = a; q < i; q++) {
-                boolean roofed = j.ground(xs[q], zs[q]) >= plan.y[q] + Tunnels.ROOF;
+                boolean roofed = t.ground(xs[q], zs[q]) >= plan.y[q] + Tunnels.ROOF;
                 tun[q] = roofed ? 1 : 0;
                 if (roofed) {
                     tidx[q] = run++;
@@ -106,7 +105,7 @@ final class PathPlan {
             }
         }
 
-        long seed = PathSearch.key(j.sx, j.sz);
+        long seed = RouteSolver.key(sx, sz);
         int earth = 0, planks = 0, torches = 0, tunnelCells = 0;
         List<List<HousePaths.Cell>> bands = new ArrayList<>();
         for (int i = 0; i < n; i++) {
@@ -122,7 +121,7 @@ final class PathPlan {
                 int rx = -DZ[dir[i]], rz = DX[dir[i]];
                 for (int s = -1; s <= 1; s += 2) {
                     int qx = xs[i] + s * rx, qz = zs[i] + s * rz;
-                    if (used.contains(ChunkPos.pack(qx, qz)) || (qx == j.sx && qz == j.sz)) continue;
+                    if (used.contains(ChunkPos.pack(qx, qz)) || (qx == sx && qz == sz)) continue;
                     bands.get(i).add(new HousePaths.Cell(qx, qz, plan.y[i], false, true, plan.stair[i], dir[i], false, tun[i], tidx[i]));
                     used.add(ChunkPos.pack(qx, qz));
                 }
@@ -135,22 +134,22 @@ final class PathPlan {
         // the worn band: a wandering offset and a changing radius around the walked line, ragged at the rim
         for (int i = 1; i + 1 < n; i++) {
             if (wet[i] || tun[i] >= 0 || tm[i] > 0) continue;
-            int off = (int) Math.round((PathSearch.along(seed + 11, i) - 0.5) * 2.4);
-            double rad = 0.35 + 1.55 * PathSearch.along(seed + 23, i);
+            int off = (int) Math.round((RouteSolver.along(seed + 11, i) - 0.5) * 2.4);
+            double rad = 0.35 + 1.55 * RouteSolver.along(seed + 23, i);
             int rx = -DZ[dir[i]], rz = DX[dir[i]];
             for (int o = -3; o <= 3; o++) {
                 if (o == 0) continue;
                 int qx = xs[i] + o * rx, qz = zs[i] + o * rz;
                 long qk = ChunkPos.pack(qx, qz);
-                if (used.contains(qk) || (qx == j.sx && qz == j.sz)) continue;
-                double jitter = (PathSearch.lattice(seed + 5, qx, qz) - 0.5) * 1.1;
+                if (used.contains(qk) || (qx == sx && qz == sz)) continue;
+                double jitter = (RouteSolver.lattice(seed + 5, qx, qz) - 0.5) * 1.1;
                 double d = Math.abs(o - off);
                 boolean fringe = d > rad;
                 if (d > rad + jitter) continue;
-                if (fringe && PathSearch.lattice(seed + 9, qx, qz) > 0.5) continue;
-                if (RoadColumns.isRoad(j.level, qx, qz)) continue;
-                int sh = j.ground(qx, qz);
-                if (sh < -1000 || sh >= 100000 || j.treeCost(qx, qz, plan.y[i]) > 0) continue;
+                if (fringe && RouteSolver.lattice(seed + 9, qx, qz) > 0.5) continue;
+                if (t.road(qx, qz)) continue;
+                int sh = t.ground(qx, qz);
+                if (sh < -1000 || sh >= 100000 || t.treeCost(qx, qz, plan.y[i]) > 0) continue;
                 boolean steps = plan.stair[i] >= 0;
                 if (steps ? fringe || Math.abs(sh - plan.y[i]) > 1 : sh != plan.y[i]) continue;
                 // keep the band joined to the walked line: an outer cell needs the one inside it
