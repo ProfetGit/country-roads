@@ -243,4 +243,32 @@ final class StreetChecks {
         });
         return 1;
     }
+
+    /** CR-STREETTOPS: street surface blocks of the band columns in the chunk holding (x, z), for the retrofit test. */
+    static int tops(CommandSourceStack src, int x0, int z0) {
+        ServerLevel level = src.getLevel();
+        RoadNetwork n = RoadNetwork.get(level);
+        if (n == null) return 0;
+        int cx = x0 >> 4, cz = z0 >> 4;
+        ChunkAccess chunk = level.getChunkSource().getChunk(cx, cz, ChunkStatus.FULL, true);
+        Map<String, Integer> hist = new TreeMap<>();
+        var streets = n.streets(cx, cz);
+        BlockPos.MutableBlockPos pos = new BlockPos.MutableBlockPos();
+        for (int lz = 0; lz < 16; lz++)
+            for (int lx = 0; lx < 16; lx++) {
+                int x = (cx << 4) + lx, z = (cz << 4) + lz;
+                boolean band = false;
+                for (var b : streets) band |= b.contains(x, z);
+                if (!band) continue;
+                int y = chunk.getHeight(Heightmap.Types.WORLD_SURFACE, lx, lz) + 2;
+                for (; y > chunk.getMinY() + 1; y--) {
+                    BlockState st = chunk.getBlockState(pos.set(x, y, z));
+                    if (st.isAir() || (!st.isSolid() && !st.is(Blocks.DIRT_PATH))) continue;
+                    hist.merge(st.getBlock().getDescriptionId().replace("block.minecraft.", ""), 1, Integer::sum);
+                    break;
+                }
+            }
+        report(src, "CR-STREETTOPS chunk " + cx + "," + cz + " " + hist);
+        return 1;
+    }
 }

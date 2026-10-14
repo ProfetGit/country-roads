@@ -41,6 +41,7 @@ Build files copied from `mods/BuildBuddy/build.gradle.kts` + `gradle.properties`
 - **M8 Retrofit** — Check: vanilla world → mark chunks lived-in → reopen with mod: lived-in chunk hashes unchanged, roads elsewhere, MSPT p99 < 50.
 - **M9 House paths** — Check: server scenario stake → preview → confirm → rollout → break stake restores identical hash + correct refund; client still of ghost + bill.
 - **M10 Perks** — Check: 0 monster spawns on road columns vs control under `/tick sprint`; map pixels coloured; speed modifier on/off; trader follows waypoints.
+- **M12 Village streets** (2026-10-14, user: same look as our roads; new chunks + unlived-in old ones) — `StreetBands` (street/terminator template columns), `StreetPainter` (biome road mix on the street surface, same noise as roads), roads dock onto the nearest street column through a connector out past the village's terrain shaping (`Docking`, beard radius 12). Check: `streetsnap` only band tops differ, `docks` PASS (dock in band, dy <= 1, steps <= 1), `check`/`decor`/`perks` PASS, retrofit leaves lived-in chunks untouched.
 - **M11 Config, Mod Menu, perf pass, release jar**, then art/showcase via the usual skills.
 
 ## Risks

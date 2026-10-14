@@ -108,6 +108,18 @@ public final class DevCommands {
                 .then(Commands.argument("radius", IntegerArgumentType.integer(16, 4000)).executes(c -> StreetChecks.snap(c.getSource(), IntegerArgumentType.getInteger(c, "radius")))))
             .then(Commands.literal("docks")
                 .then(Commands.argument("radius", IntegerArgumentType.integer(16, 4000)).executes(c -> StreetChecks.docks(c.getSource(), IntegerArgumentType.getInteger(c, "radius")))))
+            .then(Commands.literal("streettops")
+                .then(Commands.argument("x", IntegerArgumentType.integer()).then(Commands.argument("z", IntegerArgumentType.integer())
+                    .executes(c -> {
+                        var src = c.getSource();
+                        int x = IntegerArgumentType.getInteger(c, "x"), z = IntegerArgumentType.getInteger(c, "z");
+                        queue(() -> {
+                            if (io.github.profetgit.countryroads.retro.Retrofit.busy()) return false;
+                            StreetChecks.tops(src, x, z);
+                            return true;
+                        });
+                        return 1;
+                    }))))
             .then(Commands.literal("decor")
                 .then(Commands.argument("radius", IntegerArgumentType.integer(16, 4000)).executes(c -> RoadChecks.decor(c.getSource(), IntegerArgumentType.getInteger(c, "radius")))))
             .then(Commands.literal("perks")
@@ -332,7 +344,7 @@ public final class DevCommands {
                     var R = io.github.profetgit.countryroads.retro.Retrofit.class;
                     CountryRoads.LOG.info("CR-RETRO queued=" + io.github.profetgit.countryroads.retro.Retrofit.queued + " noRoad=" + io.github.profetgit.countryroads.retro.Retrofit.plain
                         + " painted=" + io.github.profetgit.countryroads.retro.Retrofit.painted + " livedIn=" + io.github.profetgit.countryroads.retro.Retrofit.skippedLivedIn
-                        + " crafted=" + io.github.profetgit.countryroads.retro.Retrofit.skippedCrafted + " craftedBlocks=" + io.github.profetgit.countryroads.retro.Retrofit.craftedSeen);
+                        + " streetColumns=" + io.github.profetgit.countryroads.retro.Retrofit.streetsPainted + " crafted=" + io.github.profetgit.countryroads.retro.Retrofit.skippedCrafted + " craftedBlocks=" + io.github.profetgit.countryroads.retro.Retrofit.craftedSeen);
                     return true;
                 });
                 return 1;

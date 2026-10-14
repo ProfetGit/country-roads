@@ -102,7 +102,7 @@ public interface Canvas {
             }
 
             public int surface(int x, int z) {
-                return level.getHeight(net.minecraft.world.level.levelgen.Heightmap.Types.WORLD_SURFACE_WG, x, z);
+                return level.getHeight(net.minecraft.world.level.levelgen.Heightmap.Types.WORLD_SURFACE, x, z);
             }
 
             public int maxY() {
