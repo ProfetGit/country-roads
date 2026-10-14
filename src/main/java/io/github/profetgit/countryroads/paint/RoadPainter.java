@@ -40,24 +40,38 @@ public final class RoadPainter {
 
     private final Canvas chunk;
     private final BlockPos.MutableBlockPos pos = new BlockPos.MutableBlockPos();
+    private java.util.function.IntBinaryOperator neighbourTop;
 
     private RoadPainter(Canvas chunk) {
         this.chunk = chunk;
     }
 
     /** Worldgen: paints a generating chunk and records its road columns (empty too: "this chunk was handled"). */
-    public static int paint(ChunkAccess chunk, ChunkMask m, java.util.List<io.github.profetgit.countryroads.world.StreetBands> streets) {
+    public static int paint(ChunkAccess chunk, ChunkMask m, java.util.List<io.github.profetgit.countryroads.world.StreetBands> streets,
+                            java.util.function.IntBinaryOperator neighbourTop) {
         RoadColumns cols = RoadColumns.empty();
         Canvas canvas = Canvas.proto(chunk);
-        int painted = m.any() ? paint(canvas, m, cols) : 0;
+        int painted = m.any() ? paint(canvas, m, cols, neighbourTop) : 0;
         painted += StreetPainter.paint(canvas, streets, chunk.getPos().x(), chunk.getPos().z(), cols);
         RoadColumns.store(chunk, cols);
         return painted;
     }
 
     public static int paint(Canvas canvas, ChunkMask m, RoadColumns cols) {
+        return paint(canvas, m, cols, null);
+    }
+
+    /** NO_TOP from a neighbourTop function: that column of the next chunk is not a painted connector (or not painted yet). */
+    public static final int NO_TOP = Integer.MIN_VALUE;
+
+    /**
+     * neighbourTop(x, z): the surface of an already painted connector column in a neighbouring chunk, so the later of two
+     * chunks can meet it (a connector laid on the ground can meet a 2-block cliff exactly on a chunk border).
+     */
+    public static int paint(Canvas canvas, ChunkMask m, RoadColumns cols, java.util.function.IntBinaryOperator neighbourTop) {
         if (!m.any()) return 0;
         RoadPainter p = new RoadPainter(canvas);
+        p.neighbourTop = neighbourTop;
         int painted = 0;
         GenContext.bypass(true);
         try {
@@ -106,10 +120,36 @@ public final class RoadPainter {
         return painted;
     }
 
-    /** A connector eased from the ground can still meet a cliff: raise the lower column of any two-block step (inside this chunk). */
+    /**
+     * A connector eased from the ground can still meet a cliff. First its border columns are held within one block of an
+     * already painted connector column across the chunk border (this chunk is the later one, so it does the meeting: it may
+     * raise or cut), then the lower column of any two-block step inside the chunk is raised (a pinned border column is never
+     * moved: the higher side is cut instead).
+     */
     private void evenConnector(ChunkMask m, int[] ctop) {
+        boolean[] pinned = new boolean[256];
+        if (neighbourTop != null) {
+            int[][] dirs = {{1, 0}, {-1, 0}, {0, 1}, {0, -1}};
+            for (int lz = 0; lz < 16; lz++)
+                for (int lx = 0; lx < 16; lx++) {
+                    int i = ChunkMask.idx(lx, lz);
+                    if (ctop[i] == Integer.MIN_VALUE) continue;
+                    for (int[] d : dirs) {
+                        int nx = lx + d[0], nz = lz + d[1];
+                        if (nx >= 0 && nx <= 15 && nz >= 0 && nz <= 15) continue;
+                        int t = neighbourTop.applyAsInt((m.cx << 4) + nx, (m.cz << 4) + nz);
+                        if (t == NO_TOP) continue;
+                        int want = Math.clamp(ctop[i], t - 1, t + 1);
+                        pinned[i] = true;
+                        if (want != ctop[i]) {
+                            ctop[i] = want;
+                            road((m.cx << 4) + lx, (m.cz << 4) + lz, want, false, m.in[i], m, i);
+                        }
+                    }
+                }
+        }
         int[][] dirs = {{1, 0}, {-1, 0}, {0, 1}, {0, -1}};
-        for (int round = 0; round < 4; round++) {
+        for (int round = 0; round < 6; round++) {
             boolean changed = false;
             for (int lz = 0; lz < 16; lz++)
                 for (int lx = 0; lx < 16; lx++) {
@@ -120,8 +160,13 @@ public final class RoadPainter {
                         if (nx < 0 || nx > 15 || nz < 0 || nz > 15) continue;
                         int j = ChunkMask.idx(nx, nz);
                         if (ctop[j] == Integer.MIN_VALUE || ctop[j] - ctop[i] < 2) continue;
-                        ctop[i] = ctop[j] - 1;
-                        road((m.cx << 4) + lx, (m.cz << 4) + lz, ctop[i], false, m.in[i], m, i);
+                        if (!pinned[i]) {
+                            ctop[i] = ctop[j] - 1;
+                            road((m.cx << 4) + lx, (m.cz << 4) + lz, ctop[i], false, m.in[i], m, i);
+                        } else if (!pinned[j]) {
+                            ctop[j] = ctop[i] + 1;
+                            road((m.cx << 4) + nx, (m.cz << 4) + nz, ctop[j], false, m.in[j], m, j);
+                        } else continue;
                         changed = true;
                     }
                 }
@@ -338,7 +383,7 @@ public final class RoadPainter {
     }
 
     /** Blocks over which a connector eases from the ground at its street end to the road's planned height. */
-    static final double CONN_EASE = 8;
+    public static final double CONN_EASE = 8;
 
     static final String DEBUG = System.getProperty("countryroads.debugColumn", "");
     static final boolean TRACE = Boolean.getBoolean("countryroads.traceClear");

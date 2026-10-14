@@ -120,6 +120,9 @@ public final class DevCommands {
                         });
                         return 1;
                     }))))
+            .then(Commands.literal("roadspeed")
+                .then(Commands.argument("x", IntegerArgumentType.integer()).then(Commands.argument("z", IntegerArgumentType.integer())
+                    .executes(c -> StreetChecks.roadSpeed(c.getSource(), IntegerArgumentType.getInteger(c, "x"), IntegerArgumentType.getInteger(c, "z"))))))
             .then(Commands.literal("decor")
                 .then(Commands.argument("radius", IntegerArgumentType.integer(16, 4000)).executes(c -> RoadChecks.decor(c.getSource(), IntegerArgumentType.getInteger(c, "radius")))))
             .then(Commands.literal("perks")

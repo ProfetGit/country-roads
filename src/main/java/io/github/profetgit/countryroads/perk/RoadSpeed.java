@@ -13,10 +13,10 @@ import net.minecraft.world.entity.ai.attributes.AttributeModifier;
 import net.minecraft.world.entity.ai.attributes.Attributes;
 import net.minecraft.world.entity.animal.equine.AbstractHorse;
 
-/** Players walk about 10% and horses about 15% faster while on a road. */
+/** Players get Speed I (+20%) and mounts (horses, donkeys, mules, camels...) +30% while on a road. */
 public final class RoadSpeed {
     public static final Identifier ID = Identifier.fromNamespaceAndPath(CountryRoads.ID, "road_speed");
-    static final double PLAYER = 0.10, MOUNT = 0.15;
+    public static final double PLAYER = 0.20, MOUNT = 0.30;
 
     private RoadSpeed() {}
 
@@ -33,7 +33,7 @@ public final class RoadSpeed {
         }
     }
 
-    static void apply(ServerLevel level, LivingEntity e, double amount) {
+    public static void apply(ServerLevel level, LivingEntity e, double amount) {
         AttributeInstance speed = e.getAttribute(Attributes.MOVEMENT_SPEED);
         if (speed == null) return;
         boolean want = amount > 0 && onRoad(level, e);

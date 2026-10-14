@@ -271,4 +271,43 @@ final class StreetChecks {
         report(src, "CR-STREETTOPS chunk " + cx + "," + cz + " " + hist);
         return 1;
     }
+
+    /** CR-ROADSPEED: a horse and a zombie stand on the road column at (x, z) and then 40 blocks off it; the speed attribute must follow. */
+    static int roadSpeed(CommandSourceStack src, int x, int z) {
+        ServerLevel level = src.getLevel();
+        DevCommands.queue(() -> {
+            level.getChunkSource().getChunk(x >> 4, z >> 4, ChunkStatus.FULL, true);
+            if (!io.github.profetgit.countryroads.world.RoadColumns.isRoad(level, x, z)) {
+                report(src, "CR-ROADSPEED FAIL (" + x + "," + z + ") is not a road column");
+                return true;
+            }
+            int y = level.getHeight(Heightmap.Types.MOTION_BLOCKING_NO_LEAVES, x, z);
+            var horse = net.minecraft.world.entity.EntityTypes.HORSE.create(level, net.minecraft.world.entity.EntitySpawnReason.COMMAND);
+            var zombie = net.minecraft.world.entity.EntityTypes.ZOMBIE.create(level, net.minecraft.world.entity.EntitySpawnReason.COMMAND);
+            if (horse == null || zombie == null) {
+                report(src, "CR-ROADSPEED FAIL cannot create test mobs");
+                return true;
+            }
+            var attr = net.minecraft.world.entity.ai.attributes.Attributes.MOVEMENT_SPEED;
+            double h0 = horse.getAttributeValue(attr), z0 = zombie.getAttributeValue(attr);
+            horse.setPos(x + 0.5, y, z + 0.5);
+            zombie.setPos(x + 0.5, y, z + 0.5);
+            io.github.profetgit.countryroads.perk.RoadSpeed.apply(level, horse, io.github.profetgit.countryroads.perk.RoadSpeed.MOUNT);
+            io.github.profetgit.countryroads.perk.RoadSpeed.apply(level, zombie, io.github.profetgit.countryroads.perk.RoadSpeed.PLAYER);
+            double h1 = horse.getAttributeValue(attr), z1 = zombie.getAttributeValue(attr);
+            int ox = x + 40, oz = z;
+            for (int d = 0; d < 80 && io.github.profetgit.countryroads.world.RoadColumns.isRoad(level, ox, oz); d++) ox += 7;
+            level.getChunkSource().getChunk(ox >> 4, oz >> 4, ChunkStatus.FULL, true);
+            int oy = level.getHeight(Heightmap.Types.MOTION_BLOCKING_NO_LEAVES, ox, oz);
+            horse.setPos(ox + 0.5, oy, oz + 0.5);
+            zombie.setPos(ox + 0.5, oy, oz + 0.5);
+            io.github.profetgit.countryroads.perk.RoadSpeed.apply(level, horse, io.github.profetgit.countryroads.perk.RoadSpeed.MOUNT);
+            io.github.profetgit.countryroads.perk.RoadSpeed.apply(level, zombie, io.github.profetgit.countryroads.perk.RoadSpeed.PLAYER);
+            double h2 = horse.getAttributeValue(attr), z2 = zombie.getAttributeValue(attr);
+            boolean ok = Math.abs(h1 / h0 - 1.30) < 1e-6 && Math.abs(z1 / z0 - 1.20) < 1e-6 && Math.abs(h2 - h0) < 1e-9 && Math.abs(z2 - z0) < 1e-9;
+            report(src, "CR-ROADSPEED " + (ok ? "PASS" : "FAIL") + " horse base=" + h0 + " road=" + h1 + " off=" + h2 + " | zombie base=" + z0 + " road=" + z1 + " off=" + z2 + " offRoadAt=" + ox + "," + oz);
+            return true;
+        });
+        return 1;
+    }
 }
