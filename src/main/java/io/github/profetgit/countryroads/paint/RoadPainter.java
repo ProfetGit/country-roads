@@ -473,6 +473,11 @@ public final class RoadPainter {
         if (out.getAxis() == along.getAxis() || out.getAxis() == Direction.Axis.Y) out = along.getClockWise();
         // the crossing's water level (its ground on a dry trestle): weathering grows up from it
         int level = top - 2 - m.bridgeRise[i];
+        // grass the bridge now shelters loses its frost
+        BlockState g = get(x, ground, z);
+        if (g.hasProperty(net.minecraft.world.level.block.state.properties.BlockStateProperties.SNOWY)
+            && g.getValue(net.minecraft.world.level.block.state.properties.BlockStateProperties.SNOWY) && !get(x, ground + 1, z).is(Blocks.SNOW))
+            set(x, ground, z, g.setValue(net.minecraft.world.level.block.state.properties.BlockStateProperties.SNOWY, false));
         if (m.bridge[i] == EdgePlan.STONE) {
             // fill too high beside a stone bridge's raised approach: a solid masonry abutment with a plain parapet
             stoneBridge(x, z, top, half, d, rail, deck, outer, L, u, m.bridgeRise[i], along, out, Math.max(level, planned ? level : ground), ground, h, !planned);

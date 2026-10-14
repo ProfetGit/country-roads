@@ -522,7 +522,7 @@ final class RoadChecks {
     private static String profileText(EdgePlan p, int from, int to) {
         StringBuilder sb = new StringBuilder();
         for (int k = Math.max(0, from); k <= Math.min(p.length() - 1, to); k++)
-            sb.append("GCBWT".charAt(p.kind[k])).append(Math.round(p.y[k])).append(' ');
+            sb.append("GCBWT".charAt(p.kind[k])).append(Math.round(p.y[k])).append(System.getProperty("crxz") != null ? "@" + Math.round(p.x[k] * 10) / 10f + "," + Math.round(p.z[k] * 10) / 10f : "").append(' ');
         return sb.toString().trim();
     }
 

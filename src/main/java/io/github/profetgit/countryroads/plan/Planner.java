@@ -224,10 +224,22 @@ public final class Planner {
         if (Float.isNaN(pin[0]) && water[0] <= ground[0]) pin[0] = ground[0];
         if (Float.isNaN(pin[n - 1]) && water[n - 1] <= ground[n - 1]) pin[n - 1] = ground[n - 1];
         byte[] kind = new byte[n];
-        profile(ground, water, river, kind, pin, kindPin, connA, connB);
-        // bridges cross straight: the wobbling line over the water made every rail a staircase
-        boolean[] moved = straighten(x, z, kind, water, ground, pin, connA, connB);
-        for (int i = 0; i < n; i++) if (moved[i]) sampleAt(i, x, z, ground, water, river);
+        // bridges cross straight: the wobbling line over the water made every rail a staircase. Again while a crossing
+        // still runs on into the road's bend (water continuing past the straightened part): the straight part grows
+        for (int round = 0; round < 5; round++) {
+            profile(ground, water, river, kind, pin, kindPin, connA, connB);
+            boolean[] moved = straighten(x, z, kind, water, ground, pin, (px, pz) -> {
+                int bx = (int) Math.floor(px), bz = (int) Math.floor(pz);
+                return fa.inOther(bx, bz, 2) || fb.inOther(bx, bz, 2);
+            });
+            boolean any = false;
+            for (int i = 0; i < n; i++)
+                if (moved[i]) {
+                    sampleAt(i, x, z, ground, water, river);
+                    any = true;
+                }
+            if (!any) break;
+        }
         for (int i = 0; i < n; i += 16) {
             byte w = Palette.wood(terrain.biome((int) x[i], (int) water[i], (int) z[i]));
             for (int k = i; k < Math.min(n, i + 16); k++) wood[k] = w;
@@ -287,17 +299,22 @@ public final class Planner {
     /** Bridges longer than this are stone arches, shorter ones timber. */
     static final int STONE_BRIDGE = 20;
     /** Samples over which the road eases from its own line onto a straightened bridge (more for a sharper turn). */
-    static final int BRIDGE_EASE = 10, BRIDGE_EASE_TURN = 10;
+    static final int BRIDGE_EASE = 10, BRIDGE_EASE_TURN = 10, LANDING = 6;
 
     /**
      * Each bridge over water becomes a straight line along the nearer world axis, centred on a block column, through
      * the middle of the crossing and as long as its chord; the road eases onto it each side. Diagonal and wobbling
-     * bridges made every rail, post and arch a staircase. Crossings near a village end or on a shared (pinned) stretch
-     * keep their line. Sample count stays the same (samples on the bridge sit a little closer than a block).
+     * bridges made every rail, post and arch a staircase. A crossing that starts or ends too close to the road's end
+     * (a village beside the river: the street dock is sample 0) is anchored there instead: the line runs from that end
+     * along the axis, and only the other side eases (both ends anchored: the straight chord). Pinned samples (a shared
+     * trunk) never move, and a crossing whose new line would pass within 2 blocks of a village building keeps its
+     * line. Sample count stays the same (samples on the bridge sit a little closer than a block).
      */
-    static boolean[] straighten(float[] x, float[] z, byte[] kind, float[] water, float[] ground, float[] pin, int connA, int connB) {
+    static boolean[] straighten(float[] x, float[] z, byte[] kind, float[] water, float[] ground, float[] pin,
+                                java.util.function.BiPredicate<Float, Float> blocked) {
         int n = x.length;
         boolean[] moved = new boolean[n];
+        float[] nx = new float[n], nz = new float[n];
         for (int i = 0; i < n; ) {
             int j = i;
             while (j + 1 < n && kind[j + 1] == kind[i]) j++;
@@ -310,21 +327,50 @@ public final class Planner {
             if (!wet || len < 1) continue;
             float turn = (float) Math.toDegrees(Math.atan2(Math.min(Math.abs(cx), Math.abs(cz)), Math.max(Math.abs(cx), Math.abs(cz))));
             int ease = BRIDGE_EASE + Math.round(BRIDGE_EASE_TURN * turn / 45f);
-            int lo = a - ease, hi = b + ease;
-            if (lo < Math.max(1, connA) || hi > n - 2 - connB) continue;
-            boolean pinned = false;
-            for (int k = lo; k <= hi; k++) pinned |= !Float.isNaN(pin[k]);
-            if (pinned) continue;
+            boolean fixA = a - ease < 1, fixB = b + ease > n - 2;
+            float step = len / (b - a);
             boolean alongX = Math.abs(cx) >= Math.abs(cz);
             float ax = alongX ? Math.signum(cx) : 0, az = alongX ? 0 : Math.signum(cz);
-            float mid = (a + b) / 2f, mx = (x[a] + x[b]) / 2, mz = (z[a] + z[b]) / 2, step = len / (b - a);
-            if (alongX) mz = (float) Math.floor(mz) + 0.5f;
-            else mx = (float) Math.floor(mx) + 0.5f;
-            for (int k = lo; k <= hi; k++) {
-                float u = k < a ? (k - lo) / (float) (a - lo) : k > b ? (hi - k) / (float) (hi - b) : 1f;
+            // the line: through the middle (free), from the anchored end (one end fixed), or the chord (both fixed)
+            float ox, oz, dx, dz;
+            if (fixA && fixB) {
+                dx = cx / (b - a);
+                dz = cz / (b - a);
+                ox = x[a] - dx * a;
+                oz = z[a] - dz * a;
+            } else {
+                int anchor = fixA ? a : fixB ? b : -1;
+                float mid = anchor >= 0 ? anchor : (a + b) / 2f;
+                ox = anchor >= 0 ? x[anchor] : (x[a] + x[b]) / 2;
+                oz = anchor >= 0 ? z[anchor] : (z[a] + z[b]) / 2;
+                if (alongX) oz = (float) Math.floor(oz) + 0.5f;
+                else ox = (float) Math.floor(ox) + 0.5f;
+                dx = ax * step;
+                dz = az * step;
+                ox -= dx * mid;
+                oz -= dz * mid;
+            }
+            // a free end that lands far to the side of the old line eases over more samples (2 per block of shift)
+            float offA = (float) Math.hypot(ox + dx * a - x[a], oz + dz * a - z[a]), offB = (float) Math.hypot(ox + dx * b - x[b], oz + dz * b - z[b]);
+            // and the straight goes on LANDING samples past each free end before the road turns (a turn right at the
+            // shore put the end of a raised stone bridge on the bend)
+            int a0 = fixA ? a : Math.max(1, a - LANDING), b0 = fixB ? b : Math.min(n - 2, b + LANDING);
+            int lo = fixA ? a : Math.max(1, a0 - Math.max(ease, Math.round(2 * offA))), hi = fixB ? b : Math.min(n - 2, b0 + Math.max(ease, Math.round(2 * offB)));
+            boolean ok = true;
+            for (int k = lo; k <= hi && ok; k++) {
+                float u = k < a0 ? (k - lo) / (float) (a0 - lo) : k > b0 ? (hi - k) / (float) (hi - b0) : 1f;
                 float w = u * u * (3 - 2 * u);
-                x[k] += (mx + ax * (k - mid) * step - x[k]) * w;
-                z[k] += (mz + az * (k - mid) * step - z[k]) * w;
+                nx[k] = x[k] + (ox + dx * k - x[k]) * w;
+                nz[k] = z[k] + (oz + dz * k - z[k]) * w;
+                float shift = Math.abs(nx[k] - x[k]) + Math.abs(nz[k] - z[k]);
+                // a snap of half a block at an anchored end is no risk; a real move must stay clear of buildings
+                if (shift > 1e-4f && !Float.isNaN(pin[k]) || shift > 0.5f && blocked.test(nx[k], nz[k])) ok = false;
+            }
+            if (!ok) continue;
+            for (int k = lo; k <= hi; k++) {
+                if (Math.abs(nx[k] - x[k]) + Math.abs(nz[k] - z[k]) <= 1e-4f) continue;
+                x[k] = nx[k];
+                z[k] = nz[k];
                 moved[k] = true;
             }
         }
