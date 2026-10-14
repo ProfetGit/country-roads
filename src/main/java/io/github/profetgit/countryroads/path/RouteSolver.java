@@ -27,7 +27,7 @@ final class RouteSolver {
     /** Both sides closed (a trunk and deep water, two trunks): the path would be one wide there. */
     static final int BOTH_CLOSED = 120;
     /** A bend on the water: bridges cross straight (user saw a staircase deck over a diagonal river). */
-    static final int WET_TURN = 2000, APPROACH = 3, APPROACH_TURN = 300;
+    static final int WET_TURN = 2000, APPROACH = 5, APPROACH_TURN = 300;
     /** Longest bridge (cells of water in a row), deep water included. */
     static final int MAX_BRIDGE = 64;
     /**

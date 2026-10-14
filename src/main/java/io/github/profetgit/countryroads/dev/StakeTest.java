@@ -145,7 +145,7 @@ final class StakeTest {
                         for (int i = 0; i < cs.size(); i++) {
                             var q = cs.get(i);
                             if (q.edge()) continue;
-                            run = q.water() ? run + 1 : 0;
+                            run = q.water() || q.kit() ? run + 1 : 0;
                             if (run > brLen) {
                                 brLen = run;
                                 br = q;
@@ -444,7 +444,7 @@ final class StakeTest {
         int bad = 0, stairs = 0, steps = 0, flat = 0, slabs = 0, mudSteps = 0, stoneSteps = 0;
         int[] halfSteps = {0}, stairSteps = {0};
         HousePaths.Cell prev = null;
-        int banks = 0, cutFill = 0, rails = 0, archCells = 0, lanterns = 0;
+        int banks = 0, cutFill = 0, rails = 0, archCells = 0, lanterns = 0, kitCells = 0;
         for (HousePaths.Cell c : cells) {
             BlockPos at = new BlockPos(c.x(), c.y(), c.z());
             var state = level.getBlockState(at);
@@ -466,6 +466,15 @@ final class StakeTest {
                 banks++;
                 int top = level.getHeight(net.minecraft.world.level.levelgen.Heightmap.Types.MOTION_BLOCKING_NO_LEAVES, c.x(), c.z()) - 1;
                 if (top != c.y() && !level.getBlockState(new BlockPos(c.x(), top, c.z())).is(net.minecraft.tags.BlockTags.LOGS)) bad = fail(++bad, "bank height " + top, at, state);
+                continue;
+            }
+            if (c.kit()) {
+                // a kit bridge: its blocks are the user's design, the walk is proven by CR-STAKE-SIM
+                kitCells++;
+                if (!c.edge()) {
+                    if (prev != null && Math.abs(c.x() - prev.x()) + Math.abs(c.z() - prev.z()) != 1) bad = fail(++bad, "cells do not touch", at, state);
+                    prev = c;
+                }
                 continue;
             }
             if (c.water() && c.arch() > 0) {
@@ -530,9 +539,9 @@ final class StakeTest {
             HousePaths.Cell pc = null;
             for (HousePaths.Cell c : cells) {
                 if (c.edge() || c.bank()) continue;
-                run = c.water() ? run + 1 : 0;
+                run = c.water() || c.kit() ? run + 1 : 0;
                 longest = Math.max(longest, run);
-                if (pc != null && pc.dir() != c.dir() && (pc.water() || c.water())) {
+                if (pc != null && pc.dir() != c.dir() && (pc.water() || c.water() || pc.kit() || c.kit())) {
                     if (++bends <= 4) CountryRoads.LOG.info("CR-STAKE-BRIDGE-BEND at " + c.x() + "," + c.y() + "," + c.z());
                 }
                 pc = c;
@@ -574,7 +583,7 @@ final class StakeTest {
         }
         int above = 0;
         for (HousePaths.Cell c : cells)
-            for (int dy = 1; dy <= 8 && c.tun() < 1 && !c.bank() && !c.rail() && c.arch() == 0; dy++) {
+            for (int dy = 1; dy <= 8 && c.tun() < 1 && !c.bank() && !c.rail() && c.arch() == 0 && !c.kit(); dy++) {
                 BlockPos q = new BlockPos(c.x(), c.y() + dy, c.z());
                 var st = level.getBlockState(q);
                 // canopy from four blocks up is allowed (trees are never cut back further); anything else is left over
@@ -662,13 +671,13 @@ final class StakeTest {
         }
         int pct = open == 0 ? 100 : wide * 100 / open;
         CountryRoads.LOG.info("CR-STAKE-WIDTH " + (pct >= 95 && one == 0 ? "PASS" : "FAIL") + " three wide " + wide + "/" + open + " (" + pct + "%) two=" + two + " one=" + one + " banks=" + banks + " why=" + why);
-        CountryRoads.LOG.info("CR-STAKE-WALK " + (bad == 0 ? "PASS" : "FAIL") + " cells=" + cells.size() + " flat=" + flat + " steps=" + steps + " (half " + halfSteps[0] + ", stair " + stairSteps[0] + ") stairs=" + stairs + " rails=" + rails + " lanterns=" + lanterns + " arched=" + archCells + " slabs=" + slabs + " (mud " + mudSteps + ", other " + stoneSteps + ") bad=" + bad
+        CountryRoads.LOG.info("CR-STAKE-WALK " + (bad == 0 ? "PASS" : "FAIL") + " cells=" + cells.size() + " flat=" + flat + " steps=" + steps + " (half " + halfSteps[0] + ", stair " + stairSteps[0] + ") stairs=" + stairs + " rails=" + rails + " kit=" + kitCells + " lanterns=" + lanterns + " arched=" + archCells + " slabs=" + slabs + " (mud " + mudSteps + ", other " + stoneSteps + ") bad=" + bad
             + " palette=" + io.github.profetgit.countryroads.paint.Palette.surface(level.getBiome(stake)).name() + " at=" + stake.toShortString());
     }
 
     /** Feet height on a path cell: a bottom slab is half a block lower than a full block or a stair's top. */
     private static double stand(HousePaths.Cell c) {
-        return c.y() + (c.slab() ? 0.5 : 1);
+        return c.y() + (c.slab() ? 0.5 : 1) + c.arch() / 2.0;
     }
 
     private static int fail(int n, String what, BlockPos at, net.minecraft.world.level.block.state.BlockState s) {

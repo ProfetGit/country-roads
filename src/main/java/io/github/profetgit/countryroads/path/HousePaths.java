@@ -64,15 +64,16 @@ public final class HousePaths {
      * block in the verge, the tunnel part (-1 none, 0 open cut, 1 inside the rock, 2 portal) with the index along the
      * roofed run, and whether it is a bank: no path there, only the ground cut or filled to height y.
      */
-    public record Cell(int x, int z, int y, boolean water, boolean edge, int stair, int dir, boolean fringe, int tun, int tidx, boolean bank, boolean slab, boolean rail, int arch) {}
+    public record Cell(int x, int z, int y, boolean water, boolean edge, int stair, int dir, boolean fringe, int tun, int tidx, boolean bank, boolean slab, boolean rail, int arch, boolean kit) {}
 
     /** A finished survey: cells from the door to the road, the bill, and what the route is made of. */
-    public record Survey(List<Cell> cells, int earth, int stone, int planks, int torches, int lanterns, int tunnelCells, int length, Map<Long, String> skipped) {}
+    public record Survey(List<Cell> cells, int earth, int stone, int planks, int torches, int lanterns, int tunnelCells, int length, Map<Long, String> skipped, List<BridgeKit.Bridge> bridges) {}
 
     public static final Direction[] DIRS = {Direction.NORTH, Direction.EAST, Direction.SOUTH, Direction.WEST};
     static final int[] DX = {0, 1, 0, -1}, DZ = {-1, 0, 1, 0};
 
-    private record Rollout(ServerLevel level, BlockPos stake, List<Cell> cells, int[] next, java.util.Set<Long> chunks, int[] age, java.util.Set<Long> cols, java.util.Set<Long> rocky) {}
+    private record Rollout(ServerLevel level, BlockPos stake, List<Cell> cells, int[] next, java.util.Set<Long> chunks, int[] age, java.util.Set<Long> cols, java.util.Set<Long> rocky,
+                           List<BridgeKit.Bridge> bridges, java.util.Set<Integer> stamped) {}
 
     private record Preview(ServerLevel level, BlockPos stake, ServerPlayer player, List<Cell> cells, long until) {}
 
@@ -330,7 +331,7 @@ public final class HousePaths {
             chunks.add(ChunkPos.pack(c.x >> 4, c.z >> 4));
             if (!c.bank && !c.rail) cols.add(key(c.x, c.z));
         }
-        ROLLOUTS.add(new Rollout(level, stake, s.cells, new int[]{0}, chunks, new int[]{0}, cols, rocky(level, s.cells)));
+        ROLLOUTS.add(new Rollout(level, stake, s.cells, new int[]{0}, chunks, new int[]{0}, cols, rocky(level, s.cells), s.bridges, new java.util.HashSet<>()));
         tell(player, Component.translatable("countryroads.stake.building", s.cells.size()), true);
     }
 
@@ -442,7 +443,7 @@ public final class HousePaths {
                     // cells far from the player would not be seen: no packet for them
                     double dx = c.x + 0.5 - px, dz = c.z + 0.5 - pz;
                     if (dx * dx + dz * dz > PREVIEW_REACH * PREVIEW_REACH) continue;
-                    p.level.sendParticles(p.player, dust, true, false, c.x + 0.5, c.y + 1.15, c.z + 0.5, 1, 0.15, 0.02, 0.15, 0);
+                    p.level.sendParticles(p.player, dust, true, false, c.x + 0.5, c.y + 1.15 + c.arch / 2.0, c.z + 0.5, 1, 0.15, 0.02, 0.15, 0);
                 }
             }
         }
@@ -479,12 +480,12 @@ public final class HousePaths {
             Cell c = r.cells.get(r.next[0]);
             if (!r.level.hasChunkAt(new BlockPos(c.x, c.y, c.z))) break;
             r.next[0]++;
-            lay(r.level, be, c, false, r.cols, r.rocky);
+            lay(r.level, be, c, false, r);
         }
         if (r.next[0] >= r.cells.size()) {
-            for (int pass = 0; pass < 2; pass++)
+            for (int pass = 0; pass < 2; pass++, r.stamped.clear())
                 for (Cell c : r.cells)
-                    if (r.level.hasChunkAt(new BlockPos(c.x, c.y, c.z))) lay(r.level, be, c, true, r.cols, r.rocky);
+                    if (r.level.hasChunkAt(new BlockPos(c.x, c.y, c.z))) lay(r.level, be, c, true, r);
             // the waypoints did their job: they come back as items
             for (BlockPos w : new ArrayList<>(be.waypoints)) if (r.level.getBlockState(w).is(Stake.BLOCK)) r.level.destroyBlock(w, true);
             be.waypoints.clear();
@@ -523,10 +524,17 @@ public final class HousePaths {
         return out;
     }
 
-    private static void lay(ServerLevel level, StakeBlockEntity be, Cell c, boolean quiet, java.util.Set<Long> cols, java.util.Set<Long> rocky) {
+    private static void lay(ServerLevel level, StakeBlockEntity be, Cell c, boolean quiet, Rollout r) {
+        java.util.Set<Long> cols = r.cols, rocky = r.rocky;
         int y = c.y;
         long h = c.x * 0x2545F4914F6CDD1DL ^ c.z * 0x9E3779B97F4A7C15L;
         BlockPos at = new BlockPos(c.x, y, c.z);
+        if (c.kit) {
+            // a kit bridge goes down whole when the rollout reaches its first cell
+            if (r.stamped.add(c.tidx)) stampBridge(level, be, r.bridges.get(c.tidx), quiet);
+            markPath(level, be, c.x, c.z);
+            return;
+        }
         if (c.rail) {
             rail(level, be, c);
             return;
@@ -705,6 +713,61 @@ public final class HousePaths {
                 .setValue(StairBlock.HALF, net.minecraft.world.level.block.state.properties.Half.TOP));
             return;
         }
+    }
+
+    /**
+     * Lays a kit bridge (BridgeKit): every block of the kit turned to the bridge's direction, posts carried down to the
+     * bed, the kit's air clearing what grew or stood there (never logs or anything built), and path ground under the
+     * two end cells where the walked line meets the kit.
+     */
+    private static void stampBridge(ServerLevel level, StakeBlockEntity be, BridgeKit.Bridge br, boolean quiet) {
+        net.minecraft.world.level.block.Rotation rot = BridgeKit.rotation(br.dir());
+        int len = br.length();
+        for (int z = 0; z < len; z++)
+            for (int x = 0; x < BridgeKit.WIDTH; x++) {
+                for (int y = 0; y < BridgeKit.height(); y++) {
+                    BlockPos p = BridgeKit.world(br, x, y, z);
+                    BlockState s = BridgeKit.at(br.spans(), x, y, z);
+                    if (s.isAir()) {
+                        BlockState old = level.getBlockState(p);
+                        if (!old.isAir() && old.getFluidState().isEmpty() && !old.is(BlockTags.LOGS) && !Retrofit.isCrafted(old) && !old.is(Stake.BLOCK))
+                            change(level, be, p, Blocks.AIR.defaultBlockState());
+                        continue;
+                    }
+                    change(level, be, p, s.rotate(rot));
+                    if (y == 0 && BridgeKit.isPost(s))
+                        for (int yy = br.y0() - 1; yy >= br.y0() - 25; yy--) {
+                            BlockPos q = p.atY(yy);
+                            BlockState under = level.getBlockState(q);
+                            if (PaintRules.solid(under) && under.getFluidState().isEmpty()) break;
+                            change(level, be, q, s.rotate(rot));
+                        }
+                }
+                // where the line steps off the ground onto the kit: path ground under the deck columns
+                if (BridgeKit.halves(br.spans(), z) == 0 && Math.abs(x - BridgeKit.MID) <= 1) {
+                    BlockPos g = BridgeKit.world(br, x, -1, z);
+                    BlockState natural = level.getBlockState(g);
+                    change(level, be, g, Palette.housePath(level.getBiome(g), 1f, g.asLong(), natural));
+                    for (int yy = g.getY() - 1; yy >= g.getY() - 8; yy--) {
+                        BlockPos q = g.atY(yy);
+                        BlockState under = level.getBlockState(q);
+                        if (PaintRules.solid(under) && under.getFluidState().isEmpty()) break;
+                        change(level, be, q, Blocks.DIRT.defaultBlockState());
+                    }
+                }
+            }
+        if (!quiet) {
+            BlockPos mid = BridgeKit.world(br, BridgeKit.MID, 2, len / 2);
+            level.playSound(null, mid, net.minecraft.sounds.SoundEvents.WOOD_PLACE, SoundSource.BLOCKS, 1f, 0.8f);
+        }
+        // lanterns have item value: kept with the torches, refunded only while standing
+        for (int z = 0; z < len; z++)
+            for (int x = 0; x < BridgeKit.WIDTH; x++)
+                for (int y = 0; y < BridgeKit.height(); y++)
+                    if (BridgeKit.at(br.spans(), x, y, z).is(Blocks.LANTERN)) {
+                        long lp = BridgeKit.world(br, x, y, z).asLong();
+                        if (!be.torchPos.contains(lp)) be.torchPos.add(lp);
+                    }
     }
 
     /** Chance (of 1024, times a smooth patch density) of a plant beside the bed and on a bank. */

@@ -22,6 +22,16 @@ final class PathPlan {
     static final int BED_MAX = 3, BANK_MAX = 4, BANK_REACH = 3;
     /** Bridge rail posts every this many cells (and at both ends). */
     static final int BRIDGE_POST = 4, BRIDGE_GAP = 3;
+    /** Crossings at least this long get the kit bridge (BridgeKit); shorter ones keep the plank deck. */
+    static final int KIT_MIN = 3;
+
+    record BlockPosLike(int x, int z) {}
+
+    /** The column of a kit bridge's local (x across, z along). */
+    static BlockPosLike kitColumn(BridgeKit.Bridge br, int x, int z) {
+        var p = BridgeKit.world(br, x, 0, z);
+        return new BlockPosLike(p.getX(), p.getZ());
+    }
     /** Crossings at least ARCH_MIN cells long arch by one block, from ARCH_HIGH by ARCH_MAX half blocks. */
     static final int ARCH_MIN = 6, ARCH_HIGH = 16, ARCH_MAX = 4;
     /**
@@ -190,6 +200,40 @@ final class PathPlan {
             int top = blen[i] >= ARCH_HIGH ? ARCH_MAX : 2;
             arch[i] = Math.min(top, Math.min(bidx[i], blen[i] - 1 - bidx[i]));
         }
+        // a crossing of KIT_MIN or more cells gets the user's bridge (BridgeKit): sized to cover the water with land at
+        // both ends, on a straight stretch of the line; the cells under it follow the kit's deck heights. Anything else
+        // keeps the plank deck.
+        List<BridgeKit.Bridge> bridges = new ArrayList<>();
+        int[] kitAt = new int[n], kitH = new int[n];
+        java.util.Arrays.fill(kitAt, -1);
+        if (BridgeKit.available())
+            for (int i = 0; i < n; ) {
+                if (!wet[i] || tm[i] > 0) {
+                    i++;
+                    continue;
+                }
+                int a = i;
+                while (i < n && wet[i] && tm[i] <= 0) i++;
+                int w = i - a;
+                if (w < KIT_MIN) continue;
+                int k = Math.max(0, (int) Math.ceil((w + 2 - BridgeKit.length(0)) / (double) BridgeKit.SPAN));
+                if (k > BridgeKit.MAX_SPANS) continue;
+                int len = BridgeKit.length(k), pad = len - w, s0 = a - (pad + 1) / 2, e0 = s0 + len - 1;
+                if (s0 < 1 || e0 > n - 2 || wet[s0] || wet[e0]) continue;
+                int d = dir[s0 + 1];
+                boolean ok = dir[s0] == d && dir[e0 + 1] == d;
+                for (int q = s0; q <= e0 && ok; q++) if (dir[q] != d || tm[q] > 0 || kitAt[q] >= 0) ok = false;
+                if (!ok) continue;
+                int y0 = Math.max(Math.max(ty[s0], ty[e0]) + 1, ty[a]);
+                bridges.add(new BridgeKit.Bridge(xs[s0], zs[s0], d, k, y0));
+                for (int q = s0; q <= e0; q++) {
+                    kitAt[q] = bridges.size() - 1;
+                    kitH[q] = BridgeKit.halves(k, q - s0);
+                    ty[q] = y0 - 1 + kitH[q] / 2;
+                    fixed[q] = true;
+                    wet[q] = false;
+                }
+            }
         // near a bore the walked line keeps its ground: the portals need it, and a stretch passing over the tunnel must
         // not sink into its headroom
         Set<Long> bored = new HashSet<>();
@@ -248,7 +292,7 @@ final class PathPlan {
                 for (int s = -1; s <= 1; s += 2) {
                     int qx = xs[i] + s * rx, qz = zs[i] + s * rz;
                     if (used.contains(ChunkPos.pack(qx, qz)) || (qx == sx && qz == sz)) continue;
-                    bands.get(i).add(new HousePaths.Cell(qx, qz, plan.y[i], false, true, plan.stair[i], dir[i], false, tun[i], tidx[i], false, plan.slab[i], false, 0));
+                    bands.get(i).add(new HousePaths.Cell(qx, qz, plan.y[i], false, true, plan.stair[i], dir[i], false, tun[i], tidx[i], false, plan.slab[i], false, 0, false));
                     used.add(ChunkPos.pack(qx, qz));
                 }
                 if (tun[i] >= 1)
@@ -258,6 +302,8 @@ final class PathPlan {
                         for (int dx = -1; dx <= 1; dx++)
                             for (int dz = -1; dz <= 1; dz++) nearRock.add(ChunkPos.pack(qx + dx, qz + dz));
                     }
+            } else if (kitAt[i] >= 0) {
+                // billed with the bridge
             } else if (wet[i]) {
                 planks++;
             } else {
@@ -270,8 +316,15 @@ final class PathPlan {
         java.util.Map<Long, String> skipped = new java.util.HashMap<>();
         Long2IntOpenHashMap ref = new Long2IntOpenHashMap(), refMan = new Long2IntOpenHashMap();
         ref.defaultReturnValue(-1);
+        // a kit bridge owns its whole footprint: its deck sides are cells of the bridge, nothing else shapes it
+        for (BridgeKit.Bridge br : bridges)
+            for (int z = 0; z < br.length(); z++)
+                for (int x = 0; x < BridgeKit.WIDTH; x++) {
+                    BlockPosLike q = kitColumn(br, x, z);
+                    used.add(ChunkPos.pack(q.x(), q.z()));
+                }
         for (int i = 0; i < n; i++) {
-            if (tun[i] >= 0 || tm[i] > 0) continue;
+            if (tun[i] >= 0 || tm[i] > 0 || kitAt[i] >= 0) continue;
             for (int dx = -1; dx <= 1; dx++)
                 for (int dz = -1; dz <= 1; dz++) {
                     long col = ChunkPos.pack(xs[i] + dx, zs[i] + dz);
@@ -289,6 +342,18 @@ final class PathPlan {
         }
         Long2IntOpenHashMap height = new Long2IntOpenHashMap();
         for (int i = 0; i < n; i++) height.put(ChunkPos.pack(xs[i], zs[i]), plan.y[i]);
+        for (int i = 0; i < n; i++) {
+            if (kitAt[i] >= 0) {
+                BridgeKit.Bridge br = bridges.get(kitAt[i]);
+                int z = Math.abs(xs[i] - br.x()) + Math.abs(zs[i] - br.z());
+                for (int x = BridgeKit.MID - 1; x <= BridgeKit.MID + 1; x += 2) {
+                    BlockPosLike q = kitColumn(br, x, z);
+                    bands.get(i).add(new HousePaths.Cell(q.x(), q.z(), br.y0() - 1, false, true, -1, dir[i], false, -1, kitAt[i], false, false, false, kitH[i], true));
+                    height.put(ChunkPos.pack(q.x(), q.z()), br.y0() - 1);
+                }
+                height.put(ChunkPos.pack(xs[i], zs[i]), br.y0() - 1);
+            }
+        }
         List<long[]> bedCols = new ArrayList<>();
         for (var e : ref.long2IntEntrySet()) bedCols.add(new long[]{e.getIntValue(), e.getLongKey()});
         bedCols.sort((a, b) -> a[0] != b[0] ? Long.compare(a[0], b[0]) : Long.compare(a[1], b[1]));
@@ -338,7 +403,7 @@ final class PathPlan {
                 continue;
             }
             fill += extra;
-            bands.get(i).add(new HousePaths.Cell(cx, cz, y, sideWet, true, stair, dir[i], false, -1, 0, false, plan.slab[i] && !sideWet, false, sideWet ? arch[i] : 0));
+            bands.get(i).add(new HousePaths.Cell(cx, cz, y, sideWet, true, stair, dir[i], false, -1, 0, false, plan.slab[i] && !sideWet, false, sideWet ? arch[i] : 0, false));
             used.add(col);
             height.put(col, y);
             if (sideWet) planks++;
@@ -376,7 +441,7 @@ final class PathPlan {
                 for (int s = -1; s <= 1; s += 2) {
                     int qx = xs[k] + 2 * s * rx, qz = zs[k] + 2 * s * rz;
                     boolean post = posts.contains(k), lantern = Palette.bridgeDetail("lantern") && (k == a && shoreA || k == b && shoreB);
-                    bands.get(k).add(new HousePaths.Cell(qx, qz, plan.y[k], true, true, -1, dir[k], false, -1, lantern ? 2 : post ? 1 : 0, false, false, true, arch[k]));
+                    bands.get(k).add(new HousePaths.Cell(qx, qz, plan.y[k], true, true, -1, dir[k], false, -1, lantern ? 2 : post ? 1 : 0, false, false, true, arch[k], false));
                     used.add(ChunkPos.pack(qx, qz));
                     // a beam, a fence and a trapdoor (4 + 2 + 3 planks), a post about three logs
                     planks += post ? 12 : 6 + (Palette.bridgeDetail("trapdoor") ? 3 : 0);
@@ -390,7 +455,7 @@ final class PathPlan {
         // level with the path get a stray path block, so the trail frays into the verge
         Set<Long> banked = new HashSet<>();
         for (int i = 0; i < n; i++) {
-            if (tun[i] >= 0 || tm[i] > 0) continue;
+            if (tun[i] >= 0 || tm[i] > 0 || kitAt[i] >= 0) continue;
             int reach = 1 + BANK_REACH;
             for (int dx = -reach; dx <= reach; dx++)
                 for (int dz = -reach; dz <= reach; dz++) {
@@ -418,7 +483,7 @@ final class PathPlan {
                     if (target == lvl) {
                         banked.add(col);
                         if (away == 1 && lvl == yRef && RouteSolver.lattice(seed + 9, cx, cz) < 0.22 && t.treeCost(cx, cz, lvl) == 0) {
-                            bands.get(i).add(new HousePaths.Cell(cx, cz, lvl, false, true, -1, dir[i], true, -1, 0, false, false, false, 0));
+                            bands.get(i).add(new HousePaths.Cell(cx, cz, lvl, false, true, -1, dir[i], true, -1, 0, false, false, false, 0, false));
                             used.add(col);
                         }
                         continue;
@@ -426,7 +491,7 @@ final class PathPlan {
                     if (Math.abs(target - lvl) > BANK_MAX) target = lvl + Integer.signum(target - lvl) * BANK_MAX;
                     if (target < lvl && trunkOrBuiltNear(t, cx, cz)) continue;
                     banked.add(col);
-                    bands.get(i).add(new HousePaths.Cell(cx, cz, target, false, true, -1, dir[i], false, -1, 0, true, false, false, 0));
+                    bands.get(i).add(new HousePaths.Cell(cx, cz, target, false, true, -1, dir[i], false, -1, 0, true, false, false, 0, false));
                     if (lvl > target) cut += lvl - target;
                     else fill += target - lvl;
                 }
@@ -434,7 +499,10 @@ final class PathPlan {
 
         List<HousePaths.Cell> cells = new ArrayList<>();
         for (int i = 0; i < n; i++) {
-            cells.add(new HousePaths.Cell(xs[i], zs[i], plan.y[i], wet[i], false, plan.stair[i], dir[i], false, tun[i], tidx[i], false, plan.slab[i] && !wet[i], false, arch[i]));
+            if (kitAt[i] >= 0)
+                cells.add(new HousePaths.Cell(xs[i], zs[i], bridges.get(kitAt[i]).y0() - 1, false, false, -1, dir[i], false, -1, kitAt[i], false, false, false, kitH[i], true));
+            else
+                cells.add(new HousePaths.Cell(xs[i], zs[i], plan.y[i], wet[i], false, plan.stair[i], dir[i], false, tun[i], tidx[i], false, plan.slab[i] && !wet[i], false, arch[i], false));
             cells.addAll(bands.get(i));
         }
         // path blocks are half a block of material each; earth the cuts do not supply is paid; steps are paid in stone
@@ -448,13 +516,19 @@ final class PathPlan {
         surface -= stairs + slabs;
         int earth = (Math.max(0, surface) + 1) / 2 + earthFixed + Math.max(0, fill - cut);
         int stone = 2 * stairs + (slabs + 1) / 2 + stoneExtra;
+        for (BridgeKit.Bridge br : bridges) {
+            int[] bill = BridgeKit.bill(br.spans());
+            planks += bill[0];
+            stone += bill[1];
+            lanterns += bill[2];
+        }
         // arched decks: a slab on every odd half, an upside-down stair under every rise of the underside (5 wide)
         for (int i = 0; i < n; i++) {
             if (arch[i] == 0) continue;
             planks += (arch[i] & 1) == 1 ? 2 : 0;
             if (i > 0 && arch[i] / 2 > arch[i - 1] / 2 || i < n - 1 && arch[i] / 2 > arch[i + 1] / 2) planks += 10;
         }
-        return new HousePaths.Survey(cells, earth, stone, planks, torches, lanterns, tunnelCells, n, skipped);
+        return new HousePaths.Survey(cells, earth, stone, planks, torches, lanterns, tunnelCells, n, skipped, bridges);
     }
 
     /** Can cell i of the walked line have a bridge rail on side s: a wet cell, its deck beside laid, the column open water or low ground. */
