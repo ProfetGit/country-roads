@@ -493,7 +493,9 @@ public final class RoadPainter {
         byte kind = m.kind[i];
         int s = (int) Math.floor(m.s[i]);
         Palette.Wood wood = Palette.wood(m.wood[i]);
-        if (kind == EdgePlan.GROUND && top - ground - 1 > MAX_FILL) kind = EdgePlan.BRIDGE;
+        // fill too high for an embankment: next to a stone bridge a masonry abutment; anywhere else the road stays solid
+        // ground (earth, then rubble), never a few loose timber bridge columns in the middle of a road
+        if (kind == EdgePlan.GROUND && top - ground - 1 > MAX_FILL && m.bridge[i] == EdgePlan.STONE) kind = EdgePlan.BRIDGE;
         if (kind == EdgePlan.TUNNEL && ground <= top + 5) kind = EdgePlan.GROUND;
 
         switch (kind) {
@@ -832,7 +834,7 @@ public final class RoadPainter {
         int s = (int) Math.floor(m.s[i]);
         Palette.Wood wood = Palette.wood(m.wood[i]);
         int ground = groundAt(x, z, top);
-        if (kind == EdgePlan.GROUND && top - ground - 1 > MAX_FILL && d < 1) kind = EdgePlan.BRIDGE;
+        if (kind == EdgePlan.GROUND && top - ground - 1 > MAX_FILL && d < 1 && m.bridge[i] == EdgePlan.STONE) kind = EdgePlan.BRIDGE;
         if (kind == EdgePlan.TUNNEL && ground <= top + 5) kind = EdgePlan.GROUND;
 
         if (kind == EdgePlan.BRIDGE) {

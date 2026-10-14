@@ -340,6 +340,8 @@ public final class Planner {
     static final boolean TRACE_BRIDGES = Boolean.getBoolean("countryroads.traceBridges");
     /** A new turn sharper than this over 4 samples makes an eased line a hairpin (55 kept 45-degree crossings diagonal). */
     static final double KINK = 100;
+    /** Dry trestles shorter than this many samples are filled ground instead. */
+    static final int MIN_TRESTLE = 4;
     static final int BRIDGE_EASE = 10, BRIDGE_EASE_TURN = 10, LANDING = 6, WET_REACH = 12;
 
     /**
@@ -885,6 +887,17 @@ public final class Planner {
                 if (kind[i] == EdgePlan.GROUND && Float.isNaN(pin[i])) y[i] = Math.max(y[i], y[i + 1] - (i < 24 || i > n - 25 ? 0.5f : MAX_GRADE));
             for (int i = 0; i < n; i++)
                 if (kind[i] == EdgePlan.GROUND && Float.isNaN(pin[i]) && y[i] > ground[i] + 5) kind[i] = EdgePlan.BRIDGE;
+        }
+        // a dry trestle shorter than MIN_TRESTLE samples is no bridge (a lone post over a dip): it is filled ground
+        for (int i = 0; i < n; ) {
+            int j = i;
+            while (j + 1 < n && kind[j + 1] == kind[i]) j++;
+            if (kind[i] == EdgePlan.BRIDGE && j - i + 1 < MIN_TRESTLE) {
+                boolean wet = false;
+                for (int k = i; k <= j; k++) wet |= water[k] > ground[k];
+                if (!wet) for (int k = i; k <= j; k++) if (Float.isNaN(pin[k])) kind[k] = EdgePlan.GROUND;
+            }
+            i = j + 1;
         }
         // a crossing ends where its water ends: dry samples at either end (the bank, the level part of a raised deck's
         // approach) are ground again, built up as an embankment or, too high for one, a masonry abutment. A road that

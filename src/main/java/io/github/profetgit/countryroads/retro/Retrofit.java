@@ -126,6 +126,9 @@ public final class Retrofit {
     }
 
     public static boolean isCrafted(BlockState s) {
+        // the roadside field stones' slabs are scenery, not a building (they closed columns to house paths and pushed
+        // them away like a wall)
+        if (s.is(Blocks.STONE_SLAB) || s.is(Blocks.ANDESITE_SLAB)) return false;
         return s.is(BlockTags.PLANKS) || s.is(BlockTags.WOOL) || s.is(BlockTags.BEDS) || s.is(BlockTags.DOORS) || s.is(Blocks.CHEST)
             || s.is(Blocks.CRAFTING_TABLE) || s.is(Blocks.FURNACE) || s.is(Blocks.TORCH) || s.is(Blocks.WALL_TORCH) || s.is(Blocks.GLASS)
             || s.is(BlockTags.FENCES) || s.is(Blocks.FARMLAND) || s.is(BlockTags.STAIRS) || s.is(BlockTags.SLABS) || s.is(Blocks.COBBLESTONE)
