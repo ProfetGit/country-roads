@@ -241,7 +241,7 @@ public final class Planner {
         for (int round = 0; round < Integer.getInteger("countryroads.bridgeRounds", 12); round++) {
             boolean grew = round == 0;
             for (int i = 0; i < n; i++) {
-                if (kind[i] == EdgePlan.BRIDGE && !crossing[i]) {
+                if ((kind[i] == EdgePlan.BRIDGE || kind[i] == EdgePlan.BOARDWALK) && !crossing[i]) {
                     crossing[i] = true;
                     grew = true;
                 }
@@ -291,7 +291,7 @@ public final class Planner {
         // bridges keep one width: 3 deck columns between the parapets on a column-centred line
         for (int i = 0; i < n; i++) {
             int near = 99;
-            for (int k = Math.max(0, i - 4); k <= Math.min(n - 1, i + 4); k++) if (kind[k] == EdgePlan.BRIDGE) near = Math.min(near, Math.abs(k - i));
+            for (int k = Math.max(0, i - 4); k <= Math.min(n - 1, i + 4); k++) if (kind[k] == EdgePlan.BRIDGE || kind[k] == EdgePlan.BOARDWALK) near = Math.min(near, Math.abs(k - i));
             if (near < 99) hw[i] += (BRIDGE_HW - hw[i]) * Math.min(1f, (5 - near) / 4f);
         }
         EdgePlan plan = new EdgePlan(e, x, z, y, hw, kind, wood, System.nanoTime() - t0);
@@ -365,7 +365,8 @@ public final class Planner {
             while (j + 1 < n && kind[j + 1] == kind[i]) j++;
             int a = i, b = j;
             i = j + 1;
-            if (kind[a] != EdgePlan.BRIDGE || b - a < 3) continue;
+            // walkways over shallow water are straightened like bridges
+            if (kind[a] != EdgePlan.BRIDGE && kind[a] != EdgePlan.BOARDWALK || b - a < 3) continue;
             boolean wet = false;
             for (int k = a; k <= b; k++) wet |= water[k] > ground[k];
             if (TRACE_BRIDGES && !wet) io.github.profetgit.countryroads.CountryRoads.LOG.info("CR-STRAIGHT dry " + a + ".." + b + " at " + x[a] + "," + z[a]);
@@ -519,7 +520,7 @@ public final class Planner {
             int a = i, b = j;
             i = j + 1;
             // dry trestles too (from 4 samples): a ravine bridge is as much a bridge as a river one
-            if (kind[a] != EdgePlan.BRIDGE || b - a < 2) continue;
+            if (kind[a] != EdgePlan.BRIDGE && kind[a] != EdgePlan.BOARDWALK || b - a < 2) continue;
             boolean wet = false;
             for (int k = a; k <= b; k++) wet |= water[k] > ground[k];
             float cx = x[b] - x[a], cz = z[b] - z[a], len = (float) Math.hypot(cx, cz), dev = 0;

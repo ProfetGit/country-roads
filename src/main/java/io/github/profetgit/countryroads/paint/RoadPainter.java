@@ -499,12 +499,7 @@ public final class RoadPainter {
         if (kind == EdgePlan.TUNNEL && ground <= top + 5) kind = EdgePlan.GROUND;
 
         switch (kind) {
-            case EdgePlan.BOARDWALK -> {
-                set(x, top, z, wood.planks().defaultBlockState());
-                if (half) set(x, top + 1, z, wood.slab().defaultBlockState());
-                if (in < 0.9f && Math.floorMod(s, 4) == 0) post(x, z, top - 1, wood.log().defaultBlockState());
-                clear(x, top + (half ? 2 : 1), top + 4, z);
-            }
+            case EdgePlan.BOARDWALK -> walkway(x, z, top, -in, m, i);
             case EdgePlan.BRIDGE -> bridge(x, z, top, half, -in, m, i, ground);
             case EdgePlan.TUNNEL -> {
                 set(x, top, z, Palette.surface(pal(x, top, z), in, h, Blocks.STONE.defaultBlockState(), false));
@@ -721,6 +716,45 @@ public final class RoadPainter {
         }
     }
 
+    /** Chances (of 1024) of a campfire post on a walkway edge column and of a pile under a walkway column. */
+    static final int WALKWAY_POST = 230, WALKWAY_PILE = 150;
+
+    /**
+     * A tiny walkway over shallow still water (the boardwalk kind), all spruce, just above the water: a deck of bottom
+     * slabs edged by closed trapdoors lying flat, unlit campfires here and there on the edges as stubby posts and
+     * waterlogged ones under the deck as piles. Posts and piles are scattered per column (never two posts side by side
+     * along an edge), not in matching rows: the user wanted it irregular. The deck sits on the planned surface.
+     */
+    private void walkway(int x, int z, int top, float d, ChunkMask m, int i) {
+        float sl = m.slant[i] / 2;
+        boolean rail = d >= 0 && d - 0.5f >= -sl && d - 0.5f < sl, deck = !rail && d - 0.5f < sl;
+        int water = top - 1;
+        if (!rail && !deck) {
+            lilyPad(x, z, water);
+            return;
+        }
+        Direction along = Direction.getApproximateNearest(m.tx[i], 0, m.tz[i]);
+        // a post here unless the edge column just before it (along the walkway) drew one too
+        boolean post = rail && walkwayPost(x, z) && !walkwayPost(x - along.getStepX(), z - along.getStepZ());
+        BlockState campfire = Blocks.CAMPFIRE.defaultBlockState().setValue(net.minecraft.world.level.block.CampfireBlock.LIT, false)
+            .setValue(net.minecraft.world.level.block.CampfireBlock.FACING, Direction.from2DDataValue((int) ((hash(x, z) >>> 7) & 3)));
+        // piles under the deck where the water is (a campfire holds water like a slab); always under a post
+        boolean pile = post || (int) ((hash(x * 5 + 3, z * 3 - 7) >>> 20) & 1023) < WALKWAY_PILE;
+        if (pile && !get(x, water, z).getFluidState().isEmpty())
+            set(x, water, z, campfire.setValue(net.minecraft.world.level.block.CampfireBlock.WATERLOGGED, true));
+        if (deck) set(x, top, z, Blocks.SPRUCE_SLAB.defaultBlockState());
+        else if (post) set(x, top, z, campfire);
+        else set(x, top, z, Blocks.SPRUCE_TRAPDOOR.defaultBlockState()
+            .setValue(net.minecraft.world.level.block.TrapDoorBlock.FACING, along)
+            .setValue(net.minecraft.world.level.block.TrapDoorBlock.OPEN, false)
+            .setValue(net.minecraft.world.level.block.TrapDoorBlock.HALF, net.minecraft.world.level.block.state.properties.Half.BOTTOM));
+        clear(x, top + 1, top + 3, z);
+    }
+
+    private static boolean walkwayPost(int x, int z) {
+        return (int) ((hash(x * 11 - 3, z * 7 + 5) >>> 30) & 1023) < WALKWAY_POST;
+    }
+
     /** Lowest masonry block under the deck at u: a flattened round arch between piers, crown one block under the deck. */
     private static int archUnder(float u, float sp, int spans, int rise, int top) {
         int j = Math.clamp((int) Math.floor(u / sp), 0, spans - 1);
@@ -841,7 +875,11 @@ public final class RoadPainter {
             if (d < 4.5f) bridge(x, z, top, false, d, m, i, ground);
             return;
         }
-        if (kind == EdgePlan.BOARDWALK || kind == EdgePlan.BRIDGE) return;
+        if (kind == EdgePlan.BOARDWALK) {
+            if (d < 4.5f) walkway(x, z, top, d, m, i);
+            return;
+        }
+        if (kind == EdgePlan.BRIDGE) return;
         if (kind == EdgePlan.TUNNEL) {
             if (d >= 1.5f) return;
             boolean frame = Math.floorMod(s, 6) == 0;

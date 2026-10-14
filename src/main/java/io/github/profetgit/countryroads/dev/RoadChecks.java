@@ -569,6 +569,11 @@ final class RoadChecks {
                 CountryRoads.LOG.info(line);
                 if (p != null && p.bridge != null)
                     for (int i = 0; i < p.length(); i += Math.max(1, p.runLen[i])) {
+                        if (p.kind[i] == EdgePlan.BOARDWALK) {
+                            int mid = i + p.runLen[i] / 2, e2 = i + p.runLen[i] - 1;
+                            report(src, "CR-WALKWAY at " + (int) p.x[mid] + " " + Math.round(p.y[mid]) + " " + (int) p.z[mid] + " len=" + p.runLen[i]
+                                + " dir=" + Math.round(Math.toDegrees(Math.atan2(p.z[e2] - p.z[i], p.x[e2] - p.x[i]))));
+                        }
                         if (p.kind[i] != EdgePlan.BRIDGE) continue;
                         int mid = i + p.runLen[i] / 2, e2 = i + p.runLen[i] - 1;
                         float dev = 0, cx = p.x[e2] - p.x[i], cz = p.z[e2] - p.z[i], cl = (float) Math.hypot(cx, cz);
