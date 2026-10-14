@@ -29,6 +29,8 @@ public final class EdgePlan {
     public byte[] bridge, bridgeWood, bridgeRise;
     /** Samples laid on an earlier road's exact line (a shared trunk): that road paints them, this one does not. */
     public boolean[] shared;
+    /** Dev: whether the terrain sample under each sample had water above its ground. */
+    public boolean[] wet;
     /** Wood style for decks: 0 spruce, 1 oak, 2 mangrove, 3 dark oak. */
     public final byte[] wood;
     public final long routeNanos;

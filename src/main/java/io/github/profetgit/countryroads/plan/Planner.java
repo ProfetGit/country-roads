@@ -167,7 +167,29 @@ public final class Planner {
                     } else gap++;
                 }
                 i = b + 1;
-                if (b - a + 1 < 12) continue;
+                if (TRACE_BRIDGES) io.github.profetgit.countryroads.CountryRoads.LOG.info("CR-TRUNK edge " + e.a().pos().toShortString() + "->" + e.b().pos().toShortString()
+                    + " trunk " + t.p.edge.a().pos().toShortString() + "->" + t.p.edge.b().pos().toShortString() + " matched " + a + ".." + b + " of " + L
+                    + " at " + (int) line.get(a)[0] + "," + (int) line.get(a)[1]);
+                if (b - a + 1 < 12) {
+                    // a crossing, too short to share the line: the road meets the other one at its height there (two
+                    // roads crossed with the later one's bridge approach three blocks above the earlier one)
+                    int best = -1;
+                    double bestD = 2.5 * 2.5;
+                    for (int k = a; k <= b; k++) {
+                        if (match[k] < 0 || !Float.isNaN(pinY[k])) continue;
+                        double[] q = line.get(k);
+                        double dx = t.p.x[match[k]] - q[0], dz = t.p.z[match[k]] - q[1], d2 = dx * dx + dz * dz;
+                        if (d2 < bestD) {
+                            bestD = d2;
+                            best = k;
+                        }
+                    }
+                    if (best > 0 && best < L - 1) {
+                        pinY[best] = t.p.y[match[best]];
+                        pinKind[best] = t.p.kind[match[best]];
+                    }
+                    continue;
+                }
                 double[] offA = null, offB = null;
                 int j = match[a];
                 for (int k = a; k <= b; k++) {
@@ -241,7 +263,9 @@ public final class Planner {
         for (int round = 0; round < Integer.getInteger("countryroads.bridgeRounds", 12); round++) {
             boolean grew = round == 0;
             for (int i = 0; i < n; i++) {
-                if (kind[i] == EdgePlan.BRIDGE && !crossing[i]) {
+                // only water grows a crossing: dry trestle under a raised deck on the moved line joined it too, and one
+                // crossing of 12 wet samples grew round by round into a 442-sample viaduct
+                if (kind[i] == EdgePlan.BRIDGE && water0[i] > ground0[i] && !crossing[i]) {
                     crossing[i] = true;
                     grew = true;
                 }
@@ -255,7 +279,7 @@ public final class Planner {
             System.arraycopy(river0, 0, river, 0, n);
             boolean[] moved = straighten(x, z, use, water, ground, pin, (px, pz) -> {
                 int bx = (int) Math.floor(px), bz = (int) Math.floor(pz);
-                return fa.inOther(bx, bz, 2) || fb.inOther(bx, bz, 2);
+                return fa.inOther(bx, bz, 2) || fb.inOther(bx, bz, 2) || nearTrunk(trunks, px, pz);
             }, (px, pz) -> terrain.sample((int) Math.floor(px), (int) Math.floor(pz)).wet());
             for (int i = 0; i < n; i++) if (moved[i]) sampleAt(i, x, z, ground, water, river);
             profile(ground, water, river, kind, pin, kindPin, connA, connB);
@@ -265,17 +289,22 @@ public final class Planner {
             for (int k = i; k < Math.min(n, i + 16); k++) wood[k] = w;
         }
         float[] y = profile(ground, water, river, kind, pin, kindPin, connA, connB);
+        if (TRACE_BRIDGES) {
+            StringBuilder w = new StringBuilder();
+            for (int q = 0; q < Math.min(n, 80); q++) w.append(water[q] > ground[q] ? "GCBWT".charAt(kind[q]) : Character.toLowerCase("GCBWT".charAt(kind[q]))).append(Math.round(y[q])).append(Float.isNaN(pin[q]) ? "" : "p").append(' ');
+            io.github.profetgit.countryroads.CountryRoads.LOG.info("CR-PROFILE n=" + n + " " + w);
+        }
         // whatever crossing is still bent (it grew into a bend the rounds could not follow) is laid on the chord between its
         // own two ends: the ends stay, so the road either side is unchanged, and the deck is level, so heights hold
         boolean[] chorded = Boolean.getBoolean("countryroads.noChord") ? new boolean[n] : chordBridges(x, z, kind, water, ground, pin, (px, pz) -> {
             int bx = (int) Math.floor(px), bz = (int) Math.floor(pz);
-            return fa.inOther(bx, bz, 2) || fb.inOther(bx, bz, 2);
+            return fa.inOther(bx, bz, 2) || fb.inOther(bx, bz, 2) || nearTrunk(trunks, px, pz);
         }, (px, pz) -> terrain.sample((int) Math.floor(px), (int) Math.floor(pz)).wet());
         // again while a crossing's ease bent a neighbour that was already straight
         for (int pass = 0; pass < 3 && !Boolean.getBoolean("countryroads.noChord"); pass++) {
             boolean[] more = chordBridges(x, z, kind, water, ground, pin, (px, pz) -> {
                 int bx = (int) Math.floor(px), bz = (int) Math.floor(pz);
-                return fa.inOther(bx, bz, 2) || fb.inOther(bx, bz, 2);
+                return fa.inOther(bx, bz, 2) || fb.inOther(bx, bz, 2) || nearTrunk(trunks, px, pz);
             }, (px, pz) -> terrain.sample((int) Math.floor(px), (int) Math.floor(pz)).wet());
             boolean any = false;
             for (int i = 0; i < n; i++) if (more[i]) any = chorded[i] = true;
@@ -296,6 +325,8 @@ public final class Planner {
         }
         EdgePlan plan = new EdgePlan(e, x, z, y, hw, kind, wood, System.nanoTime() - t0);
         plan.shared = shared;
+        plan.wet = new boolean[n];
+        for (int i = 0; i < n; i++) plan.wet[i] = water[i] > ground[i];
         bridges(plan, ground, water);
         plan.connA = connA;
         plan.connB = connB;
@@ -340,6 +371,8 @@ public final class Planner {
     static final boolean TRACE_BRIDGES = Boolean.getBoolean("countryroads.traceBridges");
     /** A new turn sharper than this over 4 samples makes an eased line a hairpin (55 kept 45-degree crossings diagonal). */
     static final double KINK = 100;
+    /** Dry land at least this many samples long inside a crossing splits it in two. */
+    static final int SPLIT_LAND = 8;
     /** Dry trestles shorter than this many samples are filled ground instead. */
     static final int MIN_TRESTLE = 4;
     static final int BRIDGE_EASE = 10, BRIDGE_EASE_TURN = 10, LANDING = 6, WET_REACH = 12;
@@ -376,13 +409,32 @@ public final class Planner {
         for (int[] r : runs) lines.add(line(x, z, r[0], r[1], wetAt));
         for (int k = 0; k + 1 < lines.size(); ) {
             Line c = lines.get(k), d = lines.get(k + 1);
-            if (c.hi() < d.lo()) {
+            // ...unless dry land of SPLIT_LAND+ samples lies between them (an island): merged, the line went past the
+            // island through the river and made one 235-block viaduct; split, the road touches down on the island
+            int dry = 0, most = 0;
+            for (int q = c.b() + 1; q < d.a(); q++) {
+                dry = water[q] <= ground[q] ? dry + 1 : 0;
+                most = Math.max(most, dry);
+            }
+            if (c.hi() < d.lo() || most >= SPLIT_LAND) {
+                if (c.hi() >= d.lo()) {
+                    int mid = (c.b() + d.a()) / 2;
+                    int b0 = Math.max(c.b(), Math.min(c.b0(), mid)), a0 = Math.min(d.a(), Math.max(d.a0(), mid + 1));
+                    int m2 = (b0 + a0) / 2;
+                    lines.set(k, new Line(c.a(), c.b(), c.a0(), b0, c.lo(), Math.clamp(m2, b0, Math.max(b0, c.hi())), c.ox(), c.oz(), c.dx(), c.dz()));
+                    lines.set(k + 1, new Line(d.a(), d.b(), a0, d.b0(), Math.clamp(m2 + 1, Math.min(d.lo(), a0), a0), d.hi(), d.ox(), d.oz(), d.dx(), d.dz()));
+                }
                 k++;
                 continue;
             }
             lines.set(k, line(x, z, c.a(), d.b(), wetAt));
             lines.remove(k + 1);
             if (k > 0) k--;
+        }
+        if (TRACE_BRIDGES) {
+            StringBuilder w = new StringBuilder();
+            for (int q = 0; q < n; q++) w.append(kind[q] == EdgePlan.BRIDGE ? (water[q] > ground[q] ? 'B' : 'b') : water[q] > ground[q] ? 'W' : '.');
+            io.github.profetgit.countryroads.CountryRoads.LOG.info("CR-STRAIGHT kinds n=" + n + " " + w);
         }
         if (TRACE_BRIDGES) for (Line l : lines) io.github.profetgit.countryroads.CountryRoads.LOG.info("CR-STRAIGHT line " + l.a() + ".." + l.b()
             + " at " + x[l.a()] + "," + z[l.a()] + " -> " + x[l.b()] + "," + z[l.b()] + " lo/hi=" + l.lo() + "/" + l.hi());
@@ -547,6 +599,27 @@ public final class Planner {
         return moved;
     }
 
+    /**
+     * Whether (x, z) is within TRUNK_CLEAR of an earlier road's centreline: a straightened line moved next to another road
+     * met it at a different height (the planner does not match heights where roads cross).
+     */
+    private static boolean nearTrunk(List<Trunk> trunks, float x, float z) {
+        for (Trunk t : trunks)
+            for (int k = 0; k < t.p.length(); k++) {
+                float dx = t.p.x[k] - x, dz = t.p.z[k] - z;
+                if (dx * dx + dz * dz < TRUNK_CLEAR * TRUNK_CLEAR) return true;
+            }
+        return false;
+    }
+
+    static final float TRUNK_CLEAR = 4.5f;
+    /** Samples beyond a stone bridge's ends that must be free of pinned heights for its deck to be raised. */
+    static final int RAISE_CLEAR = 12;
+    /** A stone bridge needs at least this many samples (a 2-3 sample stone bridge was a lone arch). */
+    static final int MIN_STONE = 8;
+    /** Samples either side of a pinned sample graded at CONN_GRADE. */
+    static final int PIN_EASE = 6;
+
     /** Degrees between the axis (ax, az), pointed away from the bridge, and the old line's heading over 12 samples from k. */
     private static float turnFrom(float[] x, float[] z, int k, int dir, float ax, float az) {
         int e = Math.clamp(k + 12 * dir, 0, x.length - 1);
@@ -582,7 +655,7 @@ public final class Planner {
                 }
                 clear = Math.round(p.y[(i + j) / 2]) - level - 2;
                 // a raised deck (planned as stone before its dry ends were trimmed off) stays stone
-                byte style = len > STONE_BRIDGE || clear >= 4 && levels.size() > 0 ? EdgePlan.STONE : EdgePlan.TIMBER;
+                byte style = (len > STONE_BRIDGE || clear >= 4 && levels.size() > 0) && len >= MIN_STONE ? EdgePlan.STONE : EdgePlan.TIMBER;
                 int mid = (i + j) / 2;
                 byte pair = Palette.bridgeWoods(terrain.biome((int) p.x[mid], (int) water[mid], (int) p.z[mid]));
                 // the raised approaches too: where their fill is too high for an embankment the painter walls them in stone
@@ -772,6 +845,11 @@ public final class Planner {
 
     static float[] profile(float[] ground, float[] water, boolean[] river, byte[] kind, float[] pin, byte[] pinKind, int connA, int connB) {
         int n = ground.length;
+        // next to a pinned stretch (a shared road's fixed heights) the road may climb like a village connector: a bridge
+        // ending a few samples before a shared stretch at water level could not come down to it at the normal grade
+        boolean[] pinNear = new boolean[n];
+        for (int i = 1; i < n - 1; i++)
+            if (!Float.isNaN(pin[i])) for (int k = Math.max(0, i - PIN_EASE); k <= Math.min(n - 1, i + PIN_EASE); k++) pinNear[k] = true;
         float[] base = new float[n];
         for (int i = 0; i < n; i++) {
             boolean wet = water[i] > ground[i];
@@ -821,7 +899,10 @@ public final class Planner {
                 float deck = Float.NEGATIVE_INFINITY;
                 for (int k = i; k <= j; k++) deck = Math.max(deck, base[k]);
                 // stone bridges stand three higher than timber so their arches clear the water
-                if (kind[i] == EdgePlan.BRIDGE && j - i + 1 > STONE_BRIDGE) {
+                // ...unless a pinned stretch (a shared road's fixed heights) starts too close to either end to ramp down to
+                boolean pinned = false;
+                for (int k = Math.max(0, i - RAISE_CLEAR); k <= Math.min(n - 1, j + RAISE_CLEAR) && !pinned; k++) pinned = !Float.isNaN(pin[k]) && k > 0 && k < n - 1;
+                if (kind[i] == EdgePlan.BRIDGE && j - i + 1 > STONE_BRIDGE && !pinned) {
                     deck += 3;
                     for (int k = i; k <= j; k++) base[k] = deck;
                 }
@@ -834,11 +915,11 @@ public final class Planner {
             for (int i = 0; i < n; i++) if (!Float.isNaN(pin[i])) y[i] = pin[i];
             // a steeper grade is allowed on the last stretch into a village, so the road climbs into the street
             for (int i = 1; i < n; i++) {
-                float g = i < connA || i >= n - connB ? CONN_GRADE : i < 24 || i > n - 25 ? 0.5f : MAX_GRADE;
+                float g = i < connA || i >= n - connB || pinNear[i] ? CONN_GRADE : i < 24 || i > n - 25 ? 0.5f : MAX_GRADE;
                 if (Float.isNaN(pin[i])) y[i] = Math.clamp(y[i], y[i - 1] - g, y[i - 1] + g);
             }
             for (int i = n - 2; i >= 0; i--) {
-                float g = i < connA || i >= n - connB ? CONN_GRADE : i < 24 || i > n - 25 ? 0.5f : MAX_GRADE;
+                float g = i < connA || i >= n - connB || pinNear[i] ? CONN_GRADE : i < 24 || i > n - 25 ? 0.5f : MAX_GRADE;
                 if (Float.isNaN(pin[i])) y[i] = Math.clamp(y[i], y[i + 1] - g, y[i + 1] + g);
             }
         }
@@ -850,8 +931,9 @@ public final class Planner {
         }
         dropShortRuns(kind, EdgePlan.TUNNEL, 16);
         // trestle samples that joined a crossing above (the climb to a raised stone deck) are part of the bridge: the
-        // whole crossing is level and the climb moves onto the ground before it
-        for (int round = 0; round < 3; round++) {
+        // whole crossing is level and the climb moves onto the ground before it. Until nothing changes: new trestle
+        // samples from the last round joined two runs at different deck heights (a 3-block step inside one bridge)
+        for (int round = 0; round < 12; round++) {
             boolean changed = false;
             // a boardwalk the crossing grew into is part of it (it stepped up two blocks a sample into the deck)
             for (boolean more = true; more; ) {
@@ -882,11 +964,39 @@ public final class Planner {
             }
             if (!changed) break;
             for (int i = 1; i < n; i++)
-                if (kind[i] == EdgePlan.GROUND && Float.isNaN(pin[i])) y[i] = Math.max(y[i], y[i - 1] - (i < 24 || i > n - 25 ? 0.5f : MAX_GRADE));
+                if (kind[i] == EdgePlan.GROUND && Float.isNaN(pin[i])) y[i] = Math.max(y[i], y[i - 1] - (pinNear[i] ? CONN_GRADE : i < 24 || i > n - 25 ? 0.5f : MAX_GRADE));
             for (int i = n - 2; i >= 0; i--)
-                if (kind[i] == EdgePlan.GROUND && Float.isNaN(pin[i])) y[i] = Math.max(y[i], y[i + 1] - (i < 24 || i > n - 25 ? 0.5f : MAX_GRADE));
+                if (kind[i] == EdgePlan.GROUND && Float.isNaN(pin[i])) y[i] = Math.max(y[i], y[i + 1] - (pinNear[i] ? CONN_GRADE : i < 24 || i > n - 25 ? 0.5f : MAX_GRADE));
             for (int i = 0; i < n; i++)
                 if (kind[i] == EdgePlan.GROUND && Float.isNaN(pin[i]) && y[i] > ground[i] + 5) kind[i] = EdgePlan.BRIDGE;
+        }
+        // land of SPLIT_LAND+ samples inside a crossing (an island between two channels) splits it into two bridges: the
+        // land is ground again, ramping down from each deck at the grade limit (one viaduct ran 137 blocks over both)
+        for (int i = 0; i < n; ) {
+            int j = i;
+            while (j + 1 < n && kind[j + 1] == kind[i]) j++;
+            if (kind[i] == EdgePlan.BRIDGE) {
+                for (int k = i + 1; k < j; ) {
+                    if (water[k] > ground[k]) {
+                        k++;
+                        continue;
+                    }
+                    int e = k;
+                    while (e + 1 < j && water[e + 1] <= ground[e + 1]) e++;
+                    boolean free = true;
+                    for (int q = k; q <= e; q++) free &= Float.isNaN(pin[q]);
+                    // both bridges left must be real ones (a split that left a 2-sample crossing beside a raised deck made a step)
+                    if (e - k + 1 >= SPLIT_LAND && free && k - i >= MIN_TRESTLE && j - e >= MIN_TRESTLE) {
+                        float left = y[k - 1], right = y[e + 1];
+                        for (int q = k; q <= e; q++) {
+                            kind[q] = EdgePlan.GROUND;
+                            y[q] = Math.max(ground[q], Math.max(left - MAX_GRADE * (q - k + 1), right - MAX_GRADE * (e - q + 1)));
+                        }
+                    }
+                    k = e + 1;
+                }
+            }
+            i = j + 1;
         }
         // a dry trestle shorter than MIN_TRESTLE samples is no bridge (a lone post over a dip): it is filled ground
         for (int i = 0; i < n; ) {
@@ -917,6 +1027,30 @@ public final class Planner {
             }
             i = j + 1;
         }
+        // a stream only MIN_TRESTLE-1 samples wide is no bridge either: the road crosses it on its own embankment, as wet
+        // specks always did (a 2-sample bridge at water + 3 stood three blocks under the next bridge's raised approach)
+        boolean tiny = false;
+        for (int i = 0; i < n; ) {
+            int j = i;
+            while (j + 1 < n && kind[j + 1] == kind[i]) j++;
+            if (kind[i] == EdgePlan.BRIDGE && j - i + 1 < MIN_TRESTLE) {
+                boolean free = true;
+                for (int k = i; k <= j; k++) free &= Float.isNaN(pin[k]);
+                if (free) {
+                    for (int k = i; k <= j; k++) kind[k] = EdgePlan.GROUND;
+                    tiny = true;
+                }
+            }
+            i = j + 1;
+        }
+        // ground next to a deck climbs to it within the grade (raise only, so no deck or pin is cut into)
+        if (tiny)
+            for (int pass = 0; pass < 2; pass++) {
+                for (int i = 1; i < n; i++)
+                    if (kind[i] == EdgePlan.GROUND && Float.isNaN(pin[i])) y[i] = Math.max(y[i], y[i - 1] - (pinNear[i] ? CONN_GRADE : MAX_GRADE));
+                for (int i = n - 2; i >= 0; i--)
+                    if (kind[i] == EdgePlan.GROUND && Float.isNaN(pin[i])) y[i] = Math.max(y[i], y[i + 1] - (pinNear[i] ? CONN_GRADE : MAX_GRADE));
+            }
         return y;
     }
 

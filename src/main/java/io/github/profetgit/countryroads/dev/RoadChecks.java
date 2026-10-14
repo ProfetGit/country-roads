@@ -537,7 +537,7 @@ final class RoadChecks {
     private static String profileText(EdgePlan p, int from, int to) {
         StringBuilder sb = new StringBuilder();
         for (int k = Math.max(0, from); k <= Math.min(p.length() - 1, to); k++)
-            sb.append("GCBWT".charAt(p.kind[k])).append(Math.round(p.y[k])).append(System.getProperty("crxz") != null ? "@" + Math.round(p.x[k] * 10) / 10f + "," + Math.round(p.z[k] * 10) / 10f : "").append(' ');
+            sb.append(p.wet != null && !p.wet[k] ? Character.toLowerCase("GCBWT".charAt(p.kind[k])) : "GCBWT".charAt(p.kind[k])).append(Math.round(p.y[k])).append(System.getProperty("crxz") != null ? "@" + Math.round(p.x[k] * 10) / 10f + "," + Math.round(p.z[k] * 10) / 10f : "").append(' ');
         return sb.toString().trim();
     }
 
@@ -565,7 +565,8 @@ final class RoadChecks {
                     len[0] += p.length();
                 }
                 String line = "CR-ROAD " + e.a().pos().toShortString() + " -> " + e.b().pos().toShortString() + " straight=" + (int) e.length()
-                    + (p == null ? " NONE" : " length=" + p.length() + " ms=" + p.routeNanos / 1_000_000) + " trunks=" + n.trunkDeps(e).size();
+                    + (p == null ? " NONE" : " length=" + p.length() + " ms=" + p.routeNanos / 1_000_000 + " s0=" + (int) p.x[0] + "," + (int) p.z[0]
+                    + (p.length() > 17 ? " s17=" + (int) p.x[17] + "," + (int) p.z[17] : "")) + " trunks=" + n.trunkDeps(e).size();
                 CountryRoads.LOG.info(line);
                 if (p != null && p.bridge != null)
                     for (int i = 0; i < p.length(); i += Math.max(1, p.runLen[i])) {
