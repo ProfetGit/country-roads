@@ -399,6 +399,7 @@ public final class Planner {
         }
         if (camps != null) camps.choose(plan);
         PropPlanner.dropNearCamps(plan);
+        FieldPlanner.dropNearCamps(plan);
         plan.decor.removeIf(d -> d.type() != EdgePlan.PROP && !standable(d));
         return plan;
     }
@@ -771,6 +772,7 @@ public final class Planner {
                 else post(p, n - 1 - b - i, -1, side, EdgePlan.ORCHARD, "", "", "", 4.5f, 2);
             }
         }
+        FieldPlanner.plan(p, terrain);
         PropPlanner.plan(p, terrain);
         runs(p);
     }
@@ -796,6 +798,8 @@ public final class Planner {
                 int near = nearestSample(p, d.x() + 0.5f, d.z() + 0.5f);
                 if (near >= s - 6 && near <= e + 6) ok = false;
             }
+            for (int k = s; k <= e && ok; k++)
+                for (Field f : p.fields) ok &= !f.covers(p.x[k], p.z[k], 5);
             if (ok) {
                 int r = (int) Math.floorMod(h >>> 17, 10L);
                 byte side = (byte) (r < 2 && type != EdgePlan.FENCE ? 0 : r < 6 ? 1 : -1);

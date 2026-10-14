@@ -69,6 +69,8 @@ public final class EdgePlan {
     public record Run(int s0, int s1, byte side, byte type) {}
 
     public final java.util.List<Run> runs = new java.util.ArrayList<>();
+    /** Wheat fields centred on this road (before the cross-road spacing check, ChunkMask.resolveFields). */
+    public final java.util.List<Field> fields = new java.util.ArrayList<>();
     private final Long2ObjectOpenHashMap<int[]> bins = new Long2ObjectOpenHashMap<>();
 
     public EdgePlan(Edge edge, float[] x, float[] z, float[] y, float[] hw, byte[] kind, byte[] wood, long routeNanos) {

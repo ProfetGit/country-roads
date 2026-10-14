@@ -178,7 +178,7 @@ final class PropPlanner {
                 int x = (int) Math.floor(g[0] + g[2] * off), z = (int) Math.floor(g[1] + g[3] * off);
                 Direction toRoad = Direction.getApproximateNearest((float) -g[2], 0, (float) -g[3]);
                 Direction dir = pr.away ? toRoad.getOpposite() : toRoad;
-                if (!Props.fitsChunk(pr, x, z, dir)) continue;
+                if (!Props.fitsChunk(pr, x, z, dir) || inField(x, z)) continue;
                 if (!clearOfRoad(pr, x, z, dir, i) || !spaced(pr, x, z, dir) || !groundOk(propId, pr, x, z, dir, i)) continue;
                 Direction along = Direction.getApproximateNearest((float) g[4], 0, (float) g[5]);
                 if (along.getAxis() == toRoad.getAxis()) along = side > 0 ? toRoad.getCounterClockWise() : toRoad.getClockWise();
@@ -187,6 +187,11 @@ final class PropPlanner {
                 return true;
             }
         }
+        return false;
+    }
+
+    private boolean inField(int x, int z) {
+        for (Field f : p.fields) if (f.covers(x, z, 4)) return true;
         return false;
     }
 

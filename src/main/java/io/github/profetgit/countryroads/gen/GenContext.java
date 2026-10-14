@@ -211,6 +211,11 @@ public final class GenContext {
     public static boolean blocksBigFeature(BlockPos origin, int radius, boolean far) {
         GenContext c = CURRENT.get();
         if (c == null || c.bypass) return false;
+        // wheat fields: no trees, mushrooms or boulders in the blob (and 3 blocks round it)
+        ChunkMask at = c.maskAt(origin.getX(), origin.getZ());
+        if (at != null)
+            for (io.github.profetgit.countryroads.plan.Field f : at.fields)
+                if (f.covers(origin.getX(), origin.getZ(), 3 + Math.max(0, radius))) return true;
         // signposts and lamp posts need their column and arm free of trees
         if (radius == 0)
             for (ChunkMask m : c.masks.values())

@@ -129,6 +129,8 @@ public final class DevCommands {
                 .then(Commands.argument("radius", IntegerArgumentType.integer(16, 4000)).executes(c -> RoadChecks.decor(c.getSource(), IntegerArgumentType.getInteger(c, "radius")))))
             .then(Commands.literal("props")
                 .then(Commands.argument("radius", IntegerArgumentType.integer(16, 4000)).executes(c -> PropChecks.props(c.getSource(), IntegerArgumentType.getInteger(c, "radius")))))
+            .then(Commands.literal("fields")
+                .then(Commands.argument("radius", IntegerArgumentType.integer(16, 4000)).executes(c -> FieldChecks.fields(c.getSource(), IntegerArgumentType.getInteger(c, "radius")))))
             .then(Commands.literal("perks")
                 .then(Commands.argument("radius", IntegerArgumentType.integer(16, 4000)).executes(c -> RoadChecks.perks(c.getSource(), IntegerArgumentType.getInteger(c, "radius")))))
             .then(Commands.literal("inhabit")

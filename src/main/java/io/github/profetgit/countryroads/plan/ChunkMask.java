@@ -33,6 +33,10 @@ public final class ChunkMask {
     /** |nx| + |nz| of the unit direction from the centreline to the column (1 when the road runs along an axis, 1.41 diagonally). */
     public final float[] slant = new float[256];
     private boolean any;
+    /** Wheat fields (after the cross-road spacing check) whose blob can reach this chunk. */
+    public java.util.List<Field> fields = java.util.List.of();
+    /** Columns a field may not take: villages, camps, posts. */
+    public final boolean[] nofield = new boolean[256];
     public final java.util.List<EdgePlan.Decor> decor = new java.util.ArrayList<>();
 
     public ChunkMask(int cx, int cz) {
@@ -83,6 +87,30 @@ public final class ChunkMask {
      * survivor is chosen by position, so every chunk agrees.
      */
     public static java.util.List<EdgePlan.Decor> resolveDecor(List<EdgePlan> plans) {
+        return resolveDecor(plans, java.util.List.of());
+    }
+
+    /**
+     * A field survives when no other field centre within Field.APART sorts before it (a plain rule on the candidates,
+     * not a greedy chain, so a chunk that sees only the fields near it reaches the same answer as any other).
+     */
+    public static java.util.List<Field> resolveFields(List<EdgePlan> plans) {
+        java.util.List<Field> all = new java.util.ArrayList<>();
+        for (EdgePlan p : plans) all.addAll(p.fields);
+        return survivors(all, all);
+    }
+
+    public static java.util.List<Field> survivors(java.util.List<Field> candidates, java.util.List<Field> all) {
+        java.util.List<Field> out = new java.util.ArrayList<>();
+        for (Field f : candidates) {
+            boolean lost = false;
+            for (Field o : all) lost |= o != f && o.before(f) && Math.hypot(o.fx - f.fx, o.fz - f.fz) < Field.APART;
+            if (!lost) out.add(f);
+        }
+        return out;
+    }
+
+    public static java.util.List<EdgePlan.Decor> resolveDecor(List<EdgePlan> plans, java.util.List<Field> fields) {
         java.util.List<EdgePlan.Decor> all = new java.util.ArrayList<>();
         for (EdgePlan p : plans) all.addAll(p.decor);
         all.sort(java.util.Comparator.comparingInt((EdgePlan.Decor d) -> d.type()).thenComparingInt(EdgePlan.Decor::x).thenComparingInt(EdgePlan.Decor::z)
@@ -91,6 +119,7 @@ public final class ChunkMask {
         for (EdgePlan.Decor d : all) {
             if (d.type() == EdgePlan.PROP) {
                 boolean clash = false;
+                for (Field f : fields) clash |= f.covers(d.x(), d.z(), 4);
                 for (EdgePlan.Decor o : out) clash |= Math.hypot(o.x() - d.x(), o.z() - d.z()) < (o.type() == EdgePlan.PROP ? 24 : 8);
                 if (!clash) out.add(d);
                 continue;
@@ -110,8 +139,11 @@ public final class ChunkMask {
         return out;
     }
 
-    public static ChunkMask build(int cx, int cz, List<EdgePlan> plans, List<VillageOracle.Footprint> villages, List<EdgePlan> near) {
+    public static ChunkMask build(int cx, int cz, List<EdgePlan> plans, List<VillageOracle.Footprint> villages, List<EdgePlan> near,
+                                 List<Field> fields) {
         ChunkMask m = new ChunkMask(cx, cz);
+        m.fields = fields;
+        if (!fields.isEmpty()) m.any = true;
         long key = net.minecraft.world.level.ChunkPos.pack(cx, cz);
         int bx = cx << 4, bz = cz << 4;
         for (EdgePlan p : plans) {
@@ -174,7 +206,11 @@ public final class ChunkMask {
                 }
             }
         }
-        for (EdgePlan.Decor d : resolveDecor(near)) {
+        for (EdgePlan.Decor d : resolveDecor(near, fields)) {
+            if (d.type() != EdgePlan.PROP && !fields.isEmpty())
+                for (int lx = 0; lx < 16; lx++)
+                    for (int lz = 0; lz < 16; lz++)
+                        if (Math.abs(bx + lx - d.x()) <= 2 && Math.abs(bz + lz - d.z()) <= 2) m.nofield[idx(lx, lz)] = true;
             if (d.chunk() != key) continue;
             boolean inVillage = false;
             for (VillageOracle.Footprint f : villages) inVillage |= f.contains(d.x(), d.z(), d.type() == EdgePlan.PROP ? 8 : 1);
@@ -188,12 +224,15 @@ public final class ChunkMask {
                 for (net.minecraft.world.level.levelgen.structure.BoundingBox b : p.campBoxes)
                     for (int lx = 0; lx < 16; lx++)
                         for (int lz = 0; lz < 16; lz++)
-                            if (bx + lx >= b.minX() - 2 && bx + lx <= b.maxX() + 2 && bz + lz >= b.minZ() - 2 && bz + lz <= b.maxZ() + 2)
+                            if (bx + lx >= b.minX() - 2 && bx + lx <= b.maxX() + 2 && bz + lz >= b.minZ() - 2 && bz + lz <= b.maxZ() + 2) {
                                 m.in[idx(lx, lz)] = Float.NEGATIVE_INFINITY;
+                                m.nofield[idx(lx, lz)] = true;
+                            }
             for (VillageOracle.Footprint f : villages)
                 for (int lx = 0; lx < 16; lx++)
                     for (int lz = 0; lz < 16; lz++) {
                         int x = bx + lx, z = bz + lz, c = idx(lx, lz);
+                        if (f.contains(x, z, 3)) m.nofield[c] = true;
                         if (!f.contains(x, z, 1)) continue;
                         // a connector keeps its road through the village's ring, but never over a house or the street itself
                         boolean keep = m.conn[c] && !f.inOther(x, z, 0) && !f.bands().contains(x, z);

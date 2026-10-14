@@ -248,13 +248,14 @@ public final class RoadNetwork {
         ChunkMask m = masks.get(key);
         if (m != null) return m;
         List<EdgePlan> ready = new ArrayList<>();
-        List<EdgePlan> near = plansNear(cx, cz, 40);
-        for (EdgePlan p : near) if (p.touches(key) || hasDecorOrCamp(p, cx, cz)) ready.add(p);
+        List<EdgePlan> near = plansNear(cx, cz, 60);
+        List<Field> fields = fieldsOver(cx, cz, near);
+        for (EdgePlan p : near) if (p.touches(key) || hasDecorOrCamp(p, cx, cz) || hasFieldOver(p, cx, cz)) ready.add(p);
         if (ready.isEmpty()) m = ChunkMask.EMPTY;
         else {
             List<VillageOracle.Footprint> villages = new ArrayList<>();
             for (var v : oracle.find(cx - 12, cz - 12, cx + 12, cz + 12)) villages.add(oracle.footprint(v));
-            m = ChunkMask.build(cx, cz, ready, villages, near);
+            m = ChunkMask.build(cx, cz, ready, villages, near, fields);
             if (!m.any()) m = ChunkMask.EMPTY;
         }
         if (masks.size() > 50_000) masks.clear();
@@ -277,6 +278,24 @@ public final class RoadNetwork {
                 }
         }
         return out;
+    }
+
+    private static boolean hasFieldOver(EdgePlan p, int cx, int cz) {
+        for (Field f : p.fields) if (f.nearChunk(cx, cz)) return true;
+        return false;
+    }
+
+    /**
+     * The wheat fields (after the spacing check against every field within reach) whose blob can touch the chunk. The
+     * wider plan list is only fetched when a candidate field is there, so most chunks never pay for it.
+     */
+    private List<Field> fieldsOver(int cx, int cz, List<EdgePlan> near) {
+        List<Field> cand = new ArrayList<>();
+        for (EdgePlan p : near) for (Field f : p.fields) if (f.nearChunk(cx, cz)) cand.add(f);
+        if (cand.isEmpty()) return List.of();
+        List<Field> all = new ArrayList<>();
+        for (EdgePlan p : plansNear(cx, cz, 180)) all.addAll(p.fields);
+        return ChunkMask.survivors(cand, all);
     }
 
     private static boolean hasDecorOrCamp(EdgePlan p, int cx, int cz) {

@@ -68,7 +68,7 @@ final class PropChecks {
                     EdgePlan p = f.join();
                     if (p != null) plans.add(p);
                 }
-                for (EdgePlan.Decor d : ChunkMask.resolveDecor(plans)) {
+                for (EdgePlan.Decor d : ChunkMask.resolveDecor(plans, ChunkMask.resolveFields(plans))) {
                     if (d.type() != EdgePlan.PROP || Math.abs(d.x() - at.getX()) > radius || Math.abs(d.z() - at.getZ()) > radius) continue;
                     boolean inVillage = false;
                     for (EdgePlan p : plans)
