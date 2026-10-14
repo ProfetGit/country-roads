@@ -12,9 +12,9 @@ mkdir -p "$REF"
 area() {
   name=$1; seed=$2; x=$3; z=$4; r=$5
   P="execute positioned $x 80 $z run countryroads"
-  python3 dev/server/wg.py ${JAR:+--jar $JAR} --seed $seed --name cut-$T-$name-ref --port $PORT --xmx 8G --timeout 3000 \
+  python3 dev/server/wg.py ${JAR:+--jar $JAR} ${JVMX:+--jvm=$JVMX} --seed $seed --name cut-$T-$name-ref --port $PORT --xmx 8G --timeout 3000 \
     --jvm=-Dcountryroads.noPaint=true --jvm=-Dcountryroads.cutRef=$REF/$name.bin -- "$P pregen $r" "$P cuts $r" > /dev/null
-  python3 dev/server/wg.py ${JAR:+--jar $JAR} --seed $seed --name cut-$T-$name --port $PORT --xmx 8G --timeout 3000 \
+  python3 dev/server/wg.py ${JAR:+--jar $JAR} ${JVMX:+--jvm=$JVMX} --seed $seed --name cut-$T-$name --port $PORT --xmx 8G --timeout 3000 \
     --jvm=-Dcountryroads.cutRef=$REF/$name.bin -- "$P pregen $r" "$P check $r" "$P cuts $r" "$P docks $r" "$P decor $r" "$P roads $r" > /dev/null
   echo "== $name"
   grep -h 'CR-CUT \|CR-CHECK\|CR-DOCKS\|CR-DECOR' dev/server/.work/cut-$T-$name/server.log | grep -v 'System chat' | sed 's/.*\(CR-\)/\1/' | cut -c1-230

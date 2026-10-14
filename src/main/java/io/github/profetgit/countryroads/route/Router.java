@@ -125,15 +125,19 @@ public final class Router {
      * dry ground only (a lake beside the road is not a hill). Tuned so a mountain flank costs about as much as climbing a
      * 0.3 grade, and a road prefers the flat ground at the mountain's foot.
      */
-    static final double FLANK_FREE = 0.2, FLANK_W = 40, WALL_FREE = 10, WALL_W = 0.12;
+    static final double FLANK_FREE = 0.2, FLANK_W = 40, WALL_FREE = 10, WALL_W = 0.12, FLANK_MAX = 5;
+
+    /** Off by default: on the user's seed it sent roads over 90-126 block lakes; the planner's nudge does the work. */
+    static final boolean NO_FLANK = !Boolean.getBoolean("countryroads.flank");
 
     static double flankFactor(int yb, TerrainSampler.Sample left, TerrainSampler.Sample right, boolean perpDiagonal) {
-        if (left.wet() || right.wet()) return 0;
+        if (NO_FLANK || left.wet() || right.wet()) return 0;
         double span = 2 * CELL * (perpDiagonal ? Math.sqrt(2) : 1);
         double sideGrade = Math.abs(left.ground() - right.ground()) / span;
         double over = Math.max(0, sideGrade - FLANK_FREE);
         int wall = Math.max(left.ground(), right.ground()) - yb;
-        return FLANK_W * over * over + WALL_W * Math.max(0, wall - WALL_FREE);
+        // capped well below a lake's cost: avoiding a hillside must never send the road the long way over water
+        return Math.min(FLANK_MAX, FLANK_W * over * over + WALL_W * Math.max(0, wall - WALL_FREE));
     }
 
     /** Integer cost of one move, -1 when impassable. Base 10 per block. */

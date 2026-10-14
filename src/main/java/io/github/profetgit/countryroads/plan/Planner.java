@@ -196,7 +196,7 @@ public final class Planner {
                         if (match[k] < 0 || !Float.isNaN(pinY[k]) || t.p.kind[match[k]] != EdgePlan.GROUND) continue;
                         double[] q = line.get(k);
                         double dx = t.p.x[match[k]] - q[0], dz = t.p.z[match[k]] - q[1];
-                        if (dx * dx + dz * dz < OVERLAP * OVERLAP) {
+                        if (dx * dx + dz * dz < OVERLAP * OVERLAP && !Boolean.getBoolean("countryroads.noOverlapPin")) {
                             pinY[k] = t.p.y[match[k]];
                             pinKind[k] = EdgePlan.GROUND;
                         }
@@ -1087,7 +1087,7 @@ public final class Planner {
     /** Two roads whose centrelines are closer than this overlap (two half-widths of about 2). */
     static final double OVERLAP = 4.5;
     /** Samples off the shared line that still count as one shared stretch. */
-    static final int SHARE_GAP = 20;
+    static final int SHARE_GAP = Integer.getInteger("countryroads.shareGap", 20);
     static final int NUDGE_STEP = 8, NUDGE_MAX = 12, NUDGE_TRY = 3, NUDGE_KEEP = 24;
     /** Station cost (squared blocks of hillside the cut slope cannot meet) above which shifts are tried at all. */
     static final double NUDGE_FROM = 6;
@@ -1209,22 +1209,41 @@ public final class Planner {
      */
     static void capCuts(float[] y, float[] ground, float[] water, byte[] kind, float[] pin, int connA, int connB) {
         int n = y.length;
-        boolean any = false;
-        for (int i = 0; i < n; i++) {
-            if (kind[i] != EdgePlan.GROUND || !Float.isNaN(pin[i]) || water[i] > ground[i] || i < connA || i >= n - connB) continue;
-            float floor = ground[i] - MAX_CUT;
-            if (y[i] < floor) {
-                y[i] = floor;
-                any = true;
+        for (int i = connA; i < n - connB; ) {
+            if (!capFree(i, kind, pin, water, ground) || y[i] >= ground[i] - MAX_CUT) {
+                i++;
+                continue;
             }
+            int j = i;
+            while (j + 1 < n - connB && capFree(j + 1, kind, pin, water, ground) && y[j + 1] < ground[j + 1] - MAX_CUT) j++;
+            // lift this stretch and ramp the road up to it; keep the lift only when no ramp sample ends up higher above
+            // its own ground than a fill can hold (the ramp ran out over a valley as a 125-block dry viaduct)
+            float[] t = y.clone();
+            for (int k = i; k <= j; k++) t[k] = ground[k] - MAX_CUT;
+            boolean ok = true;
+            for (int k = j + 1; k < n && ok; k++) {
+                if (t[k] >= t[k - 1] - CUT_RAMP) break;
+                // the ramp would have to lift a tunnel, bridge, pinned or connector sample: a step there, keep the cut
+                if (k >= n - connB || !capFree(k, kind, pin, water, ground)) ok = false;
+                t[k] = t[k - 1] - CUT_RAMP;
+                ok = t[k] <= ground[k] + CAP_FILL;
+            }
+            for (int k = i - 1; k >= 0 && ok; k--) {
+                if (t[k] >= t[k + 1] - CUT_RAMP) break;
+                if (k < connA || !capFree(k, kind, pin, water, ground)) ok = false;
+                t[k] = t[k + 1] - CUT_RAMP;
+                ok = t[k] <= ground[k] + CAP_FILL;
+            }
+            if (ok) System.arraycopy(t, 0, y, 0, n);
+            i = j + 1;
         }
-        if (!any) return;
-        for (int pass = 0; pass < 2; pass++) {
-            for (int i = Math.max(1, connA); i < n - connB; i++)
-                if (Float.isNaN(pin[i]) && kind[i] == EdgePlan.GROUND) y[i] = Math.max(y[i], y[i - 1] - CUT_RAMP);
-            for (int i = n - 2 - connB; i >= connA; i--)
-                if (Float.isNaN(pin[i]) && kind[i] == EdgePlan.GROUND) y[i] = Math.max(y[i], y[i + 1] - CUT_RAMP);
-        }
+    }
+
+    /** Most a cap's ramp may stand above the land (a fill the painter builds); higher, the cut stays. */
+    static final int CAP_FILL = 3;
+
+    private static boolean capFree(int i, byte[] kind, float[] pin, float[] water, float[] ground) {
+        return kind[i] == EdgePlan.GROUND && Float.isNaN(pin[i]) && water[i] <= ground[i];
     }
 
     /** Runs of `fill` shorter than max between two equal non-fill kinds take that kind. */
