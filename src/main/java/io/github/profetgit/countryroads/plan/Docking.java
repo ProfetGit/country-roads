@@ -18,21 +18,33 @@ import net.minecraft.world.level.levelgen.structure.BoundingBox;
 final class Docking {
     private Docking() {}
 
-    /** pts: block centres from the dock (a band column) out to the exit, one per block step. */
-    record Connector(List<int[]> cells, int dockX, int dockZ, int exitX, int exitZ) {}
+    /** pts: block centres from the dock (a band column) out to the exit, one per block step. dryPick: chosen over a wetter, nearer one. */
+    record Connector(List<int[]> cells, int dockX, int dockZ, int exitX, int exitZ, boolean dryPick) {
+        Connector picked() {
+            return new Connector(cells, dockX, dockZ, exitX, exitZ, true);
+        }
+    }
 
     /** The village's terrain shaping (beard) reaches about this far past its pieces; a connector's end must lie beyond it to match the terrain the planner estimates. */
     static final int BEARD = 12;
     private static final int MAX_STEPS = 56;
     private static final int TRIES = 24;
 
-    /** Null when the village has no street columns or none of the best docks can reach open ground. */
-    static Connector connect(VillageOracle.Footprint f, int partnerX, int partnerZ) {
+    /** Dry land a connector's exit needs ahead of it toward the partner village, so a crossing starts out there with room to land. */
+    static final int APRON = 12;
+
+    /**
+     * Null when the village has no street columns or none of the best docks can reach open ground. With terrain, the
+     * first connector that stays on dry land with an APRON of dry land ahead wins (a road leaving a riverside village
+     * over the water put a stone bridge's end right against the street); when none does, the first one as before.
+     */
+    static Connector connect(VillageOracle.Footprint f, int partnerX, int partnerZ, io.github.profetgit.countryroads.world.TerrainSampler terrain) {
         StreetBands bands = f.bands();
         if (bands.isEmpty()) return null;
         List<int[]> cols = bands.columns();
         cols.sort(Comparator.comparingDouble((int[] c) -> Math.hypot(c[0] - partnerX, c[1] - partnerZ)).thenComparingInt(c -> c[0]).thenComparingInt(c -> c[1]));
         int tried = 0;
+        Connector first = null;
         List<int[]> used = new ArrayList<>();
         for (int[] c : cols) {
             boolean near = false;
@@ -40,11 +52,35 @@ final class Docking {
             if (near) continue;
             used.add(c);
             Connector k = search(f, c[0], c[1], partnerX, partnerZ);
-            if (k != null) return k;
+            if (k != null) {
+                if (terrain == null || dry(k, terrain, partnerX, partnerZ)) {
+                    if (first == null) return k;
+                    io.github.profetgit.countryroads.CountryRoads.LOG.info("CR-DOCK-DRY " + k.exitX() + "," + k.exitZ() + " instead of wet " + first.exitX() + "," + first.exitZ());
+                    return k.picked();
+                }
+                if (first == null) first = k;
+            }
             if (++tried >= TRIES) break;
+        }
+        if (first != null) {
+            io.github.profetgit.countryroads.CountryRoads.LOG.info("CR-DOCK-WET " + first.exitX() + "," + first.exitZ() + " (no dry exit toward " + partnerX + "," + partnerZ + ")");
+            return first;
         }
         io.github.profetgit.countryroads.CountryRoads.LOG.info("CR-DOCK-TRIED " + tried + " docks, nearest to partner at " + cols.getFirst()[0] + "," + cols.getFirst()[1] + " partner " + partnerX + "," + partnerZ);
         return null;
+    }
+
+    /** The connector's cells (every other one) and the APRON ahead of its exit toward the partner are all dry. */
+    private static boolean dry(Connector k, io.github.profetgit.countryroads.world.TerrainSampler terrain, int partnerX, int partnerZ) {
+        for (int i = 0; i < k.cells().size(); i += 2) {
+            int[] c = k.cells().get(i);
+            if (terrain.sample(c[0], c[1]).wet()) return false;
+        }
+        if (terrain.sample(k.exitX(), k.exitZ()).wet()) return false;
+        double dx = partnerX - k.exitX(), dz = partnerZ - k.exitZ(), l = Math.max(1e-6, Math.hypot(dx, dz));
+        for (int s = 3; s <= APRON; s += 3)
+            if (terrain.sample((int) Math.floor(k.exitX() + 0.5 + dx / l * s), (int) Math.floor(k.exitZ() + 0.5 + dz / l * s)).wet()) return false;
+        return true;
     }
 
     private static long key(int x, int z) {
@@ -100,6 +136,6 @@ final class Docking {
         }
         List<int[]> cells = new ArrayList<>(rev.size());
         for (int i = rev.size() - 1; i >= 0; i--) cells.add(rev.get(i));
-        return new Connector(cells, sx, sz, ex, ez);
+        return new Connector(cells, sx, sz, ex, ez, false);
     }
 }

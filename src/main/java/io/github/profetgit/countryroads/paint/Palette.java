@@ -353,6 +353,12 @@ public final class Palette {
      * then tall grass, the biome's own flowers and the odd bush; dry plants on sand and terracotta, none in snow. For
      * tall grass this is the lower half; the caller adds the upper one (see upperHalf).
      */
+    /** Desert and badlands verges (sparser plants). */
+    public static boolean dryVerge(Holder<Biome> biome) {
+        Surface pal = surface(biome);
+        return pal == DESERT || pal == BADLANDS;
+    }
+
     public static BlockState vergePlant(Holder<Biome> biome, int r) {
         Surface pal = surface(biome);
         if (pal == SNOWY) return null;

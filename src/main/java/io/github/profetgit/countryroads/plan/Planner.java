@@ -69,7 +69,19 @@ public final class Planner {
      * starts where the trunk starts, prefers to travel along it, and where the two share the way it takes the trunk's
      * exact line and heights, branching off smoothly with a junction signpost.
      */
+    private static EdgePlan noPlan(Edge e, String why) {
+        io.github.profetgit.countryroads.CountryRoads.LOG.info("CR-PLAN-NONE " + e.a().pos().toShortString() + " -> " + e.b().pos().toShortString() + ": " + why);
+        return null;
+    }
+
     public EdgePlan plan(Edge e, List<EdgePlan> trunkPlans) {
+        boolean[] picked = new boolean[1];
+        EdgePlan p = plan(e, trunkPlans, true, picked);
+        // a dry village exit the coarse router cannot reach (its cells saw the lake around it): the nearer exit as before
+        return p == null && picked[0] ? plan(e, trunkPlans, false, picked) : p;
+    }
+
+    private EdgePlan plan(Edge e, List<EdgePlan> trunkPlans, boolean dryDocks, boolean[] picked) {
         long t0 = System.nanoTime();
         VillageOracle.Footprint fa = oracle.footprint(e.a()), fb = oracle.footprint(e.b());
         int[] ja = joinPoint(fa, e.a(), e.b()), jb = joinPoint(fb, e.b(), e.a());
@@ -88,25 +100,27 @@ public final class Planner {
         if (trunkB != null) jb = new int[]{(int) Math.floor(trunkB.p.x[trunkB.end()]), (int) Math.floor(trunkB.p.z[trunkB.end()])};
         Docking.Connector ca = null, cb = null;
         if (trunkA == null) {
-            ca = Docking.connect(fa, e.b().pos().getX(), e.b().pos().getZ());
+            ca = Docking.connect(fa, e.b().pos().getX(), e.b().pos().getZ(), dryDocks ? terrain : null);
             if (ca == null && !fa.bands().isEmpty())
                 io.github.profetgit.countryroads.CountryRoads.LOG.info("CR-DOCK-MISS village " + e.a().pos().toShortString() + " bands=" + fa.bands().size() + " pieces=" + fa.pieces().size() + " toward " + e.b().pos().toShortString());
             if (ca != null) ja = new int[]{ca.exitX(), ca.exitZ()};
+            picked[0] |= ca != null && ca.dryPick();
         }
         if (trunkB == null) {
-            cb = Docking.connect(fb, e.a().pos().getX(), e.a().pos().getZ());
+            cb = Docking.connect(fb, e.a().pos().getX(), e.a().pos().getZ(), dryDocks ? terrain : null);
             if (cb == null && !fb.bands().isEmpty())
                 io.github.profetgit.countryroads.CountryRoads.LOG.info("CR-DOCK-MISS village " + e.b().pos().toShortString() + " bands=" + fb.bands().size() + " pieces=" + fb.pieces().size() + " toward " + e.a().pos().toShortString());
             if (cb != null) jb = new int[]{cb.exitX(), cb.exitZ()};
+            picked[0] |= cb != null && cb.dryPick();
         }
         it.unimi.dsi.fastutil.longs.LongOpenHashSet trunkCells = new it.unimi.dsi.fastutil.longs.LongOpenHashSet();
         for (Trunk t : trunks)
             for (int i = 0; i < t.p.length(); i += 4)
                 trunkCells.add(Router.cellKey(Math.floorDiv((int) t.p.x[i], Router.CELL), Math.floorDiv((int) t.p.z[i], Router.CELL)));
         Router.Result r = router.route(ja[0], ja[1], jb[0], jb[1], ELLIPSE, trunkCells::contains);
-        if (r == null) return null;
+        if (r == null) return noPlan(e, "no route " + ja[0] + "," + ja[1] + " -> " + jb[0] + "," + jb[1]);
         double straight = Math.hypot(jb[0] - ja[0], jb[1] - ja[1]);
-        if (r.cost() > straight * 10 * 14) return null;
+        if (r.cost() > straight * 10 * 14) return noPlan(e, "route cost " + r.cost() + " over " + Math.round(straight * 140));
 
         List<double[]> pts = new ArrayList<>();
         for (int[] p : r.points()) pts.add(new double[]{p[0] + 0.5, p[1] + 0.5});
@@ -114,7 +128,7 @@ public final class Planner {
         pts.set(pts.size() - 1, new double[]{jb[0] + 0.5, jb[1] + 0.5});
         for (int k = 0; k < 4; k++) pts = chaikin(pts);
         List<double[]> line = resample(pts, 1.0);
-        if (line.size() > straight * 2.3 + 64) return null;
+        if (line.size() > straight * 2.3 + 64) return noPlan(e, "route length " + line.size() + " for straight " + Math.round(straight));
         int connA = 0, connB = 0;
         if (ca != null) {
             List<double[]> c = connectorLine(ca);
@@ -253,7 +267,7 @@ public final class Planner {
             end = Math.min(line.size() - 1, end + 1);
         }
         int n = end - start + 1;
-        if (n < 8) return null;
+        if (n < 8) return noPlan(e, "only " + n + " samples outside the villages");
 
         float[] x = new float[n], z = new float[n], ground = new float[n], water = new float[n], hw = new float[n], pin = new float[n];
         boolean[] shared = new boolean[n];
@@ -611,7 +625,7 @@ public final class Planner {
     }
 
     /** Water at least this deep under an ease sample that stood on dry ground stops the chord pass's ease (see apply). */
-    static final int EASE_DEEP = Integer.getInteger("countryroads.easeDeep", 3);
+    static final int EASE_DEEP = Integer.getInteger("countryroads.easeDeep", 1);
 
     private boolean deepAt(float px, float pz) {
         TerrainSampler.Sample smp = terrain.sample((int) Math.floor(px), (int) Math.floor(pz));

@@ -945,6 +945,8 @@ public final class RoadPainter {
         if ((int) (h & 1023) >= chance) return;
         int g = groundAt(x, z, top + 6);
         if (!get(x, g + 1, z).isAir()) return;
+        // dry country: a quarter as many (dead bushes and dry grass lined the desert roads like weeds)
+        if (Palette.dryVerge(chunk.biome(x, g + 1, z)) && ((h >>> 52) & 3) != 0) return;
         BlockState plant = Palette.vergePlant(chunk.biome(x, g + 1, z), (int) ((h >>> 20) & 1023));
         if (plant == null || !Palette.plantable(plant, get(x, g, z))) return;
         BlockState upper = Palette.upperHalf(plant);
