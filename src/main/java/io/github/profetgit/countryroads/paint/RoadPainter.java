@@ -478,6 +478,7 @@ public final class RoadPainter {
         if (g.hasProperty(net.minecraft.world.level.block.state.properties.BlockStateProperties.SNOWY)
             && g.getValue(net.minecraft.world.level.block.state.properties.BlockStateProperties.SNOWY) && !get(x, ground + 1, z).is(Blocks.SNOW))
             set(x, ground, z, g.setValue(net.minecraft.world.level.block.state.properties.BlockStateProperties.SNOWY, false));
+        if (planned && !rail && !deck) lilyPad(x, z, level);
         if (m.bridge[i] == EdgePlan.STONE) {
             // fill too high beside a stone bridge's raised approach: a solid masonry abutment with a plain parapet
             stoneBridge(x, z, top, half, d, rail, deck, outer, L, u, m.bridgeRise[i], along, out, Math.max(level, planned ? level : ground), ground, h, !planned);
@@ -501,6 +502,16 @@ public final class RoadPainter {
         if (above < -1.5f) return r < 820 ? 2 : 1;
         if (above < 0) return r < 880 ? 1 : 0;
         return r < (int) (360 * Math.exp(-above / 1.2)) ? 1 : 0;
+    }
+
+    /** Lily pads in loose clusters on still water beside a bridge (not where the water freezes). */
+    private void lilyPad(int x, int z, int level) {
+        if (clump(x * 2 + 3, z * 2 + 17) < 620 || rnd(x, level + 1, z) > 260) return;
+        BlockState w = get(x, level, z);
+        if (!w.is(Blocks.WATER) || !w.getFluidState().isSource() || !get(x, level + 1, z).isAir()) return;
+        BlockPos at = new BlockPos(x, level + 1, z);
+        if (chunk.biome(x, level + 1, z).value().coldEnoughToSnow(at, 63)) return;
+        set(x, level + 1, z, Blocks.LILY_PAD.defaultBlockState());
     }
 
     private static int rnd(int x, int y, int z) {
@@ -613,9 +624,9 @@ public final class RoadPainter {
     }
 
     /**
-     * Timber: plank deck (a few planks replaced in the darker trim wood over the years), trim stringers and cross
-     * beams, log posts at the bents with knee braces under the stringer, stone footings that are mossy at the water
-     * line, ivy climbing the posts from the water.
+     * Timber: plank deck (a few planks replaced in the darker trim wood over the years) edged by trim stripped-log
+     * stringers that carry the rail, knee braces under them either side of each bent, cross beams under the deck at the
+     * bents, log posts driven down to the river bed, ivy climbing the posts from the water, earth under the ends.
      */
     private void timberBridge(int x, int z, int top, boolean half, boolean rail, boolean deck, boolean outer, float L, float u, boolean planned,
                               Palette.BridgeWood main, Palette.BridgeWood trim, Direction along, Direction out, int level, int ground, long h) {
@@ -637,15 +648,14 @@ public final class RoadPainter {
             return;
         }
         Direction.Axis alongAxis = along.getAxis(), across = alongAxis == Direction.Axis.X ? Direction.Axis.Z : Direction.Axis.X;
-        set(x, top, z, deck && rnd(x, top, z) < 70 ? trim.planks() : main.planks());
+        set(x, top, z, rail ? trim.stripped().setValue(RotatedPillarBlock.AXIS, alongAxis) : deck && rnd(x, top, z) < 70 ? trim.planks() : main.planks());
         if (planned && (u < 1.5f || u > L - 1.5f) && top - 1 - ground <= 3) {
-            // abutment: rubble down to the bank
-            for (int y = top - 1; y > ground; y--) set(x, y, z, Palette.bridgeStone(Palette.FOOTING, 0, rnd(x, y, z)));
+            // the bank runs on under the bridge's ends
+            for (int y = top - 1; y > ground; y--) set(x, y, z, Blocks.DIRT.defaultBlockState());
         } else if (rail) {
-            set(x, top - 1, z, trim.stripped().setValue(RotatedPillarBlock.AXIS, alongAxis));
             // knee braces either side of each bent, under the stringer
-            if (planned && !bent && Math.abs(off) < 1.5f && get(x, top - 2, z).isAir())
-                set(x, top - 2, z, stair(trim.stairs(), off > 0 ? along.getOpposite() : along, true));
+            if (planned && !bent && Math.abs(off) < 1.5f && get(x, top - 1, z).isAir())
+                set(x, top - 1, z, stair(trim.stairs(), off > 0 ? along.getOpposite() : along, true));
         } else if (bent) {
             set(x, top - 1, z, trim.stripped().setValue(RotatedPillarBlock.AXIS, across));
         }
@@ -656,7 +666,7 @@ public final class RoadPainter {
         }
         if (bent) {
             // a post through the deck edge, from the bed to above the rail, footed in stone where it stands in water
-            timberPost(x, z, top + 2, main.log());
+            timberPost(x, z, top + 2, top, main.log(), main.stripped());
             boolean lamp = planned && (end || j % 2 == 0);
             if (lamp) set(x, top + 3, z, Blocks.LANTERN.defaultBlockState());
             clear(x, top + (lamp ? 4 : 3), top + 4, z);
@@ -666,17 +676,25 @@ public final class RoadPainter {
         }
     }
 
-    /** A log post from y down to the bed: stone under the water, thick moss on the block at the water line. */
-    private void timberPost(int x, int z, int y, BlockState log) {
-        int waterTop = Integer.MIN_VALUE;
+    /**
+     * A log post from y down through the water, driven a block into the river bed. Over a gap too deep to reach (a
+     * ravine) the post stops at the deck: a stripped log from the rail to the deck edge instead of a log hanging free.
+     */
+    private void timberPost(int x, int z, int y, int top, BlockState log, BlockState stripped) {
+        int bed = Integer.MIN_VALUE;
         for (int k = y; k > chunk.minY() + 1 && k > y - 64; k--) {
             BlockState here = get(x, k, z);
-            if (PaintRules.solid(here) && here.getFluidState().isEmpty() && !here.is(BlockTags.PLANKS) && !here.is(BlockTags.LOGS)) break;
-            if (waterTop == Integer.MIN_VALUE && !here.getFluidState().isEmpty()) waterTop = k;
-            set(x, k, z, waterTop != Integer.MIN_VALUE ? Palette.bridgeStone(Palette.FOOTING, 0, rnd(x, k, z)) : log);
+            if (PaintRules.solid(here) && here.getFluidState().isEmpty() && !here.is(BlockTags.PLANKS) && !here.is(BlockTags.LOGS)) {
+                bed = k;
+                break;
+            }
         }
-        if (waterTop != Integer.MIN_VALUE && waterTop + 1 < y - 3)
-            set(x, waterTop + 1, z, Palette.bridgeStone(Palette.RUBBLE, 2, rnd(x, waterTop + 1, z)));
+        if (bed == Integer.MIN_VALUE) {
+            for (int k = y; k >= top; k--) set(x, k, z, stripped);
+            return;
+        }
+        for (int k = y; k > bed; k--) set(x, k, z, log);
+        if (PaintRules.terrain(get(x, bed, z)) && PaintRules.solid(get(x, bed - 1, z))) set(x, bed, z, log);
     }
 
     /** Columns beside the road: rails, tunnel walls, banks, embankments, retaining walls. */
@@ -714,7 +732,7 @@ public final class RoadPainter {
         if (kind == EdgePlan.TUNNEL && ground <= top + 5) kind = EdgePlan.GROUND;
 
         if (kind == EdgePlan.BRIDGE) {
-            if (d < 2.5f) bridge(x, z, top, false, d, m, i, ground);
+            if (d < 4.5f) bridge(x, z, top, false, d, m, i, ground);
             return;
         }
         if (kind == EdgePlan.BOARDWALK || kind == EdgePlan.BRIDGE) return;

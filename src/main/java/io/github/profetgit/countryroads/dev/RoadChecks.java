@@ -181,8 +181,11 @@ final class RoadChecks {
     private static void breaks(ChunkMask m, int c, ChunkMask m2, int c2, long[] breaks, long[] steps) {
         if (m2.in[c2] < 0 || m.conn[c] || m2.conn[c2]) return;
         double d = Math.abs(m.surface(c) - m2.surface(c2));
-        if (d > 1) breaks[0]++;
-        else if (d == 1) steps[0]++;
+        if (d > 1) {
+            breaks[0]++;
+            CountryRoads.LOG.info("CR-BREAK chunk " + m.cx + "," + m.cz + " col " + (c & 15) + "," + (c >> 4) + " " + m.surface(c) + " vs " + m2.surface(c2)
+                + " kinds " + m.kind[c] + "/" + m2.kind[c2] + " s " + m.s[c] + "/" + m2.s[c2]);
+        } else if (d == 1) steps[0]++;
     }
 
     /**
