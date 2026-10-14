@@ -322,18 +322,27 @@ public final class Planner {
         boolean[] chorded = Boolean.getBoolean("countryroads.noChord") ? new boolean[n] : chordBridges(x, z, kind, water, ground, pin, (px, pz) -> {
             int bx = (int) Math.floor(px), bz = (int) Math.floor(pz);
             return fa.inOther(bx, bz, 2) || fb.inOther(bx, bz, 2) || nearTrunk(trunks, px, pz);
-        }, (px, pz) -> terrain.sample((int) Math.floor(px), (int) Math.floor(pz)).wet());
+        }, (px, pz) -> terrain.sample((int) Math.floor(px), (int) Math.floor(pz)).wet(), this::deepAt);
         // again while a crossing's ease bent a neighbour that was already straight
         for (int pass = 0; pass < 3 && !Boolean.getBoolean("countryroads.noChord"); pass++) {
             boolean[] more = chordBridges(x, z, kind, water, ground, pin, (px, pz) -> {
                 int bx = (int) Math.floor(px), bz = (int) Math.floor(pz);
                 return fa.inOther(bx, bz, 2) || fb.inOther(bx, bz, 2) || nearTrunk(trunks, px, pz);
-            }, (px, pz) -> terrain.sample((int) Math.floor(px), (int) Math.floor(pz)).wet());
+            }, (px, pz) -> terrain.sample((int) Math.floor(px), (int) Math.floor(pz)).wet(), this::deepAt);
             boolean any = false;
             for (int i = 0; i < n; i++) if (more[i]) any = chorded[i] = true;
             if (!any) break;
         }
-        for (int i = 0; i < n; i++) if (chorded[i]) sampleAt(i, x, z, ground, water, river);
+        boolean anyChord = false;
+        for (int i = 0; i < n; i++)
+            if (chorded[i]) {
+                sampleAt(i, x, z, ground, water, river);
+                anyChord = true;
+            }
+        // profiled once more: the axis line runs on over the water past the crossing and its ease swings the road beside
+        // it, and ground samples moved out onto a lake kept their kind: the painter filled them up from the bed (a cobble
+        // wall under the water beside a stone bridge). Once only: chording again what this profile finds bent ran away
+        if (anyChord) y = profile(ground, water, river, kind, pin, kindPin, connA, connB);
         // inside a village the road is never a tunnel or a trestle: it climbs the slope on the ground like the street
         for (int i = 0; i < n; i++)
             if ((i < connA || i >= n - connB) && water[i] <= ground[i] && (kind[i] == EdgePlan.TUNNEL || kind[i] == EdgePlan.BRIDGE)) kind[i] = EdgePlan.GROUND;
@@ -350,6 +359,8 @@ public final class Planner {
         plan.shared = shared;
         plan.wet = new boolean[n];
         for (int i = 0; i < n; i++) plan.wet[i] = water[i] > ground[i];
+        plan.wetFill = new byte[n];
+        for (int i = 0; i < n; i++) if (plan.wet[i]) plan.wetFill[i] = (byte) Math.clamp(Math.round(y[i] - ground[i]), 0, 127);
         bridges(plan, ground, water);
         plan.connA = connA;
         plan.connB = connB;
@@ -471,10 +482,21 @@ public final class Planner {
      * near a village building. Returns whether it moved them.
      */
     private static boolean apply(Line l, float[] x, float[] z, float[] pin, java.util.function.BiPredicate<Float, Float> blocked, boolean[] moved) {
+        return apply(l, x, z, pin, blocked, moved, null, null);
+    }
+
+    /**
+     * dry (chord pass): when not null, an ease sample standing on dry ground never swings out over deep water (deepAt):
+     * it kept its ground kind and was filled from the lake bed, or, profiled again, became a bent bridge. The straight
+     * part may run on over water (profiled again it joins the crossing); a crossing whose eases cannot stay on land
+     * falls back to its plain chord (straight, diagonal).
+     */
+    private static boolean apply(Line l, float[] x, float[] z, float[] pin, java.util.function.BiPredicate<Float, Float> blocked, boolean[] moved,
+                                 boolean[] dry, java.util.function.BiPredicate<Float, Float> deepAt) {
         // a long ease that swings past a building (or onto a shared stretch, or into a kink) gets shorter on that side,
         // then the straight past the water gets shorter, before the crossing gives up
         for (Line t = l; ; ) {
-            int bad = applyOnce(t, x, z, pin, blocked, moved);
+            int bad = applyOnce(t, x, z, pin, blocked, moved, dry, deepAt);
             if (bad == Integer.MIN_VALUE) return true;
             int ea = t.a0() - t.lo(), eb = t.hi() - t.b0();
             if (bad < t.a0() && ea >= 6) t = new Line(t.a(), t.b(), t.a0(), t.b0(), t.a0() - ea / 2, t.hi(), t.ox(), t.oz(), t.dx(), t.dz());
@@ -492,7 +514,8 @@ public final class Planner {
     }
 
     /** Integer.MIN_VALUE when the line was applied, else the sample that stopped it. */
-    private static int applyOnce(Line l, float[] x, float[] z, float[] pin, java.util.function.BiPredicate<Float, Float> blocked, boolean[] moved) {
+    private static int applyOnce(Line l, float[] x, float[] z, float[] pin, java.util.function.BiPredicate<Float, Float> blocked, boolean[] moved,
+                                 boolean[] dry, java.util.function.BiPredicate<Float, Float> deepAt) {
         float[] nx = new float[l.hi() - l.lo() + 1], nz = new float[nx.length];
         for (int k = l.lo(); k <= l.hi(); k++) {
             float u = k < l.a0() ? (k - l.lo()) / (float) (l.a0() - l.lo()) : k > l.b0() ? (l.hi() - k) / (float) (l.hi() - l.b0()) : 1f;
@@ -503,6 +526,10 @@ public final class Planner {
             if (shift > 1e-4f && !Float.isNaN(pin[k]) || shift > 0.5f && blocked.test(px, pz)) {
                 if (TRACE_BRIDGES) io.github.profetgit.countryroads.CountryRoads.LOG.info("CR-STRAIGHT skip " + l.a() + ".." + l.b() + " at sample " + k + " ("
                     + px + ", " + pz + ") " + (Float.isNaN(pin[k]) ? "near a building" : "pinned (shared trunk)"));
+                return k;
+            }
+            if (dry != null && dry[k] && (k < l.a0() || k > l.b0()) && shift > 0.5f && deepAt.test(px, pz)) {
+                if (TRACE_BRIDGES) io.github.profetgit.countryroads.CountryRoads.LOG.info("CR-STRAIGHT skip " + l.a() + ".." + l.b() + " at sample " + k + " (" + px + ", " + pz + ") ease onto deep water");
                 return k;
             }
             nx[k - l.lo()] = px;
@@ -583,11 +610,22 @@ public final class Planner {
         return new Line(a, b, a0, b0, lo, hi, ox, oz, dx, dz);
     }
 
+    /** Water at least this deep under an ease sample that stood on dry ground stops the chord pass's ease (see apply). */
+    static final int EASE_DEEP = Integer.getInteger("countryroads.easeDeep", 3);
+
+    private boolean deepAt(float px, float pz) {
+        TerrainSampler.Sample smp = terrain.sample((int) Math.floor(px), (int) Math.floor(pz));
+        return smp.wet() && smp.depth() >= EASE_DEEP;
+    }
+
     /** Wet bridge runs more than half a block off the straight line between their ends, put on that line. */
     static boolean[] chordBridges(float[] x, float[] z, byte[] kind, float[] water, float[] ground, float[] pin,
-                                  java.util.function.BiPredicate<Float, Float> blocked, java.util.function.BiPredicate<Float, Float> wetAt) {
+                                  java.util.function.BiPredicate<Float, Float> blocked, java.util.function.BiPredicate<Float, Float> wetAt,
+                                  java.util.function.BiPredicate<Float, Float> deepAt) {
         int n = x.length;
         boolean[] moved = new boolean[n];
+        boolean[] dry = new boolean[n];
+        for (int k = 0; k < n; k++) dry[k] = !wetAt.test(x[k], z[k]);
         for (int i = 0; i < n; ) {
             int j = i;
             while (j + 1 < n && kind[j + 1] == kind[i]) j++;
@@ -604,7 +642,7 @@ public final class Planner {
             // the axis line first (the road either side eases, without a new profile: heights stay, the painter fills),
             // the plain chord between the run's own ends only where that would come near a building
             if (TRACE_BRIDGES) io.github.profetgit.countryroads.CountryRoads.LOG.info("CR-CHORD " + a + ".." + b + " of " + n + " dev=" + dev + " c=" + cx + "," + cz + " line=" + line(x, z, a, b, wetAt));
-            if (apply(line(x, z, a, b, wetAt), x, z, pin, blocked, moved)) continue;
+            if (apply(line(x, z, a, b, wetAt), x, z, pin, blocked, moved, dry, deepAt)) continue;
             if (dev <= 0.5f) continue;
             boolean ok = true;
             for (int k = a + 1; k < b && ok; k++) {

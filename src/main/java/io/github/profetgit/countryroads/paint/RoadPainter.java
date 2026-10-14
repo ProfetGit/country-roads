@@ -483,6 +483,7 @@ public final class RoadPainter {
     /** Tests only: plan everything but paint nothing (the land as it would be without roads, for CutCheck's reference). */
     public static final boolean NO_PAINT = Boolean.getBoolean("countryroads.noPaint");
     static final boolean TRACE = Boolean.getBoolean("countryroads.traceClear");
+    static final boolean TRACE_LAMPS = Boolean.getBoolean("countryroads.traceLamps");
 
     private String dump(int x, int z, int top) {
         StringBuilder sb = new StringBuilder();
@@ -576,7 +577,8 @@ public final class RoadPainter {
         if (planned && !rail && !deck) lilyPad(x, z, level);
         if (m.bridge[i] == EdgePlan.STONE) {
             // fill too high beside a stone bridge's raised approach: a solid masonry abutment with a plain parapet
-            stoneBridge(x, z, top, half, d, rail, deck, outer, L, u, ds, m.bridgeRise[i], along, out, Math.max(level, planned ? level : ground), ground, h, !planned);
+            stoneBridge(x, z, top, half, d, rail, deck, outer, L, u, ds, m.bridgeRise[i], along, out, Math.max(level, planned ? level : ground), ground, h, !planned,
+                rail ? prevU(d, m, i) : Float.NaN, m.joint[i]);
         } else {
             // the road's deck wood (spruce, oak, mangrove, dark oak, jungle) as a bridge pair when the crossing has none
             int pair = planned ? m.bridgeWood[i] : new int[]{2, 0, 6, 3, 4}[Math.clamp(m.wood[i], 0, 4)];
@@ -644,8 +646,28 @@ public final class RoadPainter {
      * Stone: dressed stone brick piers, arch rings and parapet; spandrel walls and abutments in rubble (cobble, stone,
      * andesite); worn paving on the deck; cobble footings under water. Moss rises from the water line (see moss()).
      */
+    /**
+     * u of the column before this one on its rail line (a 4-connected digital line: the neighbour one block back along x
+     * or z that is on the line too), NaN when there is none. On a diagonal both blocks of a stair step can fall in one
+     * row's band; only the first of them takes the row's pilaster and lantern (two lanterns stood side by side, across a
+     * chunk border where the lantern guard cannot see).
+     */
+    private static float prevU(float d, ChunkMask m, int i) {
+        float sl = m.slant[i] / 2, best = Float.NaN;
+        float sx = Math.signum(m.tx[i]), sz = Math.signum(m.tz[i]);
+        float[][] c = {{sx, 0}, {0, sz}};
+        for (float[] st : c) {
+            if (st[0] == 0 && st[1] == 0) continue;
+            float dc = d - st[0] * m.ox[i] - st[1] * m.oz[i];
+            if (dc - 0.5f < -sl || dc - 0.5f >= sl) continue;
+            float uc = m.runU[i] - m.ds[i] * (Math.abs(st[0] * m.tx[i]) + Math.abs(st[1] * m.tz[i]));
+            if (Float.isNaN(best) || uc > best) best = uc;
+        }
+        return best;
+    }
+
     private void stoneBridge(int x, int z, int top, boolean half, float d, boolean rail, boolean deck, boolean outer, float L, float u, float ds, int rise,
-                             Direction along, Direction out, int base, int ground, long h, boolean solid) {
+                             Direction along, Direction out, int base, int ground, long h, boolean solid, float uPrev, boolean joint) {
         int spans = Math.max(1, Math.round(L / STONE_SPAN));
         float sp = L / spans;
         int j = Math.clamp(Math.round(u / sp), 0, spans);
@@ -713,11 +735,19 @@ public final class RoadPainter {
         int k = Math.clamp(Math.round(u / sp), 0, spans);
         boolean end = u < ds || u > L - ds;
         boolean pilaster = !solid && (end || Math.abs(u - k * sp) < ds / 2 && k > 0 && k < spans);
+        // the second block of a stair step in the same row: a plain parapet. Where the road bends at a bridge end, the
+        // columns on the outer side all sit at the joint's u, so the step estimate cannot tell them apart: none of those
+        if (end && joint) pilaster = false;
+        if (pilaster && !Float.isNaN(uPrev) && uPrev >= 0) {
+            boolean prevEnd = uPrev < ds || uPrev > L - ds;
+            if (end ? prevEnd : Math.abs(uPrev - k * sp) < ds / 2) pilaster = false;
+        }
         stone(x, top + 1, z, Palette.DRESSED, base, north);
         int r = rnd(x, top + 2, z);
         if (pilaster) {
             set(x, top + 2, z, Blocks.CHISELED_STONE_BRICKS.defaultBlockState());
             boolean lamp = end || k % 2 == 0 || spans <= 2;
+            if (TRACE_LAMPS) io.github.profetgit.countryroads.CountryRoads.LOG.info("CR-LAMP " + x + "," + z + " u=" + u + " L=" + L + " ds=" + ds + " uPrev=" + uPrev + " end=" + end + " k=" + k + " lamp=" + lamp);
             if (!lamp || !lantern(x, top + 3, z)) set(x, top + 3, z, Palette.bridgeSlab(0, r));
             clear(x, top + 4, top + 4, z);
         } else {
@@ -958,6 +988,17 @@ public final class RoadPainter {
                 set(x, bank, z, natural);
                 clear(x, bank + 1, bank + 2, z);
             }
+        } else if (ground < top - 1 && !get(x, ground + 1, z).getFluidState().isEmpty()) {
+            // a road built up across deeper water (a narrow channel): its sides slope into the water, two down per block,
+            // instead of standing as a sheer face over the bed
+            int bank = Math.min(top, Math.round(roadY - 2 * Math.max(0f, d - 0.5f)));
+            BlockState bed = underwaterFill(get(x, ground, z));
+            boolean dryTop = bank > ground && get(x, bank + 1, z).getFluidState().isEmpty();
+            for (int y = ground + 1; y <= bank; y++) {
+                boolean wet = !get(x, y, z).getFluidState().isEmpty();
+                set(x, y, z, y == bank && dryTop ? natural : wet ? bed : Blocks.DIRT.defaultBlockState());
+            }
+            if (dryTop) clear(x, bank + 1, bank + 2, z);
         }
         feather(x, z, top, d, h);
     }
@@ -1029,7 +1070,18 @@ public final class RoadPainter {
     }
 
     private void fillBelow(int x, int z, int ground, int top) {
-        for (int y = ground + 1; y < top; y++) set(x, y, z, top - y <= 3 ? Blocks.DIRT.defaultBlockState() : Palette.rubble(hash(x, z) + y));
+        BlockState bed = underwaterFill(get(x, ground, z));
+        for (int y = ground + 1; y < top; y++) {
+            // under water the fill is the bed's own soil, never a rubble wall standing in the lake
+            boolean wet = !get(x, y, z).getFluidState().isEmpty();
+            set(x, y, z, top - y <= 3 ? Blocks.DIRT.defaultBlockState() : wet ? bed : Palette.rubble(hash(x, z) + y));
+        }
+    }
+
+    /** Fill for a road built up out of water: the bed's sand, gravel, clay or mud, else dirt. */
+    private static BlockState underwaterFill(BlockState bed) {
+        if (bed.is(Blocks.SAND) || bed.is(Blocks.RED_SAND) || bed.is(Blocks.GRAVEL) || bed.is(Blocks.CLAY) || bed.is(Blocks.MUD)) return bed.getBlock().defaultBlockState();
+        return Blocks.DIRT.defaultBlockState();
     }
 
     /** A post from y down to the ground or riverbed. */

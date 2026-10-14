@@ -31,6 +31,8 @@ public final class EdgePlan {
     public boolean[] shared;
     /** Dev: whether the terrain sample under each sample had water above its ground. */
     public boolean[] wet;
+    /** Dev: road height minus the terrain sample's ground (the fill a GROUND sample needs), where the sample is wet; else 0. */
+    public byte[] wetFill;
     /** Wood style for decks: 0 spruce, 1 oak, 2 mangrove, 3 dark oak. */
     public final byte[] wood;
     public final long routeNanos;

@@ -25,6 +25,8 @@ public final class ChunkMask {
     public final float[] ox = new float[256], oz = new float[256];
     /** Samples per block along the road here (more than 1 where a straightened line packs its samples closer). */
     public final float[] ds = new float[256];
+    /** The column's nearest road point is a joint between two samples (it lies on the outer side of a bend): its runU is clamped there. */
+    public final boolean[] joint = new boolean[256];
     public final byte[] earth = new byte[256];
     /** Which side of the centreline (+1 right, -1 left, walking from village a to b), and the wall/fence there (-1 none). */
     public final byte[] side = new byte[256], run = new byte[256];
@@ -121,7 +123,7 @@ public final class ChunkMask {
                 for (int lx = lx0; lx <= lx1; lx++) {
                     for (int lz = lz0; lz <= lz1; lz++) {
                         float px = bx + lx + 0.5f, pz = bz + lz + 0.5f;
-                        float t = len2 == 0 ? 0 : Math.clamp(((px - x0) * dx + (pz - z0) * dz) / len2, 0f, 1f);
+                        float raw = len2 == 0 ? 0 : ((px - x0) * dx + (pz - z0) * dz) / len2, t = Math.clamp(raw, 0f, 1f);
                         float qx = x0 + t * dx - px, qz = z0 + t * dz - pz;
                         float dist = (float) Math.sqrt(qx * qx + qz * qz);
                         float hw = p.hw[i] + t * (p.hw[i + 1] - p.hw[i]);
@@ -149,6 +151,7 @@ public final class ChunkMask {
                             m.tx[c] = sl > 0 ? dx / sl : 1;
                             m.tz[c] = sl > 0 ? dz / sl : 0;
                             m.ds[c] = sl > 1e-3f ? 1f / sl : 1f;
+                            m.joint[c] = raw < 0 || raw > 1;
                             m.earth[c] = p.earth == null ? 99 : p.earth[k];
                             float cross = dx * (pz - z0) - dz * (px - x0);
                             m.side[c] = (byte) (cross > 0 ? 1 : -1);

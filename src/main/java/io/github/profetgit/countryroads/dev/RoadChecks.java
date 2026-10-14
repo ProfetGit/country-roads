@@ -568,6 +568,22 @@ final class RoadChecks {
                     + (p == null ? " NONE" : " length=" + p.length() + " ms=" + p.routeNanos / 1_000_000 + " s0=" + (int) p.x[0] + "," + (int) p.z[0]
                     + (p.length() > 17 ? " s17=" + (int) p.x[17] + "," + (int) p.z[17] : "")) + " trunks=" + n.trunkDeps(e).size();
                 CountryRoads.LOG.info(line);
+                if (p != null && p.wetFill != null)
+                    for (int i = 0; i < p.length(); ) {
+                        // ground over water: the painter fills it from the bed (dirt, then a rubble wall)
+                        if (p.kind[i] != EdgePlan.GROUND || p.wetFill[i] < 3) {
+                            i++;
+                            continue;
+                        }
+                        int j = i, deepest = i;
+                        while (j + 1 < p.length() && p.kind[j + 1] == EdgePlan.GROUND && (p.wetFill[j + 1] >= 3 || j + 2 < p.length() && p.wetFill[j + 2] >= 3 && p.kind[j + 2] == EdgePlan.GROUND)) {
+                            j++;
+                            if (p.wetFill[j] > p.wetFill[deepest]) deepest = j;
+                        }
+                        report(src, "CR-WETFILL at " + (int) p.x[deepest] + " " + Math.round(p.y[deepest]) + " " + (int) p.z[deepest] + " len=" + (j - i + 1) + " fill=" + p.wetFill[deepest] + " from=" + i + "/" + p.length()
+                            + " ys=" + profileText(p, Math.max(0, i - 6), Math.min(p.length() - 1, j + 6)));
+                        i = j + 1;
+                    }
                 if (p != null && p.bridge != null)
                     for (int i = 0; i < p.length(); i += Math.max(1, p.runLen[i])) {
                         if (p.kind[i] == EdgePlan.BOARDWALK) {
