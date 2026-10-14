@@ -723,11 +723,12 @@ public final class HousePaths {
     private static void stampBridge(ServerLevel level, StakeBlockEntity be, BridgeKit.Bridge br, boolean quiet) {
         net.minecraft.world.level.block.Rotation rot = BridgeKit.rotation(br.dir());
         int len = br.length();
+        String[] woods = BridgeKit.woods(level.getBiome(BridgeKit.world(br, BridgeKit.MID, 2, len / 2)));
         for (int z = 0; z < len; z++)
             for (int x = 0; x < BridgeKit.WIDTH; x++) {
                 for (int y = 0; y < BridgeKit.height(); y++) {
                     BlockPos p = BridgeKit.world(br, x, y, z);
-                    BlockState s = BridgeKit.at(br.spans(), x, y, z);
+                    BlockState s = BridgeKit.inWoods(BridgeKit.at(br.spans(), x, y, z), woods);
                     if (s.isAir()) {
                         BlockState old = level.getBlockState(p);
                         if (!old.isAir() && old.getFluidState().isEmpty() && !old.is(BlockTags.LOGS) && !Retrofit.isCrafted(old) && !old.is(Stake.BLOCK))

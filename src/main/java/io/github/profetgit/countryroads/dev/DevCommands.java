@@ -195,6 +195,10 @@ public final class DevCommands {
             .then(Commands.literal("nearroad")
                 .then(Commands.argument("x", IntegerArgumentType.integer()).then(Commands.argument("z", IntegerArgumentType.integer())
                     .executes(c -> nearRoad(c.getSource(), IntegerArgumentType.getInteger(c, "x"), IntegerArgumentType.getInteger(c, "z"))))))
+            .then(Commands.literal("kitwoods").executes(c -> {
+                io.github.profetgit.countryroads.CountryRoads.LOG.info(io.github.profetgit.countryroads.path.BridgeKit.woodCheck());
+                return 1;
+            }))
             .then(Commands.literal("capturebench")
                 .then(Commands.argument("x", IntegerArgumentType.integer()).then(Commands.argument("z", IntegerArgumentType.integer())
                     .executes(c -> {

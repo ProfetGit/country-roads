@@ -10,6 +10,7 @@ import net.minecraft.nbt.ListTag;
 import net.minecraft.nbt.NbtAccounter;
 import net.minecraft.nbt.NbtIo;
 import net.minecraft.resources.Identifier;
+import net.minecraft.tags.BiomeTags;
 import net.minecraft.tags.BlockTags;
 import net.minecraft.world.level.block.Block;
 import net.minecraft.world.level.block.Blocks;
@@ -162,6 +163,72 @@ public final class BridgeKit {
                     else stone++;
                 }
         return new int[]{(halfPlanks + 1) / 2 + posts * 12, stone, lanterns};
+    }
+
+    /**
+     * The biome's wood pair {main, trim}: main takes the file's oak (deck, posts, beams), trim its spruce (stripped
+     * beams, trapdoors, stairs, shelves, gates). User, 2026-10-14: wood per biome, the trim darker than the main wood.
+     */
+    static String[] woods(net.minecraft.core.Holder<net.minecraft.world.level.biome.Biome> b) {
+        String forced = System.getProperty("countryroads.kitWoods");
+        if (forced != null && forced.contains(",")) return forced.split(",", 2);
+        if (b.is(net.minecraft.world.level.biome.Biomes.MANGROVE_SWAMP)) return new String[]{"mangrove", "dark_oak"};
+        if (b.is(net.minecraft.world.level.biome.Biomes.CHERRY_GROVE)) return new String[]{"cherry", "dark_oak"};
+        if (b.is(net.minecraft.world.level.biome.Biomes.PALE_GARDEN)) return new String[]{"pale_oak", "dark_oak"};
+        if (b.is(net.minecraft.world.level.biome.Biomes.DARK_FOREST)) return new String[]{"dark_oak", "spruce"};
+        if (b.is(BiomeTags.IS_JUNGLE)) return new String[]{"jungle", "dark_oak"};
+        if (b.is(BiomeTags.IS_SAVANNA)) return new String[]{"acacia", "dark_oak"};
+        if (b.is(net.minecraft.world.level.biome.Biomes.BIRCH_FOREST) || b.is(net.minecraft.world.level.biome.Biomes.OLD_GROWTH_BIRCH_FOREST))
+            return new String[]{"birch", "spruce"};
+        if (b.is(BiomeTags.IS_TAIGA) || b.value().getBaseTemperature() < 0.15f) return new String[]{"spruce", "dark_oak"};
+        return new String[]{"oak", "spruce"};
+    }
+
+    private static final java.util.Map<String, BlockState> SWAPPED = new java.util.concurrent.ConcurrentHashMap<>();
+
+    /** A kit block in the bridge's woods: oak -> main, spruce -> trim (same shape and properties); anything else as is. */
+    static BlockState inWoods(BlockState s, String[] woods) {
+        if (woods[0].equals("oak") && woods[1].equals("spruce")) return s;
+        Identifier id = BuiltInRegistries.BLOCK.getKey(s.getBlock());
+        String path = id.getPath(), to = null;
+        String[][] map = {{"oak", woods[0]}, {"spruce", woods[1]}};
+        for (String[] m : map) {
+            if (path.startsWith(m[0] + "_")) to = m[1] + path.substring(m[0].length());
+            else if (path.startsWith("stripped_" + m[0] + "_")) to = "stripped_" + m[1] + path.substring(("stripped_" + m[0]).length());
+            if (to != null) break;
+        }
+        if (to == null) return s;
+        String key = s + "|" + to;
+        String target = to;
+        return SWAPPED.computeIfAbsent(key, k -> {
+            Identifier nid = Identifier.fromNamespaceAndPath(id.getNamespace(), target);
+            if (!BuiltInRegistries.BLOCK.containsKey(nid)) return s;
+            return BuiltInRegistries.BLOCK.getValue(nid).withPropertiesOf(s);
+        });
+    }
+
+    /** Dev: every kit block in every wood pair; a block that should change but has no counterpart is listed. */
+    public static String woodCheck() {
+        String[][] pairs = {{"oak", "spruce"}, {"birch", "spruce"}, {"spruce", "dark_oak"}, {"dark_oak", "spruce"}, {"jungle", "dark_oak"},
+            {"acacia", "dark_oak"}, {"mangrove", "dark_oak"}, {"cherry", "dark_oak"}, {"pale_oak", "dark_oak"}};
+        StringBuilder sb = new StringBuilder("CR-KITWOODS");
+        int missing = 0;
+        java.util.Set<BlockState> seen = new java.util.HashSet<>();
+        for (int x = 0; x < SX; x++)
+            for (int y = 0; y < SY; y++)
+                for (int z = 0; z < SZ; z++) seen.add(CELLS[x][y][z]);
+        for (String[] p : pairs)
+            for (BlockState s : seen) {
+                String path = BuiltInRegistries.BLOCK.getKey(s.getBlock()).getPath();
+                boolean wood = path.startsWith("oak_") || path.startsWith("spruce_") || path.startsWith("stripped_oak_") || path.startsWith("stripped_spruce_");
+                boolean shouldChange = wood && !(p[0].equals("oak") && p[1].equals("spruce"))
+                    && !(path.contains("oak") && p[0].equals("oak")) && !(path.contains("spruce") && p[1].equals("spruce"));
+                if (shouldChange && inWoods(s, p) == s) {
+                    missing++;
+                    sb.append(' ').append(p[0]).append('/').append(p[1]).append(':').append(path);
+                }
+            }
+        return (missing == 0 ? "CR-KITWOODS PASS states=" + seen.size() : sb.toString() + " FAIL missing=" + missing);
     }
 
     static boolean isPost(BlockState s) {
