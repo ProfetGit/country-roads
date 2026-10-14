@@ -88,6 +88,7 @@ final class StakeTest {
         @SuppressWarnings("unchecked")
         java.util.List<HousePaths.Cell>[] cells = new java.util.List[1];
         java.util.Map<Long, String>[] skips = new java.util.Map[1];
+        java.util.List<io.github.profetgit.countryroads.path.BridgeKit.Bridge>[] bridgesRef = new java.util.List[1];
         DevCommands.queue(() -> {
             if (phase[0] == -2) {
                 // tickets only once this test's turn comes: tests run one after another and may share chunks
@@ -190,6 +191,7 @@ final class StakeTest {
                             + " lastLeg=" + legs[legs.length - 1] + " roles=" + wd.role + " savedRoundTrip=" + saved + " cells=" + cells[0].size());
                     }
                     skips[0] = be.survey.skipped();
+                    bridgesRef[0] = be.survey.bridges();
                     before[0] = snapshot(level, cells[0]);
                     beforeStates[0] = states(level, cells[0]);
                     HousePaths.use(level, stake, null);
@@ -310,12 +312,15 @@ final class StakeTest {
                         CountryRoads.LOG.info("CR-STAKE KEPT cells=" + built[0] + " journal=" + built[1]);
                         return true;
                     }
-                    int logsCut = 0, leavesCut = 0;
+                    // trees standing on a kit bridge are taken out whole on purpose (user, 2026-10-14); any other log is a cut
+                    int logsCut = 0, leavesCut = 0, bridgeLogs = 0;
                     for (var e : be.journal) {
-                        if (e.state().is(net.minecraft.tags.BlockTags.LOGS)) logsCut++;
-                        else if (e.state().is(net.minecraft.tags.BlockTags.LEAVES)) leavesCut++;
+                        if (e.state().is(net.minecraft.tags.BlockTags.LOGS)) {
+                            if (nearBridge(bridgesRef[0], e.pos())) bridgeLogs++;
+                            else logsCut++;
+                        } else if (e.state().is(net.minecraft.tags.BlockTags.LEAVES)) leavesCut++;
                     }
-                    CountryRoads.LOG.info("CR-STAKE-TREES logs removed " + logsCut + " (must be 0), leaves removed " + leavesCut);
+                    CountryRoads.LOG.info("CR-STAKE-TREES logs removed " + logsCut + " (must be 0), leaves removed " + leavesCut + ", bridge trees' logs " + bridgeLogs);
                     int shownLogs = 0;
                     for (var e : be.journal) {
                         if (!e.state().is(net.minecraft.tags.BlockTags.LOGS) || shownLogs++ >= 4) continue;
@@ -835,6 +840,21 @@ final class StakeTest {
         CountryRoads.LOG.info("CR-STAKE-WIDTH " + (pct >= 95 && one == 0 ? "PASS" : "FAIL") + " three wide " + wide + "/" + open + " (" + pct + "%) two=" + two + " one=" + one + " banks=" + banks + " why=" + why);
         CountryRoads.LOG.info("CR-STAKE-WALK " + (bad == 0 ? "PASS" : "FAIL") + " cells=" + cells.size() + " flat=" + flat + " steps=" + steps + " (half " + halfSteps[0] + ", stair " + stairSteps[0] + ") stairs=" + stairs + " rails=" + rails + " kit=" + kitCells + " lanterns=" + lanterns + " arched=" + archCells + " slabs=" + slabs + " (mud " + mudSteps + ", other " + stoneSteps + ") bad=" + bad
             + " palette=" + io.github.profetgit.countryroads.paint.Palette.surface(level.getBiome(stake)).name() + " at=" + stake.toShortString());
+    }
+
+    /** Within 8 columns of a kit bridge's footprint (where its tree clearing reaches). */
+    private static boolean nearBridge(java.util.List<io.github.profetgit.countryroads.path.BridgeKit.Bridge> bridges, BlockPos p) {
+        if (bridges == null) return false;
+        for (var br : bridges) {
+            int x0 = Integer.MAX_VALUE, x1 = Integer.MIN_VALUE, z0 = Integer.MAX_VALUE, z1 = Integer.MIN_VALUE;
+            for (int z : new int[]{0, br.length() - 1})
+                for (int x : new int[]{0, io.github.profetgit.countryroads.path.BridgeKit.WIDTH - 1}) {
+                    var c = io.github.profetgit.countryroads.path.BridgeKit.worldPos(br, x, 0, z);
+                    x0 = Math.min(x0, c.getX()); x1 = Math.max(x1, c.getX()); z0 = Math.min(z0, c.getZ()); z1 = Math.max(z1, c.getZ());
+                }
+            if (p.getX() >= x0 - 8 && p.getX() <= x1 + 8 && p.getZ() >= z0 - 8 && p.getZ() <= z1 + 8) return true;
+        }
+        return false;
     }
 
     /** Feet height on a path cell: a bottom slab is half a block lower than a full block or a stair's top. */

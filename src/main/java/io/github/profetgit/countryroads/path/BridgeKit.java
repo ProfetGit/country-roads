@@ -129,6 +129,11 @@ public final class BridgeKit {
         };
     }
 
+    /** For dev checks outside the package. */
+    public static BlockPos worldPos(Bridge b, int x, int y, int z) {
+        return world(b, x, y, z);
+    }
+
     /** World position of local (x across, y, z along) for a bridge. */
     static BlockPos world(Bridge b, int x, int y, int z) {
         int lx = x - MID, lz = z;

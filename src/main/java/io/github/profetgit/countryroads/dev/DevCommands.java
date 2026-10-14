@@ -236,6 +236,19 @@ public final class DevCommands {
             .then(Commands.literal("nearroad")
                 .then(Commands.argument("x", IntegerArgumentType.integer()).then(Commands.argument("z", IntegerArgumentType.integer())
                     .executes(c -> nearRoad(c.getSource(), IntegerArgumentType.getInteger(c, "x"), IntegerArgumentType.getInteger(c, "z"))))))
+            .then(Commands.literal("kittree")
+                .then(Commands.argument("x", IntegerArgumentType.integer()).then(Commands.argument("z", IntegerArgumentType.integer())
+                    .then(Commands.argument("dir", IntegerArgumentType.integer(0, 3)).executes(c -> {
+                        int x = IntegerArgumentType.getInteger(c, "x"), z = IntegerArgumentType.getInteger(c, "z"), dr = IntegerArgumentType.getInteger(c, "dir");
+                        var level = c.getSource().getLevel();
+                        queue(() -> {
+                            for (int cx = (x >> 4) - 3; cx <= (x >> 4) + 3; cx++)
+                                for (int cz = (z >> 4) - 3; cz <= (z >> 4) + 3; cz++) level.getChunk(cx, cz);
+                            io.github.profetgit.countryroads.CountryRoads.LOG.info(io.github.profetgit.countryroads.path.HousePaths.devKitTree(level, x, z, dr));
+                            return true;
+                        });
+                        return 1;
+                    })))))
             .then(Commands.literal("kitwoods").executes(c -> {
                 io.github.profetgit.countryroads.CountryRoads.LOG.info(io.github.profetgit.countryroads.path.BridgeKit.woodCheck());
                 return 1;

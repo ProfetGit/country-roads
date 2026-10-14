@@ -269,7 +269,7 @@ final class PathPlan {
                     continue;
                 }
                 int y0 = Math.max(Math.max(ty[s0], ty[e0]) + 1, ty[a]);
-                CountryRoads.LOG.info("CR-KIT bridge at " + xs[s0] + "," + zs[s0] + " spans=" + k + " length=" + BridgeKit.length(k) + " water=" + w + " y0=" + y0);
+                CountryRoads.LOG.info("CR-KIT bridge at " + xs[s0] + "," + zs[s0] + " dir=" + d + " spans=" + k + " length=" + BridgeKit.length(k) + " water=" + w + " y0=" + y0);
                 bridges.add(new BridgeKit.Bridge(xs[s0], zs[s0], d, k, y0));
                 // the cells just off both ends meet the kit at its own level: a step there would land on the kit's end
                 // cell, which has no step block (the step happens one cell further out, as a slab like any other)

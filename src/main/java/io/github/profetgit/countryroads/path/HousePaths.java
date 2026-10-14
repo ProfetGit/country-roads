@@ -921,14 +921,16 @@ public final class HousePaths {
     }
 
     /**
-     * Lays a kit bridge (BridgeKit): every block of the kit turned to the bridge's direction, posts carried down to the
-     * bed, the kit's air clearing what grew or stood there (never logs or anything built), and path ground under the
+     * Lays a kit bridge (BridgeKit): trees in its footprint taken out whole, every block of the kit turned to the
+     * bridge's direction, posts carried down to the bed, the kit's air clearing what grew or stood there (nothing
+     * built), and path ground under the
      * two end cells where the walked line meets the kit.
      */
     private static void stampBridge(ServerLevel level, PathData be, BridgeKit.Bridge br, boolean quiet) {
         net.minecraft.world.level.block.Rotation rot = BridgeKit.rotation(br.dir());
         int len = br.length();
         String[] woods = BridgeKit.woods(level.getBiome(BridgeKit.world(br, BridgeKit.MID, 2, len / 2)));
+        clearBridgeTrees(level, be, br);
         for (int z = 0; z < len; z++)
             for (int x = 0; x < BridgeKit.WIDTH; x++) {
                 for (int y = 0; y < BridgeKit.height(); y++) {
@@ -974,6 +976,116 @@ public final class HousePaths {
                         long lp = BridgeKit.world(br, x, y, z).asLong();
                         if (!be.torchPos.contains(lp)) be.torchPos.add(lp);
                     }
+    }
+
+    /**
+     * Dev: plant a birch inside a one-span bridge's footprint at (x, z) running dir, lay the bridge, count the logs left
+     * in the footprint, then take everything back and count what did not return. Prints CR-KITTREE.
+     */
+    public static String devKitTree(ServerLevel level, int x, int z, int dir) {
+        int top = level.getHeight(Heightmap.Types.MOTION_BLOCKING_NO_LEAVES, x, z);
+        BridgeKit.Bridge br = new BridgeKit.Bridge(x, z, dir, 1, top + 1);
+        BlockPos at = BridgeKit.world(br, BridgeKit.MID + 2, 0, 2);
+        BlockPos ground = new BlockPos(at.getX(), level.getHeight(Heightmap.Types.MOTION_BLOCKING_NO_LEAVES, at.getX(), at.getZ()), at.getZ());
+        var feature = level.registryAccess().lookupOrThrow(net.minecraft.core.registries.Registries.FEATURE)
+            .getOrThrow(net.minecraft.data.worldgen.features.TreeFeatures.BIRCH);
+        boolean planted = feature.value().place(level, level.getChunkSource().getGenerator(), level.getRandom(), ground);
+        java.util.Map<BlockPos, BlockState> before = new java.util.HashMap<>();
+        for (BlockPos p : BlockPos.betweenClosed(at.offset(-12, -6, -12), at.offset(12, 16, 12))) before.put(p.immutable(), level.getBlockState(p));
+        PathData pd = new PathData(() -> {});
+        stampBridge(level, pd, br, true);
+        int left = 0;
+        for (int zz = 0; zz < br.length(); zz++)
+            for (int xx = 0; xx < BridgeKit.WIDTH; xx++)
+                for (int y = -2; y < BridgeKit.height() + 8; y++) {
+                    if (level.getBlockState(BridgeKit.world(br, xx, y, zz)).is(Blocks.BIRCH_LOG)) left++;
+                }
+        int floating = 0;
+        for (BlockPos p : BlockPos.betweenClosed(at.offset(-10, -2, -10), at.offset(10, 14, 10))) {
+            BlockState s = level.getBlockState(p);
+            if (s.is(Blocks.BIRCH_LEAVES) && !s.getValue(net.minecraft.world.level.block.LeavesBlock.PERSISTENT)) {
+                boolean near = false;
+                for (BlockPos q : BlockPos.betweenClosed(p.offset(-4, -4, -4), p.offset(4, 4, 4))) if (level.getBlockState(q).is(BlockTags.LOGS)) near = true;
+                if (!near) floating++;
+            }
+        }
+        for (int i = pd.journal.size() - 1; i >= 0; i--) level.setBlock(pd.journal.get(i).pos(), pd.journal.get(i).state(), EXACT);
+        int notBack = 0;
+        for (var e : before.entrySet()) if (level.getBlockState(e.getKey()) != e.getValue()) notBack++;
+        return "CR-KITTREE " + (planted && left == 0 && floating == 0 && notBack == 0 ? "PASS" : "FAIL") + " planted=" + planted + " birchLogsLeftInFootprint=" + left
+            + " floatingLeaves=" + floating + " notRestored=" + notBack + " journal=" + pd.journal.size();
+    }
+
+    /**
+     * Trees standing in a bridge's footprint go whole (user, 2026-10-14: a birch grew through the deck): every log
+     * connected to a log in the footprint, if the group carries natural leaves (a tree, not something built), and the
+     * natural leaves no remaining log keeps alive. Journaled like everything else, so taking the path up puts them back.
+     */
+    private static void clearBridgeTrees(ServerLevel level, PathData be, BridgeKit.Bridge br) {
+        java.util.ArrayDeque<BlockPos> todo = new java.util.ArrayDeque<>();
+        java.util.Set<BlockPos> logs = new java.util.HashSet<>();
+        for (int z = 0; z < br.length(); z++)
+            for (int x = 0; x < BridgeKit.WIDTH; x++)
+                for (int y = -2; y < BridgeKit.height() + 3; y++) {
+                    BlockPos p = BridgeKit.world(br, x, y, z);
+                    if (level.getBlockState(p).is(BlockTags.LOGS) && !logs.contains(p)) {
+                        // one tree: its logs, 26-connected
+                        java.util.Set<BlockPos> tree = new java.util.HashSet<>();
+                        boolean leafy = false;
+                        todo.add(p);
+                        tree.add(p);
+                        while (!todo.isEmpty() && tree.size() < 4000) {
+                            BlockPos q = todo.poll();
+                            for (int dx = -1; dx <= 1; dx++)
+                                for (int dy = -1; dy <= 1; dy++)
+                                    for (int dz = -1; dz <= 1; dz++) {
+                                        BlockPos n = q.offset(dx, dy, dz);
+                                        BlockState ns = level.getBlockState(n);
+                                        if (ns.is(BlockTags.LOGS)) {
+                                            if (tree.add(n)) todo.add(n);
+                                        } else if (ns.is(BlockTags.LEAVES) && ns.hasProperty(net.minecraft.world.level.block.LeavesBlock.PERSISTENT)
+                                            && !ns.getValue(net.minecraft.world.level.block.LeavesBlock.PERSISTENT)) leafy = true;
+                                    }
+                        }
+                        todo.clear();
+                        if (leafy && tree.size() < 4000) logs.addAll(tree);
+                    }
+                }
+        if (logs.isEmpty()) return;
+        io.github.profetgit.countryroads.CountryRoads.LOG.info("CR-KIT trees cleared from the bridge at " + br.x() + "," + br.z() + ": " + logs.size() + " logs");
+        int x0 = Integer.MAX_VALUE, y0 = Integer.MAX_VALUE, z0 = Integer.MAX_VALUE, x1 = Integer.MIN_VALUE, y1 = Integer.MIN_VALUE, z1 = Integer.MIN_VALUE;
+        for (BlockPos p : logs) {
+            x0 = Math.min(x0, p.getX()); y0 = Math.min(y0, p.getY()); z0 = Math.min(z0, p.getZ());
+            x1 = Math.max(x1, p.getX()); y1 = Math.max(y1, p.getY()); z1 = Math.max(z1, p.getZ());
+        }
+        for (BlockPos p : logs) change(level, be, p, Blocks.AIR.defaultBlockState());
+        // natural leaves within 6 of a log still standing stay; the rest of the crown goes
+        int r = 7;
+        java.util.Map<BlockPos, Integer> dist = new java.util.HashMap<>();
+        java.util.ArrayDeque<BlockPos> q = new java.util.ArrayDeque<>();
+        for (BlockPos p : BlockPos.betweenClosed(x0 - r, y0 - r, z0 - r, x1 + r, y1 + r, z1 + r))
+            if (level.getBlockState(p).is(BlockTags.LOGS)) {
+                BlockPos ip = p.immutable();
+                dist.put(ip, 0);
+                q.add(ip);
+            }
+        while (!q.isEmpty()) {
+            BlockPos p = q.poll();
+            int d = dist.get(p);
+            if (d >= 6) continue;
+            for (net.minecraft.core.Direction dir : net.minecraft.core.Direction.values()) {
+                BlockPos n = p.relative(dir);
+                if (dist.containsKey(n) || !level.getBlockState(n).is(BlockTags.LEAVES)) continue;
+                dist.put(n, d + 1);
+                q.add(n);
+            }
+        }
+        for (BlockPos p : BlockPos.betweenClosed(x0 - r, y0 - r, z0 - r, x1 + r, y1 + r, z1 + r)) {
+            BlockState s = level.getBlockState(p);
+            if (!s.is(BlockTags.LEAVES) || !s.hasProperty(net.minecraft.world.level.block.LeavesBlock.PERSISTENT)
+                || s.getValue(net.minecraft.world.level.block.LeavesBlock.PERSISTENT) || dist.containsKey(p)) continue;
+            change(level, be, p.immutable(), Blocks.AIR.defaultBlockState());
+        }
     }
 
     /** Chance (of 1024, times a smooth patch density) of a plant beside the bed and on a bank. */
