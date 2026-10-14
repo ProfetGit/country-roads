@@ -231,20 +231,30 @@ public final class Planner {
         float[] x0 = x.clone(), z0 = z.clone(), ground0 = ground.clone(), water0 = water.clone();
         boolean[] river0 = river.clone();
         profile(ground, water, river, kind, pin, kindPin, connA, connB);
+        // crossings only grow from round to round (a crossing that flipped between two extents never settled)
+        boolean[] crossing = new boolean[n];
+        byte[] use = new byte[n];
         for (int round = 0; round < Integer.getInteger("countryroads.bridgeRounds", 12); round++) {
+            boolean grew = round == 0;
+            for (int i = 0; i < n; i++) {
+                if (kind[i] == EdgePlan.BRIDGE && !crossing[i]) {
+                    crossing[i] = true;
+                    grew = true;
+                }
+                use[i] = crossing[i] ? EdgePlan.BRIDGE : kind[i];
+            }
+            if (!grew) break;
             System.arraycopy(x0, 0, x, 0, n);
             System.arraycopy(z0, 0, z, 0, n);
             System.arraycopy(ground0, 0, ground, 0, n);
             System.arraycopy(water0, 0, water, 0, n);
             System.arraycopy(river0, 0, river, 0, n);
-            boolean[] moved = straighten(x, z, kind, water, ground, pin, (px, pz) -> {
+            boolean[] moved = straighten(x, z, use, water, ground, pin, (px, pz) -> {
                 int bx = (int) Math.floor(px), bz = (int) Math.floor(pz);
                 return fa.inOther(bx, bz, 2) || fb.inOther(bx, bz, 2);
             }, (px, pz) -> terrain.sample((int) Math.floor(px), (int) Math.floor(pz)).wet());
             for (int i = 0; i < n; i++) if (moved[i]) sampleAt(i, x, z, ground, water, river);
-            byte[] before = kind.clone();
             profile(ground, water, river, kind, pin, kindPin, connA, connB);
-            if (java.util.Arrays.equals(before, kind)) break;
         }
         for (int i = 0; i < n; i += 16) {
             byte w = Palette.wood(terrain.biome((int) x[i], (int) water[i], (int) z[i]));
@@ -256,7 +266,17 @@ public final class Planner {
         boolean[] chorded = Boolean.getBoolean("countryroads.noChord") ? new boolean[n] : chordBridges(x, z, kind, water, ground, pin, (px, pz) -> {
             int bx = (int) Math.floor(px), bz = (int) Math.floor(pz);
             return fa.inOther(bx, bz, 2) || fb.inOther(bx, bz, 2);
-        });
+        }, (px, pz) -> terrain.sample((int) Math.floor(px), (int) Math.floor(pz)).wet());
+        // again while a crossing's ease bent a neighbour that was already straight
+        for (int pass = 0; pass < 3 && !Boolean.getBoolean("countryroads.noChord"); pass++) {
+            boolean[] more = chordBridges(x, z, kind, water, ground, pin, (px, pz) -> {
+                int bx = (int) Math.floor(px), bz = (int) Math.floor(pz);
+                return fa.inOther(bx, bz, 2) || fb.inOther(bx, bz, 2);
+            }, (px, pz) -> terrain.sample((int) Math.floor(px), (int) Math.floor(pz)).wet());
+            boolean any = false;
+            for (int i = 0; i < n; i++) if (more[i]) any = chorded[i] = true;
+            if (!any) break;
+        }
         for (int i = 0; i < n; i++) if (chorded[i]) sampleAt(i, x, z, ground, water, river);
         // inside a village the road is never a tunnel or a trestle: it climbs the slope on the ground like the street
         for (int i = 0; i < n; i++)
@@ -312,6 +332,7 @@ public final class Planner {
     /** Bridges longer than this are stone arches, shorter ones timber. */
     static final int STONE_BRIDGE = 20;
     /** Samples over which the road eases from its own line onto a straightened bridge (more for a sharper turn). */
+    static final boolean TRACE_BRIDGES = Boolean.getBoolean("countryroads.traceBridges");
     static final int BRIDGE_EASE = 10, BRIDGE_EASE_TURN = 10, LANDING = 6, WET_REACH = 12;
 
     /**
@@ -323,12 +344,13 @@ public final class Planner {
      * trunk) never move, and a crossing whose new line would pass within 2 blocks of a village building keeps its
      * line. Sample count stays the same (samples on the bridge sit a little closer than a block).
      */
+    /** One straight line per crossing: samples a0..b0 lie on it, lo..a0 and b0..hi ease from the old line onto it. */
+    record Line(int a, int b, int a0, int b0, int lo, int hi, float ox, float oz, float dx, float dz) {}
+
     static boolean[] straighten(float[] x, float[] z, byte[] kind, float[] water, float[] ground, float[] pin,
                                 java.util.function.BiPredicate<Float, Float> blocked, java.util.function.BiPredicate<Float, Float> wetAt) {
         int n = x.length;
-        // one straight line per crossing: samples a0..b0 lie on it, lo..a0 and b0..hi ease from the old line onto it
-        record Line(int a, int b, int a0, int b0, int lo, int hi, float ox, float oz, float dx, float dz) {}
-        List<Line> lines = new ArrayList<>();
+        List<int[]> runs = new ArrayList<>();
         for (int i = 0; i < n; ) {
             int j = i;
             while (j + 1 < n && kind[j + 1] == kind[i]) j++;
@@ -337,91 +359,121 @@ public final class Planner {
             if (kind[a] != EdgePlan.BRIDGE || b - a < 3) continue;
             boolean wet = false;
             for (int k = a; k <= b; k++) wet |= water[k] > ground[k];
-            float cx = x[b] - x[a], cz = z[b] - z[a], len = (float) Math.hypot(cx, cz);
-            if (!wet || len < 1) continue;
-            float turn = (float) Math.toDegrees(Math.atan2(Math.min(Math.abs(cx), Math.abs(cz)), Math.max(Math.abs(cx), Math.abs(cz))));
-            int ease = BRIDGE_EASE + Math.round(BRIDGE_EASE_TURN * turn / 45f);
-            boolean fixA = a - ease < 1, fixB = b + ease > n - 2;
-            float step = len / (b - a);
-            boolean alongX = Math.abs(cx) >= Math.abs(cz);
-            float ax = alongX ? Math.signum(cx) : 0, az = alongX ? 0 : Math.signum(cz);
-            // the line: through the middle (free), from the anchored end (one end fixed), or the chord (both fixed)
-            float ox, oz, dx, dz;
-            if (fixA && fixB) {
-                dx = cx / (b - a);
-                dz = cz / (b - a);
-                ox = x[a] - dx * a;
-                oz = z[a] - dz * a;
-            } else {
-                int anchor = fixA ? a : fixB ? b : -1;
-                float mid = anchor >= 0 ? anchor : (a + b) / 2f;
-                ox = anchor >= 0 ? x[anchor] : (x[a] + x[b]) / 2;
-                oz = anchor >= 0 ? z[anchor] : (z[a] + z[b]) / 2;
-                if (alongX) oz = (float) Math.floor(oz) + 0.5f;
-                else ox = (float) Math.floor(ox) + 0.5f;
-                dx = ax * step;
-                dz = az * step;
-                ox -= dx * mid;
-                oz -= dz * mid;
-            }
-            // the straight runs on while the water under the line itself goes on (a road bending along the river), then
-            // LANDING samples more before the road turns (a turn right at the shore put a raised bridge's end on the bend)
-            int ea = a, eb = b;
-            while (!fixA && ea > 1 && a - ea < WET_REACH && wetAt.test(ox + dx * (ea - 1), oz + dz * (ea - 1))) ea--;
-            while (!fixB && eb < n - 2 && eb - b < WET_REACH && wetAt.test(ox + dx * (eb + 1), oz + dz * (eb + 1))) eb++;
-            int a0 = fixA ? a : Math.max(1, ea - LANDING), b0 = fixB ? b : Math.min(n - 2, eb + LANDING);
-            // a free end that lands far to the side of the old line eases over more samples (2 per block of shift), and
-            // over more where the road leaves the bridge at a sharp angle (a tight bend there folded the road onto itself)
-            float offA = (float) Math.hypot(ox + dx * a0 - x[a0], oz + dz * a0 - z[a0]), offB = (float) Math.hypot(ox + dx * b0 - x[b0], oz + dz * b0 - z[b0]);
-            int bendA = Math.round(turnFrom(x, z, a0, -1, ax, az) / 90f * 24), bendB = Math.round(turnFrom(x, z, b0, 1, ax, az) / 90f * 24);
-            int lo = fixA ? a : Math.max(1, a0 - Math.max(Math.max(ease, bendA), Math.round(2 * offA))),
-                hi = fixB ? b : Math.min(n - 2, b0 + Math.max(Math.max(ease, bendB), Math.round(2 * offB)));
-            lines.add(new Line(a, b, a0, b0, lo, hi, ox, oz, dx, dz));
+            if (TRACE_BRIDGES && !wet) io.github.profetgit.countryroads.CountryRoads.LOG.info("CR-STRAIGHT dry " + a + ".." + b + " at " + x[a] + "," + z[a]);
+            if (wet && Math.hypot(x[b] - x[a], z[b] - z[a]) >= 1) runs.add(new int[]{a, b});
         }
-        // neighbouring crossings never overlap: they share the gap between them (overlapping eases tangled the road)
-        for (int k = 0; k + 1 < lines.size(); k++) {
+        // crossings whose eases would overlap become one line (sharing a short gap stretched the road between them)
+        List<Line> lines = new ArrayList<>();
+        for (int[] r : runs) lines.add(line(x, z, r[0], r[1], wetAt));
+        for (int k = 0; k + 1 < lines.size(); ) {
             Line c = lines.get(k), d = lines.get(k + 1);
-            if (c.hi < d.lo) continue;
-            int b0 = c.b0, a0 = d.a0;
-            if (b0 >= a0) {
-                int mid = (c.b + d.a) / 2;
-                b0 = Math.max(c.b, Math.min(b0, mid));
-                a0 = Math.min(d.a, Math.max(a0, mid + 1));
+            if (c.hi() < d.lo()) {
+                k++;
+                continue;
             }
-            int mid = (b0 + a0) / 2;
-            lines.set(k, new Line(c.a, c.b, c.a0, b0, c.lo, Math.clamp(mid, b0, Math.max(b0, c.hi)), c.ox, c.oz, c.dx, c.dz));
-            lines.set(k + 1, new Line(d.a, d.b, a0, d.b0, Math.clamp(mid + 1, Math.min(d.lo, a0), a0), d.hi, d.ox, d.oz, d.dx, d.dz));
+            lines.set(k, line(x, z, c.a(), d.b(), wetAt));
+            lines.remove(k + 1);
+            if (k > 0) k--;
         }
+        if (TRACE_BRIDGES) for (Line l : lines) io.github.profetgit.countryroads.CountryRoads.LOG.info("CR-STRAIGHT line " + l.a() + ".." + l.b()
+            + " at " + x[l.a()] + "," + z[l.a()] + " -> " + x[l.b()] + "," + z[l.b()] + " lo/hi=" + l.lo() + "/" + l.hi());
         boolean[] moved = new boolean[n];
-        float[] nx = new float[n], nz = new float[n];
-        for (Line l : lines) {
-            boolean ok = true;
-            for (int k = l.lo; k <= l.hi && ok; k++) {
-                float u = k < l.a0 ? (k - l.lo) / (float) (l.a0 - l.lo) : k > l.b0 ? (l.hi - k) / (float) (l.hi - l.b0) : 1f;
-                float w = u * u * (3 - 2 * u);
-                nx[k] = x[k] + (l.ox + l.dx * k - x[k]) * w;
-                nz[k] = z[k] + (l.oz + l.dz * k - z[k]) * w;
-                float shift = Math.abs(nx[k] - x[k]) + Math.abs(nz[k] - z[k]);
-                // a snap of half a block at an anchored end is no risk; a real move must stay clear of buildings
-                if (shift > 1e-4f && !Float.isNaN(pin[k]) || shift > 0.5f && blocked.test(nx[k], nz[k])) ok = false;
-            }
-            if (!ok) continue;
-            for (int k = l.lo; k <= l.hi; k++) {
-                if (Math.abs(nx[k] - x[k]) + Math.abs(nz[k] - z[k]) <= 1e-4f) continue;
-                moved[k] = true;
-            }
-            for (int k = l.lo; k <= l.hi; k++)
-                if (moved[k]) {
-                    x[k] = nx[k];
-                    z[k] = nz[k];
-                }
-        }
+        for (Line l : lines) apply(l, x, z, pin, blocked, moved);
         return moved;
+    }
+
+    /**
+     * Moves the samples lo..hi onto the line (easing at both ends) unless a real move would cross a pinned sample or come
+     * near a village building. Returns whether it moved them.
+     */
+    private static boolean apply(Line l, float[] x, float[] z, float[] pin, java.util.function.BiPredicate<Float, Float> blocked, boolean[] moved) {
+        // a long ease that swings past a building gets shorter eases, then a shorter straight past the water, before the
+        // crossing gives up
+        for (Line t = l; ; ) {
+            if (applyOnce(t, x, z, pin, blocked, moved)) return true;
+            int ea = t.a0() - t.lo(), eb = t.hi() - t.b0();
+            if (ea >= 6 || eb >= 6) {
+                t = new Line(t.a(), t.b(), t.a0(), t.b0(), t.a0() - ea / 2, t.b0() + eb / 2, t.ox(), t.oz(), t.dx(), t.dz());
+                continue;
+            }
+            if (t.a0() == t.a() && t.b0() == t.b()) return false;
+            int a0 = t.a0() + (t.a() - t.a0() + 1) / 2, b0 = t.b0() - (t.b0() - t.b() + 1) / 2;
+            t = new Line(t.a(), t.b(), a0, b0, Math.max(t.lo(), a0 - 8), Math.min(t.hi(), b0 + 8), t.ox(), t.oz(), t.dx(), t.dz());
+        }
+    }
+
+    private static boolean applyOnce(Line l, float[] x, float[] z, float[] pin, java.util.function.BiPredicate<Float, Float> blocked, boolean[] moved) {
+        float[] nx = new float[l.hi() - l.lo() + 1], nz = new float[nx.length];
+        for (int k = l.lo(); k <= l.hi(); k++) {
+            float u = k < l.a0() ? (k - l.lo()) / (float) (l.a0() - l.lo()) : k > l.b0() ? (l.hi() - k) / (float) (l.hi() - l.b0()) : 1f;
+            float w = u * u * (3 - 2 * u);
+            float px = x[k] + (l.ox() + l.dx() * k - x[k]) * w, pz = z[k] + (l.oz() + l.dz() * k - z[k]) * w;
+            float shift = Math.abs(px - x[k]) + Math.abs(pz - z[k]);
+            // a snap of half a block at an anchored end is no risk; a real move must stay clear of buildings
+            if (shift > 1e-4f && !Float.isNaN(pin[k]) || shift > 0.5f && blocked.test(px, pz)) {
+                if (TRACE_BRIDGES) io.github.profetgit.countryroads.CountryRoads.LOG.info("CR-STRAIGHT skip " + l.a() + ".." + l.b() + " at sample " + k + " ("
+                    + px + ", " + pz + ") " + (Float.isNaN(pin[k]) ? "near a building" : "pinned (shared trunk)"));
+                return false;
+            }
+            nx[k - l.lo()] = px;
+            nz[k - l.lo()] = pz;
+        }
+        for (int k = l.lo(); k <= l.hi(); k++) {
+            if (Math.abs(nx[k - l.lo()] - x[k]) + Math.abs(nz[k - l.lo()] - z[k]) <= 1e-4f) continue;
+            x[k] = nx[k - l.lo()];
+            z[k] = nz[k - l.lo()];
+            moved[k] = true;
+        }
+        return true;
+    }
+
+    /** The straight line for the crossing a..b (see straighten). */
+    private static Line line(float[] x, float[] z, int a, int b, java.util.function.BiPredicate<Float, Float> wetAt) {
+        int n = x.length;
+        float cx = x[b] - x[a], cz = z[b] - z[a], len = (float) Math.hypot(cx, cz);
+        float turn = (float) Math.toDegrees(Math.atan2(Math.min(Math.abs(cx), Math.abs(cz)), Math.max(Math.abs(cx), Math.abs(cz))));
+        int ease = BRIDGE_EASE + Math.round(BRIDGE_EASE_TURN * turn / 45f);
+        boolean fixA = a - ease < 1, fixB = b + ease > n - 2;
+        float step = len / (b - a);
+        boolean alongX = Math.abs(cx) >= Math.abs(cz);
+        float ax = alongX ? Math.signum(cx) : 0, az = alongX ? 0 : Math.signum(cz);
+        // through the middle (free), from the anchored end (one end fixed), or the chord (both fixed)
+        float ox, oz, dx, dz;
+        if (fixA && fixB) {
+            dx = cx / (b - a);
+            dz = cz / (b - a);
+            ox = x[a] - dx * a;
+            oz = z[a] - dz * a;
+        } else {
+            int anchor = fixA ? a : fixB ? b : -1;
+            float mid = anchor >= 0 ? anchor : (a + b) / 2f;
+            ox = anchor >= 0 ? x[anchor] : (x[a] + x[b]) / 2;
+            oz = anchor >= 0 ? z[anchor] : (z[a] + z[b]) / 2;
+            if (alongX) oz = (float) Math.floor(oz) + 0.5f;
+            else ox = (float) Math.floor(ox) + 0.5f;
+            dx = ax * step;
+            dz = az * step;
+            ox -= dx * mid;
+            oz -= dz * mid;
+        }
+        // the straight runs on while the water under the line itself goes on (a road bending along the river), then
+        // LANDING samples more before the road turns (a turn right at the shore put a raised bridge's end on the bend)
+        int ea = a, eb = b;
+        while (!fixA && ea > 1 && a - ea < WET_REACH && wetAt.test(ox + dx * (ea - 1), oz + dz * (ea - 1))) ea--;
+        while (!fixB && eb < n - 2 && eb - b < WET_REACH && wetAt.test(ox + dx * (eb + 1), oz + dz * (eb + 1))) eb++;
+        int a0 = fixA ? a : Math.max(1, ea - LANDING), b0 = fixB ? b : Math.min(n - 2, eb + LANDING);
+        // a free end that lands far to the side of the old line eases over more samples (2 per block of shift), and over
+        // more where the road leaves the bridge at a sharp angle (a tight bend there folded the road onto itself)
+        float offA = (float) Math.hypot(ox + dx * a0 - x[a0], oz + dz * a0 - z[a0]), offB = (float) Math.hypot(ox + dx * b0 - x[b0], oz + dz * b0 - z[b0]);
+        int bendA = Math.round(turnFrom(x, z, a0, -1, ax, az) / 90f * 24), bendB = Math.round(turnFrom(x, z, b0, 1, ax, az) / 90f * 24);
+        int lo = fixA ? a : Math.max(1, a0 - Math.max(Math.max(ease, bendA), Math.round(2 * offA))),
+            hi = fixB ? b : Math.min(n - 2, b0 + Math.max(Math.max(ease, bendB), Math.round(2 * offB)));
+        return new Line(a, b, a0, b0, lo, hi, ox, oz, dx, dz);
     }
 
     /** Wet bridge runs more than half a block off the straight line between their ends, put on that line. */
     static boolean[] chordBridges(float[] x, float[] z, byte[] kind, float[] water, float[] ground, float[] pin,
-                                  java.util.function.BiPredicate<Float, Float> blocked) {
+                                  java.util.function.BiPredicate<Float, Float> blocked, java.util.function.BiPredicate<Float, Float> wetAt) {
         int n = x.length;
         boolean[] moved = new boolean[n];
         for (int i = 0; i < n; ) {
@@ -429,12 +481,18 @@ public final class Planner {
             while (j + 1 < n && kind[j + 1] == kind[i]) j++;
             int a = i, b = j;
             i = j + 1;
+            // dry trestles too (from 4 samples): a ravine bridge is as much a bridge as a river one
             if (kind[a] != EdgePlan.BRIDGE || b - a < 2) continue;
             boolean wet = false;
             for (int k = a; k <= b; k++) wet |= water[k] > ground[k];
             float cx = x[b] - x[a], cz = z[b] - z[a], len = (float) Math.hypot(cx, cz), dev = 0;
-            if (!wet || len < 1) continue;
+            if (!wet && b - a < 3 || len < 1) continue;
             for (int k = a; k <= b; k++) dev = Math.max(dev, Math.abs((x[k] - x[a]) * cz - (z[k] - z[a]) * cx) / len);
+            if (dev <= 0.5f && (Math.abs(cx) < 0.05f * len || Math.abs(cz) < 0.05f * len)) continue;
+            // the axis line first (the road either side eases, without a new profile: heights stay, the painter fills),
+            // the plain chord between the run's own ends only where that would come near a building
+            if (TRACE_BRIDGES) io.github.profetgit.countryroads.CountryRoads.LOG.info("CR-CHORD " + a + ".." + b + " of " + n + " dev=" + dev + " c=" + cx + "," + cz + " line=" + line(x, z, a, b, wetAt));
+            if (apply(line(x, z, a, b, wetAt), x, z, pin, blocked, moved)) continue;
             if (dev <= 0.5f) continue;
             boolean ok = true;
             for (int k = a + 1; k < b && ok; k++) {
@@ -758,6 +816,15 @@ public final class Planner {
         // whole crossing is level and the climb moves onto the ground before it
         for (int round = 0; round < 3; round++) {
             boolean changed = false;
+            // a boardwalk the crossing grew into is part of it (it stepped up two blocks a sample into the deck)
+            for (boolean more = true; more; ) {
+                more = false;
+                for (int i = 0; i < n; i++)
+                    if (kind[i] == EdgePlan.BOARDWALK && Float.isNaN(pin[i]) && (i > 0 && kind[i - 1] == EdgePlan.BRIDGE || i + 1 < n && kind[i + 1] == EdgePlan.BRIDGE)) {
+                        kind[i] = EdgePlan.BRIDGE;
+                        more = changed = true;
+                    }
+            }
             for (int i = 0; i < n; ) {
                 int j = i;
                 while (j + 1 < n && kind[j + 1] == kind[i]) j++;
@@ -794,9 +861,10 @@ public final class Planner {
                 int a = i, b = j;
                 while (a < b - 2 && water[a] <= ground[a] && Float.isNaN(pin[a])) a++;
                 while (b > a + 2 && water[b] <= ground[b] && Float.isNaN(pin[b])) b--;
+                // only where the end meets ordinary ground (a level dry end beside a boardwalk left a 4-block step)
                 if (water[a] > ground[a] || water[b] > ground[b]) {
-                    for (int k = i; k < a; k++) kind[k] = EdgePlan.GROUND;
-                    for (int k = b + 1; k <= j; k++) kind[k] = EdgePlan.GROUND;
+                    if (i == 0 || kind[i - 1] == EdgePlan.GROUND) for (int k = i; k < a; k++) kind[k] = EdgePlan.GROUND;
+                    if (j == n - 1 || kind[j + 1] == EdgePlan.GROUND) for (int k = b + 1; k <= j; k++) kind[k] = EdgePlan.GROUND;
                 }
             }
             i = j + 1;

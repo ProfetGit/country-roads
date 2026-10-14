@@ -77,7 +77,7 @@ final class RoadChecks {
         int[] a = area(src, radius);
         int total = a[2] * a[2];
         int[] next = {0};
-        long[] cols = {0}, bad = {0}, breaks = {0}, steps = {0}, skipped = {0}, floating = {0}, snowyBare = {0};
+        long[] cols = {0}, bad = {0}, breaks = {0}, steps = {0}, skipped = {0}, floating = {0}, snowyBare = {0}, lanternPairs = {0};
         Set<String> examples = new LinkedHashSet<>();
         MessageDigest sha;
         try {
@@ -109,6 +109,18 @@ final class RoadChecks {
                     for (int y = ft - 3; y <= ft + 14; y++) {
                         BlockState st = chunk.getBlockState(pos.set(fx, y, fz));
                         if (st.isAir()) continue;
+                        if (st.is(Blocks.LANTERN)) {
+                            // two lanterns side by side (any of the 26 neighbours) are never wanted
+                            boolean pair = false;
+                            for (int dx = -1; dx <= 1 && !pair; dx++)
+                                for (int dz = -1; dz <= 1 && !pair; dz++)
+                                    for (int dy = -1; dy <= 1 && !pair; dy++)
+                                        pair = (dx | dy | dz) != 0 && level.getBlockState(pos.set(fx + dx, y + dy, fz + dz)).is(Blocks.LANTERN);
+                            if (pair) {
+                                lanternPairs[0]++;
+                                if (examples.size() < 6) examples.add("lanternPair " + fx + "," + y + "," + fz);
+                            }
+                        }
                         BlockState below = chunk.getBlockState(pos.set(fx, y - 1, fz));
                         boolean plant = st.canBeReplaced() && st.getFluidState().isEmpty() && !st.is(Blocks.SNOW) && !st.is(BlockTags.LEAVES) && !st.is(Blocks.VINE) && !st.is(BlockTags.CAVE_VINES) && !st.is(Blocks.HANGING_ROOTS);
                         if (plant && below.isAir()) {
@@ -163,9 +175,9 @@ final class RoadChecks {
                 }
             }
             if (next[0] < total) return false;
-            String verdict = cols[0] > 0 && bad[0] == 0 && breaks[0] == 0 && floating[0] == 0 && snowyBare[0] == 0
+            String verdict = cols[0] > 0 && bad[0] == 0 && breaks[0] == 0 && floating[0] == 0 && snowyBare[0] == 0 && lanternPairs[0] == 0
                 && trees.floatingTrees == 0 && trees.floatingMushrooms == 0 && trees.floatingLeaves == 0 && trees.overhangs == 0 ? "PASS" : "FAIL";
-            report(src, "CR-CHECK " + verdict + " roadColumns=" + cols[0] + " bad=" + bad[0] + " breaks=" + breaks[0] + " oneBlockSteps=" + steps[0] + " skippedChunks=" + skipped[0] + " floatingPlants=" + floating[0] + " frostyBareGrass=" + snowyBare[0]
+            report(src, "CR-CHECK " + verdict + " roadColumns=" + cols[0] + " bad=" + bad[0] + " breaks=" + breaks[0] + " oneBlockSteps=" + steps[0] + " skippedChunks=" + skipped[0] + " floatingPlants=" + floating[0] + " frostyBareGrass=" + snowyBare[0] + " lanternPairs=" + lanternPairs[0]
                 + " treesUndone=" + io.github.profetgit.countryroads.gen.GenContext.UNDONE.get() + " floatingTrees=" + trees.floatingTrees + " floatingMushrooms=" + trees.floatingMushrooms + " floatingLeaves=" + trees.floatingLeaves + " (vanilla loose leaves " + trees.vanillaLeaves + ") overhangs=" + trees.overhangs
                 + " examples=" + examples);
             report(src, "CR-HASH " + HexFormat.of().formatHex(sha.digest()).substring(0, 16) + " columns=" + cols[0]);

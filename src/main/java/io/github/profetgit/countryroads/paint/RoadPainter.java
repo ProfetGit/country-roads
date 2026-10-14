@@ -468,6 +468,9 @@ public final class RoadPainter {
         // a stretch the painter turned into a bridge (fill too high) has no crossing data: a plain timber trestle
         boolean planned = m.kind[i] == EdgePlan.BRIDGE;
         float L = planned ? m.runLen[i] : 1000f, u = planned ? m.runU[i] : (float) m.s[i];
+        // samples per block step along the rail line: on a diagonal its blocks advance only 0.7 of a block along the road,
+        // so a one-block row is narrower there (else both blocks of a stair step took the post, and two lanterns)
+        float ds = m.ds[i] * Math.max(Math.abs(m.tx[i]), Math.abs(m.tz[i]));
         Direction along = Direction.getApproximateNearest(m.tx[i], 0, m.tz[i]);
         Direction out = Direction.getApproximateNearest(m.ox[i], 0, m.oz[i]);
         if (out.getAxis() == along.getAxis() || out.getAxis() == Direction.Axis.Y) out = along.getClockWise();
@@ -481,11 +484,11 @@ public final class RoadPainter {
         if (planned && !rail && !deck) lilyPad(x, z, level);
         if (m.bridge[i] == EdgePlan.STONE) {
             // fill too high beside a stone bridge's raised approach: a solid masonry abutment with a plain parapet
-            stoneBridge(x, z, top, half, d, rail, deck, outer, L, u, m.bridgeRise[i], along, out, Math.max(level, planned ? level : ground), ground, h, !planned);
+            stoneBridge(x, z, top, half, d, rail, deck, outer, L, u, ds, m.bridgeRise[i], along, out, Math.max(level, planned ? level : ground), ground, h, !planned);
         } else {
             // the road's deck wood (spruce, oak, mangrove, dark oak, jungle) as a bridge pair when the crossing has none
             int pair = planned ? m.bridgeWood[i] : new int[]{2, 0, 6, 3, 4}[Math.clamp(m.wood[i], 0, 4)];
-            timberBridge(x, z, top, half, rail, deck, outer, L, u, planned, Palette.bridgeWood(pair, false), Palette.bridgeWood(pair, true),
+            timberBridge(x, z, top, half, rail, deck, outer, L, u, ds, planned, Palette.bridgeWood(pair, false), Palette.bridgeWood(pair, true),
                 along, out, level, ground, h);
         }
     }
@@ -514,6 +517,21 @@ public final class RoadPainter {
         set(x, level + 1, z, Blocks.LILY_PAD.defaultBlockState());
     }
 
+    /**
+     * A standing lantern, unless another one already stands next to it (any of the 26 blocks around, inside this chunk):
+     * two lanterns side by side are never wanted. Returns whether it was placed.
+     */
+    private boolean lantern(int x, int y, int z) {
+        for (int dx = -1; dx <= 1; dx++)
+            for (int dz = -1; dz <= 1; dz++)
+                for (int dy = -1; dy <= 1; dy++) {
+                    if ((dx | dy | dz) == 0 || (x + dx) >> 4 != x >> 4 || (z + dz) >> 4 != z >> 4) continue;
+                    if (get(x + dx, y + dy, z + dz).is(Blocks.LANTERN)) return false;
+                }
+        set(x, y, z, Blocks.LANTERN.defaultBlockState());
+        return true;
+    }
+
     private static int rnd(int x, int y, int z) {
         return (int) ((hash(x * 31 + y * 97, z * 17 + y * 53) >>> 40) & 1023);
     }
@@ -534,19 +552,21 @@ public final class RoadPainter {
      * Stone: dressed stone brick piers, arch rings and parapet; spandrel walls and abutments in rubble (cobble, stone,
      * andesite); worn paving on the deck; cobble footings under water. Moss rises from the water line (see moss()).
      */
-    private void stoneBridge(int x, int z, int top, boolean half, float d, boolean rail, boolean deck, boolean outer, float L, float u, int rise,
+    private void stoneBridge(int x, int z, int top, boolean half, float d, boolean rail, boolean deck, boolean outer, float L, float u, float ds, int rise,
                              Direction along, Direction out, int base, int ground, long h, boolean solid) {
         int spans = Math.max(1, Math.round(L / STONE_SPAN));
         float sp = L / spans;
         int j = Math.clamp(Math.round(u / sp), 0, spans);
         boolean inner = j > 0 && j < spans;
-        boolean pier = !solid && inner && Math.abs(u - j * sp) < 1f, abut = solid || u < 1.5f || u > L - 1.5f;
+        // rows are counted in blocks, not samples: a feature one block wide spans ds samples (posts and lanterns doubled up
+        // where a straightened line packed its samples closer than a block)
+        boolean pier = !solid && inner && Math.abs(u - j * sp) < ds, abut = solid || u < 1.5f * ds || u > L - 1.5f * ds;
         float north = out == Direction.NORTH ? 0.8f : out == Direction.SOUTH ? -0.3f : 0f;
         int under = pier || abut ? ground : archUnder(u, sp, spans, rise, top);
         if (!rail && !deck) {
             if (!outer) {
                 // a starling of rubble around each pier foot, under the water
-                if (!solid && inner && Math.abs(u - j * sp) < 1.5f && d < 2.6f)
+                if (!solid && inner && Math.abs(u - j * sp) < 1.5f * ds && d < 2.6f)
                     for (int y = ground + 1; y <= base && y < top - 2; y++) set(x, y, z, Palette.bridgeStone(Palette.FOOTING, 0, rnd(x, y, z)));
                 return;
             }
@@ -599,14 +619,14 @@ public final class RoadPainter {
         // parapet with a slab coping (rain-fed moss on a few); a taller pilaster over each pier and at both ends, every
         // other one with a lantern
         int k = Math.clamp(Math.round(u / sp), 0, spans);
-        boolean end = u < 1f || u > L - 1f;
-        boolean pilaster = !solid && (end || Math.abs(u - k * sp) < 0.5f && k > 0 && k < spans);
+        boolean end = u < ds || u > L - ds;
+        boolean pilaster = !solid && (end || Math.abs(u - k * sp) < ds / 2 && k > 0 && k < spans);
         stone(x, top + 1, z, Palette.DRESSED, base, north);
         int r = rnd(x, top + 2, z);
         if (pilaster) {
             set(x, top + 2, z, Blocks.CHISELED_STONE_BRICKS.defaultBlockState());
             boolean lamp = end || k % 2 == 0 || spans <= 2;
-            set(x, top + 3, z, lamp ? Blocks.LANTERN.defaultBlockState() : Palette.bridgeSlab(0, r));
+            if (!lamp || !lantern(x, top + 3, z)) set(x, top + 3, z, Palette.bridgeSlab(0, r));
             clear(x, top + 4, top + 4, z);
         } else {
             set(x, top + 2, z, Palette.bridgeSlab(r < 90 ? 1 : 0, r));
@@ -628,14 +648,14 @@ public final class RoadPainter {
      * stringers that carry the rail, knee braces under them either side of each bent, cross beams under the deck at the
      * bents, log posts driven down to the river bed, ivy climbing the posts from the water, earth under the ends.
      */
-    private void timberBridge(int x, int z, int top, boolean half, boolean rail, boolean deck, boolean outer, float L, float u, boolean planned,
+    private void timberBridge(int x, int z, int top, boolean half, boolean rail, boolean deck, boolean outer, float L, float u, float ds, boolean planned,
                               Palette.BridgeWood main, Palette.BridgeWood trim, Direction along, Direction out, int level, int ground, long h) {
         int bays = Math.max(1, Math.round((L - 1) / TIMBER_BAY));
         float step = (L - 1) / bays;
         int j = Math.clamp(Math.round((u - 0.5f) / step), 0, bays);
         float off = u - 0.5f - j * step;
-        boolean bent = planned ? Math.abs(off) < 0.5f : Math.floorMod((int) Math.floor(u), 5) == 0;
-        boolean end = planned && (u < 1f || u > L - 1f);
+        boolean bent = planned ? Math.abs(off) < ds / 2 : Math.abs(u - 5 * Math.round(u / 5)) < ds / 2;
+        boolean end = planned && (u < ds || u > L - ds);
         if (!rail && !deck) {
             // ivy on the outer face of a post, up from the water
             if (outer && planned && bent && clump(x * 3 + 5, z * 3 + 9) > 480) {
@@ -654,7 +674,7 @@ public final class RoadPainter {
             for (int y = top - 1; y > ground; y--) set(x, y, z, Blocks.DIRT.defaultBlockState());
         } else if (rail) {
             // knee braces either side of each bent, under the stringer
-            if (planned && !bent && Math.abs(off) < 1.5f && get(x, top - 1, z).isAir())
+            if (planned && !bent && Math.abs(off) < 1.5f * ds && get(x, top - 1, z).isAir())
                 set(x, top - 1, z, stair(trim.stairs(), off > 0 ? along.getOpposite() : along, true));
         } else if (bent) {
             set(x, top - 1, z, trim.stripped().setValue(RotatedPillarBlock.AXIS, across));
@@ -667,8 +687,7 @@ public final class RoadPainter {
         if (bent) {
             // a post through the deck edge, from the bed to above the rail, footed in stone where it stands in water
             timberPost(x, z, top + 2, top, main.log(), main.stripped());
-            boolean lamp = planned && (end || j % 2 == 0);
-            if (lamp) set(x, top + 3, z, Blocks.LANTERN.defaultBlockState());
+            boolean lamp = planned && (end || j % 2 == 0) && lantern(x, top + 3, z);
             clear(x, top + (lamp ? 4 : 3), top + 4, z);
         } else {
             set(x, top + 1, z, main.fence());

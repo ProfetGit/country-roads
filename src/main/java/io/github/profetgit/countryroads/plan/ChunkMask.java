@@ -23,6 +23,8 @@ public final class ChunkMask {
     public final float[] runU = new float[256], tx = new float[256], tz = new float[256];
     /** Unit direction from the centreline out to the column (0 on the line). */
     public final float[] ox = new float[256], oz = new float[256];
+    /** Samples per block along the road here (more than 1 where a straightened line packs its samples closer). */
+    public final float[] ds = new float[256];
     public final byte[] earth = new byte[256];
     /** Which side of the centreline (+1 right, -1 left, walking from village a to b), and the wall/fence there (-1 none). */
     public final byte[] side = new byte[256], run = new byte[256];
@@ -143,6 +145,7 @@ public final class ChunkMask {
                             float sl = (float) Math.sqrt(len2);
                             m.tx[c] = sl > 0 ? dx / sl : 1;
                             m.tz[c] = sl > 0 ? dz / sl : 0;
+                            m.ds[c] = sl > 1e-3f ? 1f / sl : 1f;
                             m.earth[c] = p.earth == null ? 99 : p.earth[k];
                             float cross = dx * (pz - z0) - dz * (px - x0);
                             m.side[c] = (byte) (cross > 0 ? 1 : -1);
