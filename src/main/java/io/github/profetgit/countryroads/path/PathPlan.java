@@ -5,6 +5,7 @@ import java.util.ArrayList;
 import java.util.HashSet;
 import java.util.List;
 import java.util.Set;
+import io.github.profetgit.countryroads.CountryRoads;
 import io.github.profetgit.countryroads.paint.Palette;
 import net.minecraft.world.level.ChunkPos;
 
@@ -204,6 +205,8 @@ final class PathPlan {
         // both ends, on a straight stretch of the line; the cells under it follow the kit's deck heights. Anything else
         // keeps the plank deck.
         List<BridgeKit.Bridge> bridges = new ArrayList<>();
+        List<int[]> misses = new ArrayList<>();
+        int fordFill = 0;
         int[] kitAt = new int[n], kitH = new int[n];
         java.util.Arrays.fill(kitAt, -1);
         if (BridgeKit.available())
@@ -215,17 +218,66 @@ final class PathPlan {
                 int a = i;
                 while (i < n && wet[i] && tm[i] <= 0) i++;
                 int w = i - a;
-                if (w < KIT_MIN) continue;
-                int k = Math.max(BridgeKit.MIN_SPANS, (int) Math.ceil((w + 2 - BridgeKit.length(0)) / (double) BridgeKit.SPAN));
-                if (k > BridgeKit.MAX_SPANS) continue;
-                int len = BridgeKit.length(k), pad = len - w, s0 = a - (pad + 1) / 2, e0 = s0 + len - 1;
-                if (s0 < 1 || e0 > n - 2 || wet[s0] || wet[e0]) continue;
-                int d = dir[s0 + 1];
-                boolean ok = dir[s0] == d && dir[e0 + 1] == d;
-                for (int q = s0; q <= e0 && ok; q++) if (dir[q] != d || tm[q] > 0 || kitAt[q] >= 0) ok = false;
-                if (!ok) continue;
+                if (w < KIT_MIN) {
+                    // a creek of one or two cells: a ford (the water filled under the path), unless it is deep
+                    boolean shallow = true;
+                    for (int q = a; q < i; q++) if (Terrain.deep(t.ground(xs[q], zs[q]))) shallow = false;
+                    if (shallow) {
+                        for (int q = a; q < i; q++) {
+                            wet[q] = false;
+                            ty[q] -= 1;
+                            fordFill += 3;
+                        }
+                        continue;
+                    }
+                }
+                // every size from the smallest that covers the water, every placement along the line that still has a
+                // land cell at both ends, nearest the middle first: the first that fits a straight stretch wins
+                int s0 = -1, e0 = -1, k = -1, d = dir[a];
+                String why = "no straight stretch with land at both ends";
+                search:
+                for (int kk = Math.max(BridgeKit.MIN_SPANS, (int) Math.ceil((w + 2 - BridgeKit.length(0)) / (double) BridgeKit.SPAN)); kk <= BridgeKit.MAX_SPANS; kk++) {
+                    int len = BridgeKit.length(kk), lo = i - len + 1, hi = a - 1, mid = a - (len - w + 1) / 2;
+                    for (int tr = 0; tr <= 2 * (hi - lo) + 1; tr++) {
+                        int ss = mid + ((tr & 1) == 0 ? -(tr / 2) : (tr + 1) / 2);
+                        if (ss < lo || ss > hi) continue;
+                        if (ss < 1 || ss + len - 1 > n - 2) {
+                            why = "the line is too short around the water (door or road too close)";
+                            continue;
+                        }
+                        int ee = ss + len - 1;
+                        if (wet[ss] || wet[ee]) {
+                            why = "an end would stand in water";
+                            continue;
+                        }
+                        boolean ok = dir[ss] == d && dir[ee + 1] == d;
+                        for (int q = ss; q <= ee && ok; q++) if (dir[q] != d || tm[q] > 0 || kitAt[q] >= 0) ok = false;
+                        if (!ok) {
+                            why = "the line bends within " + len + " cells around the water";
+                            continue;
+                        }
+                        s0 = ss;
+                        e0 = ss + len - 1;
+                        k = kk;
+                        break search;
+                    }
+                }
+                if (k < 0) {
+                    if (w > BridgeKit.length(BridgeKit.MAX_SPANS) - 2) why = "longer than the longest kit bridge";
+                    misses.add(new int[]{xs[a], zs[a], xs[i - 1], zs[i - 1], dir[a], w});
+                    CountryRoads.LOG.info("CR-KIT miss at " + xs[a] + "," + zs[a] + ": " + w + " cells of water, " + why);
+                    continue;
+                }
                 int y0 = Math.max(Math.max(ty[s0], ty[e0]) + 1, ty[a]);
+                CountryRoads.LOG.info("CR-KIT bridge at " + xs[s0] + "," + zs[s0] + " spans=" + k + " length=" + BridgeKit.length(k) + " water=" + w + " y0=" + y0);
                 bridges.add(new BridgeKit.Bridge(xs[s0], zs[s0], d, k, y0));
+                // the cells just off both ends meet the kit at its own level: a step there would land on the kit's end
+                // cell, which has no step block (the step happens one cell further out, as a slab like any other)
+                for (int q : new int[]{s0 - 1, e0 + 1})
+                    if (q >= 0 && q < n && tm[q] <= 0 && !wet[q] && Math.abs(ty[q] - (y0 - 1)) <= PROFILE_RANGE) {
+                        ty[q] = y0 - 1;
+                        fixed[q] = true;
+                    }
                 for (int q = s0; q <= e0; q++) {
                     kitAt[q] = bridges.size() - 1;
                     kitH[q] = BridgeKit.halves(k, q - s0);
@@ -514,7 +566,7 @@ final class PathPlan {
             else if (c.slab()) slabs++;
         }
         surface -= stairs + slabs;
-        int earth = (Math.max(0, surface) + 1) / 2 + earthFixed + Math.max(0, fill - cut);
+        int earth = (Math.max(0, surface) + 1) / 2 + earthFixed + Math.max(0, fill + fordFill - cut);
         int stone = 2 * stairs + (slabs + 1) / 2 + stoneExtra;
         for (BridgeKit.Bridge br : bridges) {
             int[] bill = BridgeKit.bill(br.spans());
@@ -528,7 +580,7 @@ final class PathPlan {
             planks += (arch[i] & 1) == 1 ? 2 : 0;
             if (i > 0 && arch[i] / 2 > arch[i - 1] / 2 || i < n - 1 && arch[i] / 2 > arch[i + 1] / 2) planks += 10;
         }
-        return new HousePaths.Survey(cells, earth, stone, planks, torches, lanterns, tunnelCells, n, skipped, bridges);
+        return new HousePaths.Survey(cells, earth, stone, planks, torches, lanterns, tunnelCells, n, skipped, bridges, misses);
     }
 
     /** Can cell i of the walked line have a bridge rail on side s: a wet cell, its deck beside laid, the column open water or low ground. */

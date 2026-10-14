@@ -67,7 +67,8 @@ public final class HousePaths {
     public record Cell(int x, int z, int y, boolean water, boolean edge, int stair, int dir, boolean fringe, int tun, int tidx, boolean bank, boolean slab, boolean rail, int arch, boolean kit) {}
 
     /** A finished survey: cells from the door to the road, the bill, and what the route is made of. */
-    public record Survey(List<Cell> cells, int earth, int stone, int planks, int torches, int lanterns, int tunnelCells, int length, Map<Long, String> skipped, List<BridgeKit.Bridge> bridges) {}
+    public record Survey(List<Cell> cells, int earth, int stone, int planks, int torches, int lanterns, int tunnelCells, int length, Map<Long, String> skipped, List<BridgeKit.Bridge> bridges,
+                         List<int[]> misses) {}
 
     public static final Direction[] DIRS = {Direction.NORTH, Direction.EAST, Direction.SOUTH, Direction.WEST};
     static final int[] DX = {0, 1, 0, -1}, DZ = {-1, 0, 1, 0};

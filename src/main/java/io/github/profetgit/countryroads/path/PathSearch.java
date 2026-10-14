@@ -523,7 +523,8 @@ final class PathSearch implements RouteSolver.Host, Runnable {
                 }
                 continue;
             }
-            c.score = c.cost + score(sv);
+            // a crossing the user's bridge cannot fit makes a route all but unusable (no plank bridges: user, 2026-10-14)
+            c.score = c.cost + score(sv) + 100_000L * sv.misses().size();
             int[] st = stairs(sv);
             stats.candLines.add(String.format(java.util.Locale.ROOT, "CR-STAKE-CAND %s cost=%d score=%d length=%d tunnel=%d stairs=%d run=%d bill=%d/%d/%d fetched=%d",
                 c.kind, c.cost, c.score, sv.length(), sv.tunnelCells(), st[0], st[1], sv.earth(), sv.planks(), sv.torches(), c.loaded));
@@ -622,8 +623,162 @@ final class PathSearch implements RouteSolver.Host, Runnable {
             fail("countryroads.stake.on_road", 0);
             return;
         }
+        if (!sv.misses().isEmpty() && chain != direct) {
+            // the wandering bends broke a crossing the direct route had right
+            HousePaths.Survey dsv = PathPlan.build(view, sx, sz, stakeY, direct, win.route.endKey());
+            if (dsv != null && dsv.misses().size() < sv.misses().size()) {
+                sv = dsv;
+                chain = direct;
+                end = win.route.endKey();
+                bores = directBores;
+                stats.candLines.add("CR-STAKE-KIT the wandering route broke a bridge: kept the direct route");
+            }
+        }
+        // a crossing still without room for the bridge: lay the bridge straight across it and route to its ends
+        for (int round = 0; round < 3 && !sv.misses().isEmpty(); round++) {
+            Forced f = forceBridge(s, view, chain, sv.misses().get(0), forbidden, all);
+            if (f == null) break;
+            HousePaths.Survey fsv = PathPlan.build(view, sx, sz, stakeY, f.chain, f.end);
+            if (fsv == null || fsv.misses().size() >= sv.misses().size()) break;
+            stats.candLines.add("CR-STAKE-KIT forced a straight bridge at " + f.note);
+            sv = fsv;
+            chain = f.chain;
+            end = f.end;
+            bores = f.bores;
+        }
+        if (!sv.misses().isEmpty()) {
+            int[] m = sv.misses().get(0);
+            stats.candLines.add("CR-STAKE-KIT no room for the bridge at " + m[0] + "," + m[1]);
+            fail("countryroads.stake.no_bridge", 0);
+            return;
+        }
         finalBores = bores;
         survey = sv;
+    }
+
+    private record Forced(List<long[]> chain, long end, List<RouteSolver.Bore> bores, String note) {}
+
+    /**
+     * A route with the kit bridge laid straight over a crossing: the axis is the line's direction where it reaches the
+     * water; the bridge is sized to the water along that axis and slid along it until both ends and the cells either
+     * side stand on open land and nothing on the deck is closed (a trunk or something built). Then the path is searched
+     * from the door to the cell before the bridge and from the cell after it to a road (the player's waypoints stay
+     * in their order on either side).
+     */
+    private Forced forceBridge(RouteSolver s, Terrain t, List<long[]> chain, int[] miss, LongOpenHashSet forbidden, int[] goal)
+        throws InterruptedException {
+        int ax = miss[0], az = miss[1], d = miss[4];
+        int dx = HousePaths.DX[d], dz = HousePaths.DZ[d];
+        int w = 0;
+        while (w < 70 && wetOrDeep(t.ground(ax + dx * w, az + dz * w))) w++;
+        if (w < 1) return null;
+        int kMin = Math.max(BridgeKit.MIN_SPANS, (int) Math.ceil((w + 2 - BridgeKit.length(0)) / (double) BridgeKit.SPAN));
+        for (int k = kMin; k <= BridgeKit.MAX_SPANS; k++) {
+            int len = BridgeKit.length(k), pad = len - w;
+            for (int shift = 0; shift <= pad - 2; shift++) {
+                for (int sg = -1; sg <= 1; sg += 2) {
+                    if (sg > 0 && shift == 0) continue;
+                    int front = (pad + 1) / 2 + sg * shift;
+                    if (front < 1 || pad - front < 1) continue;
+                    int bx = ax - dx * front, bz = az - dz * front;
+                    if (!fits(t, bx, bz, d, len)) continue;
+                    long before = RouteSolver.key(bx - dx, bz - dz), after = RouteSolver.key(bx + dx * len, bz + dz * len);
+                    Forced f = routeVia(s, t, before, after, bx, bz, d, len, chain, forbidden, goal);
+                    if (f != null) return f;
+                }
+            }
+        }
+        return null;
+    }
+
+    private static boolean wetOrDeep(int g) {
+        return g >= Terrain.WET || Terrain.deep(g);
+    }
+
+    /** Ends and the cells beyond them on open land; every deck column usable ground or water. */
+    private static boolean fits(Terrain t, int bx, int bz, int d, int len) {
+        int dx = HousePaths.DX[d], dz = HousePaths.DZ[d], rx = -dz, rz = dx;
+        for (int j = -1; j <= len; j++) {
+            int x = bx + dx * j, z = bz + dz * j;
+            for (int side = -1; side <= 1; side++) {
+                int g = t.ground(x + side * rx, z + side * rz);
+                if (g == Terrain.UNKNOWN) return false;
+                boolean end = j <= 0 || j >= len - 1;
+                if (end && side == 0 && (!Terrain.usable(g) || g >= Terrain.WET)) return false;
+                if (!Terrain.usable(g) && !Terrain.deep(g)) return false;
+                if (t.road(x + side * rx, z + side * rz)) return false;
+            }
+        }
+        return true;
+    }
+
+    private Forced routeVia(RouteSolver s, Terrain t, long before, long after, int bx, int bz, int d, int len, List<long[]> chain,
+                            LongOpenHashSet forbidden, int[] goal) throws InterruptedException {
+        int dx = HousePaths.DX[d], dz = HousePaths.DZ[d];
+        // the player's waypoints keep their order: those the old line met before the crossing go first
+        int at = Integer.MAX_VALUE;
+        for (int q = 0; q < chain.size(); q++) if (chain.get(q)[0] == RouteSolver.key(bx + dx * ((len - 1) / 2), bz + dz * ((len - 1) / 2))) at = q;
+        List<Long> pre = new ArrayList<>(), post = new ArrayList<>();
+        for (long wp : waypoints) {
+            int wi = -1;
+            for (int q = 0; q < chain.size(); q++) if (chain.get(q)[0] == wp) wi = q;
+            (wi >= 0 && wi < at ? pre : post).add(wp);
+        }
+        pre.add(before);
+        boolean[] used = s.newUsed();
+        used[s.doorIdx] = true;
+        List<long[]> bridge = new ArrayList<>();
+        for (int j = 0; j < len; j++) {
+            int x = bx + dx * j, z = bz + dz * j;
+            if (!s.inWindow(x, z)) return null;
+            used[s.idx(x, z)] = true;
+            bridge.add(new long[]{RouteSolver.key(x, z), 0, 0});
+        }
+        if (!s.inWindow(ChunkPos.getX(after), ChunkPos.getZ(after))) return null;
+        used[s.idx(ChunkPos.getX(after), ChunkPos.getZ(after))] = true;
+        List<long[]> acc = new ArrayList<>();
+        List<RouteSolver.Bore> bores = new ArrayList<>();
+        s.prefix(acc);
+        long st = doorKey;
+        int dir = RouteSolver.START, lvl = level(t, doorKey);
+        for (long v : pre) {
+            RouteSolver.Route r = solve(s, st, dir, lvl, used, RouteSolver.Goal.column(v), true, forbidden, null);
+            if (r == null) {
+                s.prefix(null);
+                return null;
+            }
+            acc.addAll(r.part());
+            bores.addAll(r.bores());
+            for (long[] e : r.part()) used[s.idx(ChunkPos.getX(e[0]), ChunkPos.getZ(e[0]))] = true;
+            lvl = r.part().size() >= 2 ? level(t, r.part().get(r.part().size() - 2)[0]) : level(t, st);
+            dir = r.endDir();
+            st = r.endKey();
+        }
+        if (acc.isEmpty() || acc.get(acc.size() - 1)[0] != before) acc.add(new long[]{before, 0, 0});
+        acc.addAll(bridge);
+        acc.add(new long[]{after, 0, 0});
+        st = after;
+        dir = d;
+        lvl = level(t, after);
+        for (long v : post) {
+            RouteSolver.Route r = solve(s, st, dir, lvl, used, RouteSolver.Goal.column(v), true, forbidden, null);
+            if (r == null) {
+                s.prefix(null);
+                return null;
+            }
+            acc.addAll(r.part());
+            bores.addAll(r.bores());
+            for (long[] e : r.part()) used[s.idx(ChunkPos.getX(e[0]), ChunkPos.getZ(e[0]))] = true;
+            lvl = r.part().size() >= 2 ? level(t, r.part().get(r.part().size() - 2)[0]) : level(t, st);
+            dir = r.endDir();
+            st = r.endKey();
+        }
+        RouteSolver.Route last = solve(s, st, dir, lvl, used, RouteSolver.Goal.roads(goal, -1), true, forbidden, null);
+        s.prefix(null);
+        if (last == null) return null;
+        acc.addAll(last.part());
+        bores.addAll(last.bores());
+        return new Forced(acc, last.endKey(), bores, ChunkPos.getX(before) + "," + ChunkPos.getZ(before) + " length " + len);
     }
 
     /** A candidate route equal to one already in the list (another road's goal or the apart search can land on the same line). */
