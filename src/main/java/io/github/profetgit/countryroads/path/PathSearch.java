@@ -468,7 +468,10 @@ final class PathSearch implements RouteSolver.Host, Runnable {
             stats.candLines.add("CR-STAKE-COARSE widened " + (wide == null ? "-" : wide.size()) + (s.allowed == null ? " then unrestricted" : ""));
         }
         if (best == null) {
-            fail("countryroads.stake.no_road", RADIUS);
+            int openSides = 0;
+            for (int d = 0; d < 4; d++) if (Terrain.usable(view.ground(sx + HousePaths.DX[d], sz + HousePaths.DZ[d]))) openSides++;
+            // few columns tried: the start itself is walled in; otherwise a road exists but something is in the way
+            fail(openSides == 0 || stats.expansions < 60 ? "countryroads.stake.boxed_in" : "countryroads.stake.no_route", RADIUS);
             return;
         }
         cands.add(new Candidate("nearest", best));
@@ -876,7 +879,7 @@ final class PathSearch implements RouteSolver.Host, Runnable {
         survey = null;
         failure = key;
         failureArg = arg;
-        if (player == null) CountryRoads.LOG.info("CR-STAKE-DEBUG expansions=" + stats.expansions);
+        if (player == null) CountryRoads.LOG.info("CR-STAKE-DEBUG expansions=" + stats.expansions + " failure=" + key + " " + arg);
     }
 
     private static int level(Terrain t, long k) {

@@ -31,11 +31,49 @@ final class StakeTest {
 
     /** staketest ... door / doorkeep: start the path from a door with the stake item (and make it permanent after the build). */
     static boolean doorMode, commitMode;
+    /** staketest ... house / houseyard / housewalls: a player's cabin around the door (1), plus a closed fence yard in front (2), plus a stone-brick wall ring (3). */
+    static int houseMode;
     /** staketest X Z via VX VZ WX WZ: a second waypoint (the chain test). */
     static int[] via2;
 
+    /** A cabin north of the door (door in its south wall, outside = south): planks, roof, a stair doorstep, a porch roof on fence posts; mode 2 adds a closed fence yard, 3 a stone-brick ring. */
+    static void cabin(ServerLevel level, BlockPos door, int mode) {
+        int x = door.getX(), y = door.getY(), z = door.getZ();
+        var planks = Blocks.OAK_PLANKS.defaultBlockState();
+        for (int dx = -3; dx <= 3; dx++)
+            for (int dz = -6; dz <= 0; dz++) {
+                for (int dy = -1; dy <= 3; dy++) {
+                    boolean wall = Math.abs(dx) == 3 || dz == -6 || dz == 0;
+                    BlockPos p = new BlockPos(x + dx, y + dy, z + dz);
+                    if (dy == -1 || dy == 3) level.setBlock(p, planks, 3);
+                    else level.setBlock(p, wall ? planks : Blocks.AIR.defaultBlockState(), 3);
+                }
+            }
+        level.setBlock(door, Blocks.OAK_DOOR.defaultBlockState(), 3);
+        level.setBlock(door.above(), Blocks.OAK_DOOR.defaultBlockState().setValue(net.minecraft.world.level.block.DoorBlock.HALF, net.minecraft.world.level.block.state.properties.DoubleBlockHalf.UPPER), 3);
+        level.setBlock(door.south().below(), Blocks.OAK_STAIRS.defaultBlockState(), 3);
+        level.setBlock(door.south(), Blocks.OAK_STAIRS.defaultBlockState(), 3);
+        for (int dx : new int[]{-1, 1}) {
+            for (int dy = 0; dy <= 2; dy++) level.setBlock(new BlockPos(x + dx, y + dy, z + 3), Blocks.OAK_FENCE.defaultBlockState(), 3);
+        }
+        for (int dx = -2; dx <= 2; dx++)
+            for (int dz = 1; dz <= 3; dz++) level.setBlock(new BlockPos(x + dx, y + 3, z + dz), planks, 3);
+        if (mode >= 2)
+            for (int dx = -6; dx <= 6; dx++)
+                for (int dz = 6; dz <= 6; dz++) level.setBlock(new BlockPos(x + dx, y, z + dz), Blocks.OAK_FENCE.defaultBlockState(), 3);
+        if (mode == 3 || mode == 4) {
+            int rx = mode == 3 ? 7 : 10, rz = mode == 3 ? 7 : 10, rn = mode == 3 ? 9 : 12;
+            for (int dx = -rx; dx <= rx; dx++)
+                for (int dz = -rn; dz <= rz; dz++)
+                    if (Math.abs(dx) == rx || dz == -rn || dz == rz)
+                        for (int dy = -4; dy <= 8; dy++) level.setBlock(new BlockPos(x + dx, y + dy, z + dz), Blocks.STONE_BRICK_WALL.defaultBlockState(), 3);
+        }
+    }
+
     static int run(CommandSourceStack src, int x, int z, boolean keep, int viaX, int viaZ, int preload) {
         final boolean door = doorMode, commitTest = commitMode;
+        final int house = houseMode;
+        houseMode = 0;
         final int[] secondVia = via2;
         via2 = null;
         doorMode = false;
@@ -72,6 +110,7 @@ final class StakeTest {
                 if (door) {
                     level.setBlock(stakeRef[0], Blocks.OAK_DOOR.defaultBlockState(), 3);
                     level.setBlock(stakeRef[0].above(), Blocks.OAK_DOOR.defaultBlockState().setValue(net.minecraft.world.level.block.DoorBlock.HALF, net.minecraft.world.level.block.state.properties.DoubleBlockHalf.UPPER), 3);
+                    if (house > 0) cabin(level, stakeRef[0], house);
                     HousePaths.useDoor(level, stakeRef[0], null, net.minecraft.core.Direction.SOUTH);
                 } else {
                     level.setBlock(stakeRef[0], Stake.BLOCK.defaultBlockState(), 3);

@@ -163,13 +163,55 @@ public final class HousePaths {
         return pos;
     }
 
-    /** The cell outside a door where the path starts: the first of the three cells that way that is not a doorstep or a wall. */
-    static BlockPos startOutside(ServerLevel level, BlockPos anchor, Direction outside) {
-        for (int i = 1; i <= 3; i++) {
-            BlockPos p = anchor.relative(outside, i);
-            if (level.getBlockState(p).getCollisionShape(level, p).isEmpty() && !Retrofit.isCrafted(level.getBlockState(p.below()))) return p;
+    /** Open ground: the top block of the column is not built, a log, a stake or fluid, and not air (the void). */
+    private static boolean open(ServerLevel level, int x, int z, int floorY) {
+        int top = level.getHeight(Heightmap.Types.MOTION_BLOCKING_NO_LEAVES, x, z) - 1;
+        if (Math.abs(top - floorY) > 4) return false;
+        BlockState s = level.getBlockState(new BlockPos(x, top, z));
+        return !s.isAir() && !Retrofit.isCrafted(s) && !s.is(BlockTags.LOGS) && !s.is(BlockTags.LEAVES) && s.getFluidState().isEmpty() && !s.is(Stake.BLOCK);
+    }
+
+    /**
+     * Where a path from a door starts: the nearest open ground within 8 blocks that is not walled in (a roof over the
+     * porch, doorstep stairs, fence posts and a closed yard all close columns, like the search itself sees them).
+     * Prefers the side the player is on. Null when every open spot nearby is boxed in.
+     */
+    static BlockPos findStart(ServerLevel level, BlockPos anchor, Direction outside) {
+        int floorY = anchor.getY() - 1;
+        BlockPos best = null;
+        double bestScore = Double.MAX_VALUE;
+        for (int dx = -8; dx <= 8; dx++)
+            for (int dz = -8; dz <= 8; dz++) {
+                int x = anchor.getX() + dx, z = anchor.getZ() + dz;
+                if ((dx == 0 && dz == 0) || !open(level, x, z, floorY)) continue;
+                double score = dx * dx + dz * dz + (dx * outside.getStepX() + dz * outside.getStepZ() <= 0 ? 60 : 0);
+                if (score >= bestScore) continue;
+                if (!escapes(level, x, z, anchor, floorY)) continue;
+                bestScore = score;
+                best = new BlockPos(x, level.getHeight(Heightmap.Types.MOTION_BLOCKING_NO_LEAVES, x, z), z);
+            }
+        return best;
+    }
+
+    /** Can one walk from this open column over open columns (steps of at most one block) to 12 blocks from the door? Budget 600 columns. */
+    private static boolean escapes(ServerLevel level, int x0, int z0, BlockPos anchor, int floorY) {
+        java.util.ArrayDeque<int[]> queue = new java.util.ArrayDeque<>();
+        java.util.HashSet<Long> seen = new java.util.HashSet<>();
+        queue.add(new int[]{x0, z0, level.getHeight(Heightmap.Types.MOTION_BLOCKING_NO_LEAVES, x0, z0)});
+        seen.add(key(x0, z0));
+        int budget = 600;
+        while (!queue.isEmpty() && budget-- > 0) {
+            int[] c = queue.poll();
+            if (Math.max(Math.abs(c[0] - anchor.getX()), Math.abs(c[1] - anchor.getZ())) >= 12) return true;
+            for (int d = 0; d < 4; d++) {
+                int nx = c[0] + DX[d], nz = c[1] + DZ[d];
+                if (!seen.add(key(nx, nz)) || !open(level, nx, nz, floorY)) continue;
+                int h = level.getHeight(Heightmap.Types.MOTION_BLOCKING_NO_LEAVES, nx, nz);
+                if (Math.abs(h - c[2]) > 1) continue;
+                queue.add(new int[]{nx, nz, h});
+            }
         }
-        return anchor.relative(outside);
+        return false;
     }
 
     /** The stake item was used on a door or fence gate: survey, build or ask what to do with the built path. `outside`: the side the player is on. */
@@ -180,7 +222,17 @@ public final class HousePaths {
             keep(level, anchor, player);
             return;
         }
-        if (d.status != PathData.BUILT) d.start = startOutside(level, anchor, outside);
+        if (d.status != PathData.BUILT) {
+            d.start = findStart(level, anchor, outside);
+            if (d.start == null) {
+                PathRecords.of(level).drop(anchor);
+                tell(player, Component.translatable("countryroads.stake.door_boxed").withStyle(ChatFormatting.RED), false);
+                if (player == null) io.github.profetgit.countryroads.CountryRoads.LOG.info("CR-STAKE-DOORBOXED no open start within 8 blocks");
+                return;
+            }
+            int far = Math.max(Math.abs(d.start.getX() - anchor.getX()), Math.abs(d.start.getZ() - anchor.getZ()));
+            if (far > 3) tell(player, Component.translatable("countryroads.stake.start_far", far).withStyle(ChatFormatting.YELLOW), false);
+        }
         use(level, anchor, player);
     }
 

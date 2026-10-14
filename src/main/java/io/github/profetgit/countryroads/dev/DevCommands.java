@@ -188,6 +188,30 @@ public final class DevCommands {
                             StakeTest.doorMode = true;
                             return StakeTest.run(c.getSource(), IntegerArgumentType.getInteger(c, "x"), IntegerArgumentType.getInteger(c, "z"), false, Integer.MIN_VALUE, 0, StakeTest.WARM);
                         }))
+                    .then(Commands.literal("house")
+                        .executes(c -> {
+                            StakeTest.doorMode = true;
+                            StakeTest.houseMode = 1;
+                            return StakeTest.run(c.getSource(), IntegerArgumentType.getInteger(c, "x"), IntegerArgumentType.getInteger(c, "z"), false, Integer.MIN_VALUE, 0, StakeTest.WARM);
+                        }))
+                    .then(Commands.literal("houseyard")
+                        .executes(c -> {
+                            StakeTest.doorMode = true;
+                            StakeTest.houseMode = 2;
+                            return StakeTest.run(c.getSource(), IntegerArgumentType.getInteger(c, "x"), IntegerArgumentType.getInteger(c, "z"), false, Integer.MIN_VALUE, 0, StakeTest.WARM);
+                        }))
+                    .then(Commands.literal("housewalls")
+                        .executes(c -> {
+                            StakeTest.doorMode = true;
+                            StakeTest.houseMode = 3;
+                            return StakeTest.run(c.getSource(), IntegerArgumentType.getInteger(c, "x"), IntegerArgumentType.getInteger(c, "z"), false, Integer.MIN_VALUE, 0, StakeTest.WARM);
+                        }))
+                    .then(Commands.literal("housesealed")
+                        .executes(c -> {
+                            StakeTest.doorMode = true;
+                            StakeTest.houseMode = 4;
+                            return StakeTest.run(c.getSource(), IntegerArgumentType.getInteger(c, "x"), IntegerArgumentType.getInteger(c, "z"), false, Integer.MIN_VALUE, 0, StakeTest.WARM);
+                        }))
                     .then(Commands.literal("doorkeep")
                         .executes(c -> {
                             StakeTest.doorMode = true;
