@@ -5,6 +5,7 @@ import io.github.profetgit.countryroads.plan.ChunkMask;
 import io.github.profetgit.countryroads.plan.EdgePlan;
 import io.github.profetgit.countryroads.world.RoadColumns;
 import net.minecraft.core.BlockPos;
+import net.minecraft.core.Direction;
 import net.minecraft.tags.BlockTags;
 import net.minecraft.world.level.block.Blocks;
 import net.minecraft.world.level.block.LanternBlock;
@@ -455,76 +456,144 @@ public final class RoadPainter {
     /**
      * One column of a bridge. d: distance outside the road edge (negative on the road). The parapet runs on a
      * 4-connected line half a block outside the edge (like the fence line, so diagonals never double up); the deck lies
-     * inside it. Everything along the bridge is placed by u, the column's place in the crossing (0..runLen), so both
-     * sides of a row agree and piers, bents and lanterns face each other. Style, wood and arch rise are per crossing.
+     * inside it, and the next line out carries the outer details (cutwaters, corbels, vines). Everything along the
+     * bridge is placed by u, the column's place in the crossing (0..runLen), so both sides of a row agree and piers,
+     * bents and lanterns face each other. Style, wood, arch rise and water level are per crossing.
      */
     private void bridge(int x, int z, int top, boolean half, float d, ChunkMask m, int i, int ground) {
         long h = hash(x, z);
         float sl = m.slant[i] / 2;
         boolean rail = d >= 0 && d - 0.5f >= -sl && d - 0.5f < sl, deck = !rail && d - 0.5f < sl;
+        boolean outer = !rail && !deck && d - 0.5f < 3 * sl;
         // a stretch the painter turned into a bridge (fill too high) has no crossing data: a plain timber trestle
         boolean planned = m.kind[i] == EdgePlan.BRIDGE;
         float L = planned ? m.runLen[i] : 1000f, u = planned ? m.runU[i] : (float) m.s[i];
-        net.minecraft.core.Direction along = net.minecraft.core.Direction.getApproximateNearest(m.tx[i], 0, m.tz[i]);
-        boolean stone = m.bridge[i] == EdgePlan.STONE;
-        // fill too high beside a stone bridge's raised approach: a solid masonry abutment with a plain parapet
-        if (stone) stoneBridge(x, z, top, half, d, rail, deck, L, u, m.bridgeRise[i], along, ground, h, !planned);
-        else {
+        Direction along = Direction.getApproximateNearest(m.tx[i], 0, m.tz[i]);
+        Direction out = Direction.getApproximateNearest(m.ox[i], 0, m.oz[i]);
+        if (out.getAxis() == along.getAxis() || out.getAxis() == Direction.Axis.Y) out = along.getClockWise();
+        // the crossing's water level (its ground on a dry trestle): weathering grows up from it
+        int level = top - 2 - m.bridgeRise[i];
+        if (m.bridge[i] == EdgePlan.STONE) {
+            // fill too high beside a stone bridge's raised approach: a solid masonry abutment with a plain parapet
+            stoneBridge(x, z, top, half, d, rail, deck, outer, L, u, m.bridgeRise[i], along, out, Math.max(level, planned ? level : ground), ground, h, !planned);
+        } else {
             // the road's deck wood (spruce, oak, mangrove, dark oak, jungle) as a bridge pair when the crossing has none
             int pair = planned ? m.bridgeWood[i] : new int[]{2, 0, 6, 3, 4}[Math.clamp(m.wood[i], 0, 4)];
-            timberBridge(x, z, top, half, rail, deck, L, u, planned, Palette.bridgeWood(pair, false), Palette.bridgeWood(pair, true), along, ground, h);
+            timberBridge(x, z, top, half, rail, deck, outer, L, u, planned, Palette.bridgeWood(pair, false), Palette.bridgeWood(pair, true),
+                along, out, level, ground, h);
         }
     }
 
-    private void stoneBridge(int x, int z, int top, boolean half, float d, boolean rail, boolean deck, float L, float u, int rise,
-                             net.minecraft.core.Direction along, int ground, long h, boolean solid) {
+    /**
+     * How weathered a block of a bridge is: 0 dry, 1 mossy, 2 thick. Moss climbs from the water (or the ground) in a
+     * wavy line 1-4 blocks up, higher on shaded faces (north, under the arches), then thins out with height; dry stone
+     * above. Smooth noise along the face keeps it in patches, never a random sprinkle.
+     */
+    private static int moss(int x, int y, int z, int base, float shade) {
+        float line = base + 1f + shade + 2.8f * clump(x * 2 + 11, z * 2 - 7) / 1024f;
+        float above = y - line;
+        int r = (int) ((hash(x * 7 + y * 131, z * 13 - y * 17) >>> 22) & 1023);
+        if (above < -1.5f) return r < 820 ? 2 : 1;
+        if (above < 0) return r < 880 ? 1 : 0;
+        return r < (int) (360 * Math.exp(-above / 1.2)) ? 1 : 0;
+    }
+
+    private static int rnd(int x, int y, int z) {
+        return (int) ((hash(x * 31 + y * 97, z * 17 + y * 53) >>> 40) & 1023);
+    }
+
+    /** One bridge stone at (x, y, z) in its role, weathered from base. */
+    private void stone(int x, int y, int z, int role, int base, float shade) {
+        int mo = role == Palette.PAVING || role == Palette.FOOTING ? 0 : moss(x, y, z, base, shade);
+        set(x, y, z, Palette.bridgeStone(role, mo, rnd(x, y, z)));
+    }
+
+    private static BlockState stair(BlockState s, Direction facing, boolean upsideDown) {
+        return s.setValue(net.minecraft.world.level.block.StairBlock.FACING, facing)
+            .setValue(net.minecraft.world.level.block.StairBlock.HALF, upsideDown ? net.minecraft.world.level.block.state.properties.Half.TOP
+                : net.minecraft.world.level.block.state.properties.Half.BOTTOM);
+    }
+
+    /**
+     * Stone: dressed stone brick piers, arch rings and parapet; spandrel walls and abutments in rubble (cobble, stone,
+     * andesite); worn paving on the deck; cobble footings under water. Moss rises from the water line (see moss()).
+     */
+    private void stoneBridge(int x, int z, int top, boolean half, float d, boolean rail, boolean deck, boolean outer, float L, float u, int rise,
+                             Direction along, Direction out, int base, int ground, long h, boolean solid) {
         int spans = Math.max(1, Math.round(L / STONE_SPAN));
         float sp = L / spans;
         int j = Math.clamp(Math.round(u / sp), 0, spans);
-        boolean pier = !solid && Math.abs(u - j * sp) < 1f, abut = solid || u < 1.5f || u > L - 1.5f;
+        boolean inner = j > 0 && j < spans;
+        boolean pier = !solid && inner && Math.abs(u - j * sp) < 1f, abut = solid || u < 1.5f || u > L - 1.5f;
+        float north = out == Direction.NORTH ? 0.8f : out == Direction.SOUTH ? -0.3f : 0f;
+        int under = pier || abut ? ground : archUnder(u, sp, spans, rise, top);
         if (!rail && !deck) {
-            // cutwaters: piers stand a block proud of the parapet on both sides
-            if (pier && j > 0 && j < spans && d < 2.0f) {
-                for (int y = top - 2; y > ground && y > top - 64; y--) set(x, y, z, Palette.masonry(h + y));
-                set(x, top - 1, z, Blocks.STONE_BRICK_SLAB.defaultBlockState());
+            if (!outer) {
+                // a starling of rubble around each pier foot, under the water
+                if (!solid && inner && Math.abs(u - j * sp) < 1.5f && d < 2.6f)
+                    for (int y = ground + 1; y <= base && y < top - 2; y++) set(x, y, z, Palette.bridgeStone(Palette.FOOTING, 0, rnd(x, y, z)));
+                return;
+            }
+            if (pier) {
+                // cutwater: the pier stands a block proud of the parapet, its top sloping back toward the bridge
+                for (int y = ground + 1; y <= top - 2; y++) {
+                    if (y <= base) set(x, y, z, Palette.bridgeStone(Palette.FOOTING, 0, rnd(x, y, z)));
+                    else stone(x, y, z, Palette.DRESSED, base, north);
+                }
+                set(x, top - 1, z, stair(Palette.bridgeStair(moss(x, top - 1, z, base, north)), out.getOpposite(), false));
                 clear(x, top, top + 2, z);
+                return;
+            }
+            if (solid) return;
+            // corbels: a lip of upside-down stairs under the parapet, and ivy climbing the wall from the water
+            BlockState at = get(x, top, z);
+            if (at.isAir() || at.canBeReplaced()) set(x, top, z, stair(Palette.bridgeStair(0), out.getOpposite(), true));
+            if (clump(x * 3 + 5, z * 3 + 9) > 560) {
+                BlockState vine = Blocks.VINE.defaultBlockState().setValue(net.minecraft.world.level.block.VineBlock.getPropertyForFace(out.getOpposite()), true);
+                for (int y = Math.max(base + 1, abut ? base + 1 : under); y < top; y++) {
+                    if (moss(x, y, z, base, north + 0.5f) == 0 || !get(x, y, z).isAir()) break;
+                    set(x, y, z, vine);
+                }
             }
             return;
         }
-        set(x, top, z, Palette.masonry(h));
-        set(x, top - 1, z, Palette.masonry(h + 1));
+        boolean face = rail;
+        set(x, top, z, deck ? Palette.bridgeStone(Palette.PAVING, 0, rnd(x, top, z)) : Palette.bridgeStone(Palette.DRESSED, 0, rnd(x, top, z)));
         if (pier || abut) {
-            for (int y = top - 2; y > ground && y > top - 64; y--) set(x, y, z, Palette.masonry(h + y));
+            int role = pier ? Palette.DRESSED : Palette.RUBBLE;
+            for (int y = top - 1; y > ground && y > top - 64; y--) {
+                if (y <= base && !solid) set(x, y, z, Palette.bridgeStone(Palette.FOOTING, 0, rnd(x, y, z)));
+                else stone(x, y, z, role, base, face ? north : 0.6f);
+            }
         } else {
-            int under = archUnder(u, sp, spans, rise, top);
-            for (int y = top - 2; y >= under; y--) set(x, y, z, Palette.masonry(h + y));
+            // spandrel rubble over a dressed arch ring two blocks deep; the underside is shaded, so mossier
+            for (int y = top - 1; y >= under; y--)
+                stone(x, y, z, y <= under + 1 ? Palette.DRESSED : Palette.RUBBLE, base, y <= under + 1 ? 1.5f + (face ? north : 0) : face ? north : 0);
             // the underside steps up toward the crown: an upside-down stair turns each step into a curve
             float c = (Math.clamp((int) Math.floor(u / sp), 0, spans - 1) + 0.5f) * sp;
             float toward = u > c ? -1 : 1;
-            if (under < top - 1 && archUnder(u + toward, sp, spans, rise, top) > under) {
-                net.minecraft.core.Direction face = toward < 0 ? along : along.getOpposite();
-                set(x, under, z, Blocks.STONE_BRICK_STAIRS.defaultBlockState()
-                    .setValue(net.minecraft.world.level.block.StairBlock.FACING, face)
-                    .setValue(net.minecraft.world.level.block.StairBlock.HALF, net.minecraft.world.level.block.state.properties.Half.TOP));
-            }
+            if (under < top - 1 && archUnder(u + toward, sp, spans, rise, top) > under)
+                set(x, under, z, stair(Palette.bridgeStair(moss(x, under, z, base, 1.5f)), toward < 0 ? along : along.getOpposite(), true));
         }
         if (deck) {
             if (half) set(x, top + 1, z, Blocks.STONE_BRICK_SLAB.defaultBlockState());
             clear(x, top + (half ? 2 : 1), top + 4, z);
             return;
         }
-        // parapet with a slab coping; a taller pilaster over each pier and at both ends, every other one with a lantern
+        // parapet with a slab coping (rain-fed moss on a few); a taller pilaster over each pier and at both ends, every
+        // other one with a lantern
         int k = Math.clamp(Math.round(u / sp), 0, spans);
         boolean end = u < 1f || u > L - 1f;
         boolean pilaster = !solid && (end || Math.abs(u - k * sp) < 0.5f && k > 0 && k < spans);
-        set(x, top + 1, z, Palette.masonry(h >>> 3));
+        stone(x, top + 1, z, Palette.DRESSED, base, north);
+        int r = rnd(x, top + 2, z);
         if (pilaster) {
             set(x, top + 2, z, Blocks.CHISELED_STONE_BRICKS.defaultBlockState());
             boolean lamp = end || k % 2 == 0 || spans <= 2;
-            set(x, top + 3, z, lamp ? Blocks.LANTERN.defaultBlockState() : Blocks.STONE_BRICK_SLAB.defaultBlockState());
+            set(x, top + 3, z, lamp ? Blocks.LANTERN.defaultBlockState() : Palette.bridgeSlab(0, r));
             clear(x, top + 4, top + 4, z);
         } else {
-            set(x, top + 2, z, Blocks.STONE_BRICK_SLAB.defaultBlockState());
+            set(x, top + 2, z, Palette.bridgeSlab(r < 90 ? 1 : 0, r));
             clear(x, top + 3, top + 4, z);
         }
     }
@@ -538,22 +607,40 @@ public final class RoadPainter {
         return top - 1 - Math.round(r * (1 - (float) Math.sqrt(1 - q * q)));
     }
 
-    private void timberBridge(int x, int z, int top, boolean half, boolean rail, boolean deck, float L, float u, boolean planned,
-                              Palette.BridgeWood main, Palette.BridgeWood trim, net.minecraft.core.Direction along, int ground, long h) {
-        if (!rail && !deck) return;
+    /**
+     * Timber: plank deck (a few planks replaced in the darker trim wood over the years), trim stringers and cross
+     * beams, log posts at the bents with knee braces under the stringer, stone footings that are mossy at the water
+     * line, ivy climbing the posts from the water.
+     */
+    private void timberBridge(int x, int z, int top, boolean half, boolean rail, boolean deck, boolean outer, float L, float u, boolean planned,
+                              Palette.BridgeWood main, Palette.BridgeWood trim, Direction along, Direction out, int level, int ground, long h) {
         int bays = Math.max(1, Math.round((L - 1) / TIMBER_BAY));
         float step = (L - 1) / bays;
         int j = Math.clamp(Math.round((u - 0.5f) / step), 0, bays);
-        boolean bent = planned ? Math.abs(u - 0.5f - j * step) < 0.5f : Math.floorMod((int) Math.floor(u), 5) == 0;
+        float off = u - 0.5f - j * step;
+        boolean bent = planned ? Math.abs(off) < 0.5f : Math.floorMod((int) Math.floor(u), 5) == 0;
         boolean end = planned && (u < 1f || u > L - 1f);
-        net.minecraft.core.Direction.Axis alongAxis = along.getAxis(), across = alongAxis == net.minecraft.core.Direction.Axis.X
-            ? net.minecraft.core.Direction.Axis.Z : net.minecraft.core.Direction.Axis.X;
-        set(x, top, z, main.planks());
+        if (!rail && !deck) {
+            // ivy on the outer face of a post, up from the water
+            if (outer && planned && bent && clump(x * 3 + 5, z * 3 + 9) > 480) {
+                BlockState vine = Blocks.VINE.defaultBlockState().setValue(net.minecraft.world.level.block.VineBlock.getPropertyForFace(out.getOpposite()), true);
+                for (int y = level + 1; y < top; y++) {
+                    if (moss(x, y, z, level, 0.3f) == 0 || !get(x, y, z).isAir()) break;
+                    set(x, y, z, vine);
+                }
+            }
+            return;
+        }
+        Direction.Axis alongAxis = along.getAxis(), across = alongAxis == Direction.Axis.X ? Direction.Axis.Z : Direction.Axis.X;
+        set(x, top, z, deck && rnd(x, top, z) < 70 ? trim.planks() : main.planks());
         if (planned && (u < 1.5f || u > L - 1.5f) && top - 1 - ground <= 3) {
             // abutment: rubble down to the bank
-            for (int y = top - 1; y > ground; y--) set(x, y, z, Palette.rubble(h + y));
+            for (int y = top - 1; y > ground; y--) set(x, y, z, Palette.bridgeStone(Palette.FOOTING, 0, rnd(x, y, z)));
         } else if (rail) {
             set(x, top - 1, z, trim.stripped().setValue(RotatedPillarBlock.AXIS, alongAxis));
+            // knee braces either side of each bent, under the stringer
+            if (planned && !bent && Math.abs(off) < 1.5f && get(x, top - 2, z).isAir())
+                set(x, top - 2, z, stair(trim.stairs(), off > 0 ? along.getOpposite() : along, true));
         } else if (bent) {
             set(x, top - 1, z, trim.stripped().setValue(RotatedPillarBlock.AXIS, across));
         }
@@ -564,7 +651,7 @@ public final class RoadPainter {
         }
         if (bent) {
             // a post through the deck edge, from the bed to above the rail, footed in stone where it stands in water
-            timberPost(x, z, top + 2, main.log(), h);
+            timberPost(x, z, top + 2, main.log());
             boolean lamp = planned && (end || j % 2 == 0);
             if (lamp) set(x, top + 3, z, Blocks.LANTERN.defaultBlockState());
             clear(x, top + (lamp ? 4 : 3), top + 4, z);
@@ -574,16 +661,17 @@ public final class RoadPainter {
         }
     }
 
-    /** A log post from y down to the bed; the part under water and one block above it is cobblestone. */
-    private void timberPost(int x, int z, int y, BlockState log, long h) {
+    /** A log post from y down to the bed: stone under the water, thick moss on the block at the water line. */
+    private void timberPost(int x, int z, int y, BlockState log) {
         int waterTop = Integer.MIN_VALUE;
         for (int k = y; k > chunk.minY() + 1 && k > y - 64; k--) {
             BlockState here = get(x, k, z);
             if (PaintRules.solid(here) && here.getFluidState().isEmpty() && !here.is(BlockTags.PLANKS) && !here.is(BlockTags.LOGS)) break;
             if (waterTop == Integer.MIN_VALUE && !here.getFluidState().isEmpty()) waterTop = k;
-            set(x, k, z, waterTop != Integer.MIN_VALUE ? Palette.rubble(h + k) : log);
+            set(x, k, z, waterTop != Integer.MIN_VALUE ? Palette.bridgeStone(Palette.FOOTING, 0, rnd(x, k, z)) : log);
         }
-        if (waterTop != Integer.MIN_VALUE && waterTop + 1 < y - 3) set(x, waterTop + 1, z, Palette.rubble(h + waterTop));
+        if (waterTop != Integer.MIN_VALUE && waterTop + 1 < y - 3)
+            set(x, waterTop + 1, z, Palette.bridgeStone(Palette.RUBBLE, 2, rnd(x, waterTop + 1, z)));
     }
 
     /** Columns beside the road: rails, tunnel walls, banks, embankments, retaining walls. */

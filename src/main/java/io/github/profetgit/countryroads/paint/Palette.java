@@ -489,4 +489,58 @@ public final class Palette {
     private static BlockState named(String id) {
         return net.minecraft.core.registries.BuiltInRegistries.BLOCK.getValue(net.minecraft.resources.Identifier.fromNamespaceAndPath("minecraft", id)).defaultBlockState();
     }
+
+    /** Bridge stone roles: dressed (arch rings, piers, parapets), rubble (spandrel walls, abutments), paving (deck), footing (under water). */
+    static final int DRESSED = 0, RUBBLE = 1, PAVING = 2, FOOTING = 3;
+
+    /**
+     * Weathered bridge stone, one palette for every stone bridge. moss: 0 dry, 1 mossy, 2 thick (well below the moss
+     * line, where moss blocks show through). r: 0..1023.
+     */
+    static BlockState bridgeStone(int role, int moss, int r) {
+        if (role == PAVING) {
+            if (r < 460) return b(Blocks.STONE_BRICKS);
+            if (r < 620) return b(Blocks.CRACKED_STONE_BRICKS);
+            if (r < 780) return b(Blocks.COBBLESTONE);
+            if (r < 900) return b(Blocks.POLISHED_ANDESITE);
+            if (r < 980) return b(Blocks.ANDESITE);
+            return b(Blocks.STONE);
+        }
+        if (role == FOOTING) {
+            if (r < 520) return b(Blocks.MOSSY_COBBLESTONE);
+            if (r < 800) return b(Blocks.COBBLESTONE);
+            if (r < 920) return b(Blocks.ANDESITE);
+            return b(Blocks.MOSSY_STONE_BRICKS);
+        }
+        if (moss == 2) {
+            if (r < 240) return b(Blocks.MOSS_BLOCK);
+            if (r < 700) return role == DRESSED ? b(Blocks.MOSSY_STONE_BRICKS) : b(Blocks.MOSSY_COBBLESTONE);
+            return role == DRESSED ? b(Blocks.MOSSY_COBBLESTONE) : b(Blocks.MOSSY_STONE_BRICKS);
+        }
+        if (moss == 1) {
+            if (role == DRESSED) return r < 800 ? b(Blocks.MOSSY_STONE_BRICKS) : b(Blocks.MOSSY_COBBLESTONE);
+            return r < 720 ? b(Blocks.MOSSY_COBBLESTONE) : b(Blocks.MOSSY_STONE_BRICKS);
+        }
+        if (role == DRESSED) {
+            if (r < 700) return b(Blocks.STONE_BRICKS);
+            if (r < 880) return b(Blocks.CRACKED_STONE_BRICKS);
+            if (r < 960) return b(Blocks.STONE);
+            return b(Blocks.POLISHED_ANDESITE);
+        }
+        if (r < 340) return b(Blocks.COBBLESTONE);
+        if (r < 560) return b(Blocks.STONE);
+        if (r < 760) return b(Blocks.ANDESITE);
+        if (r < 900) return b(Blocks.STONE_BRICKS);
+        return b(Blocks.CRACKED_STONE_BRICKS);
+    }
+
+    /** Stairs and slabs in the bridge's dressed stone, mossy where the moss reaches. */
+    static BlockState bridgeStair(int moss) {
+        return b(moss > 0 ? Blocks.MOSSY_STONE_BRICK_STAIRS : Blocks.STONE_BRICK_STAIRS);
+    }
+
+    static BlockState bridgeSlab(int moss, int r) {
+        if (moss > 0) return b(Blocks.MOSSY_STONE_BRICK_SLAB);
+        return b(r < 900 ? Blocks.STONE_BRICK_SLAB : Blocks.ANDESITE_SLAB);
+    }
 }

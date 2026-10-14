@@ -21,6 +21,8 @@ public final class ChunkMask {
     /** Bridge crossing data (EdgePlan.bridge*), the column's place in its run (0 at the first edge, runLen at the last) and the road's direction. */
     public final byte[] bridge = new byte[256], bridgeWood = new byte[256], bridgeRise = new byte[256];
     public final float[] runU = new float[256], tx = new float[256], tz = new float[256];
+    /** Unit direction from the centreline out to the column (0 on the line). */
+    public final float[] ox = new float[256], oz = new float[256];
     public final byte[] earth = new byte[256];
     /** Which side of the centreline (+1 right, -1 left, walking from village a to b), and the wall/fence there (-1 none). */
     public final byte[] side = new byte[256], run = new byte[256];
@@ -149,6 +151,8 @@ public final class ChunkMask {
                                 if (i >= run.s0() && i <= run.s1() && (run.side() == 0 || run.side() == m.side[c])) m.run[c] = run.type();
                             m.s[c] = i + t;
                             m.slant[c] = dist > 1e-4f ? (Math.abs(qx) + Math.abs(qz)) / dist : 1f;
+                            m.ox[c] = dist > 1e-4f ? -qx / dist : 0;
+                            m.oz[c] = dist > 1e-4f ? -qz / dist : 0;
                             m.any = true;
                         }
                     }
