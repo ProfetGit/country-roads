@@ -155,7 +155,7 @@ final class StreetChecks {
     private static boolean roadBlock(BlockState st) {
         return st.is(Blocks.DIRT_PATH) || st.is(Blocks.COARSE_DIRT) || st.is(Blocks.PACKED_MUD) || st.is(Blocks.ROOTED_DIRT) || st.is(Blocks.GRAVEL)
             || st.is(Blocks.MOSS_BLOCK) || st.is(Blocks.SMOOTH_SANDSTONE) || st.is(Blocks.SMOOTH_RED_SANDSTONE) || st.is(Blocks.DIRT) || st.is(Blocks.GRASS_BLOCK)
-            || st.is(Blocks.PODZOL) || st.is(Blocks.MUD_BRICKS) || st.is(Blocks.STONE) || st.is(Blocks.COBBLESTONE) || st.is(Blocks.SAND) || st.is(Blocks.RED_SAND) || st.is(net.minecraft.tags.BlockTags.PLANKS) || st.is(net.minecraft.tags.BlockTags.LOGS) || st.is(net.minecraft.tags.BlockTags.SLABS) || st.is(net.minecraft.tags.BlockTags.STAIRS);
+            || st.is(Blocks.PODZOL) || st.is(Blocks.MUD_BRICKS) || st.is(Blocks.STONE) || st.is(Blocks.COBBLESTONE) || st.is(Blocks.SAND) || st.is(Blocks.RED_SAND) || st.is(net.minecraft.tags.BlockTags.PLANKS) || st.is(Blocks.ANDESITE) || st.is(Blocks.STONE_BRICKS) || st.is(Blocks.MOSSY_STONE_BRICKS) || st.is(Blocks.CRACKED_STONE_BRICKS) || st.is(Blocks.MOSSY_COBBLESTONE) || st.is(net.minecraft.tags.BlockTags.LOGS) || st.is(net.minecraft.tags.BlockTags.SLABS) || st.is(net.minecraft.tags.BlockTags.STAIRS);
     }
 
     /** Highest road-ish block within y0-4..y0+4 of the column, or MIN_VALUE. */

@@ -35,6 +35,9 @@ public final class RoadPainter {
     private static final BlockState AIR = Blocks.AIR.defaultBlockState();
     static final int MAX_FILL = 4, MAX_BANK = 5;
     public static final float BANK_REACH = 5f;
+    /** Cuts keep sloping back this far from the road edge (inside the mask's EdgePlan.REACH). */
+    public static final float CUT_REACH = 8.5f;
+    static final float CUT_SOIL = 1f, CUT_ROCK = 2f, CUT_WOBBLE = 0.8f;
     static final float VERGE_REACH = 4f;
     /** Chance (of 1024) of a pebble on a pebbly road column near the edge, and in the middle (about 1 in 9 and 1 in 34). */
     static final int PEBBLE_EDGE = 120, PEBBLE_MIDDLE = 30;
@@ -53,6 +56,10 @@ public final class RoadPainter {
     public static int paint(ChunkAccess chunk, ChunkMask m, java.util.List<io.github.profetgit.countryroads.world.StreetBands> streets,
                             java.util.function.IntBinaryOperator neighbourTop) {
         RoadColumns cols = RoadColumns.empty();
+        if (NO_PAINT) {
+            RoadColumns.store(chunk, cols);
+            return 0;
+        }
         Canvas canvas = Canvas.proto(chunk);
         int painted = m.any() ? paint(canvas, m, cols, neighbourTop) : 0;
         painted += StreetPainter.paint(canvas, streets, chunk.getPos().x(), chunk.getPos().z(), cols);
@@ -100,7 +107,8 @@ public final class RoadPainter {
                             // laid on the ground at the street end, easing to the planned height over the first CONN_EASE blocks
                             double u = Math.clamp(m.connD[i] / CONN_EASE, 0.0, 1.0);
                             if (u < 1) {
-                                double w = u * u * (3 - 2 * u);
+                                // linear: a smooth-step is half again as steep in its middle (a 6-block climb over 8 made a 2-block step)
+                                double w = u;
                                 int g = p.groundAt(x, z, top);
                                 top = (int) Math.round(g + (Math.round(m.y[i]) - g) * w);
                                 q = top;
@@ -472,6 +480,8 @@ public final class RoadPainter {
     public static final double CONN_EASE = 8;
 
     static final String DEBUG = System.getProperty("countryroads.debugColumn", "");
+    /** Tests only: plan everything but paint nothing (the land as it would be without roads, for CutCheck's reference). */
+    public static final boolean NO_PAINT = Boolean.getBoolean("countryroads.noPaint");
     static final boolean TRACE = Boolean.getBoolean("countryroads.traceClear");
 
     private String dump(int x, int z, int top) {
@@ -827,7 +837,16 @@ public final class RoadPainter {
 
     /** Columns beside the road: rails, tunnel walls, banks, embankments, retaining walls. */
     private void beside(int x, int z, int top, float d, ChunkMask m, int i) {
-        if (d >= BANK_REACH) return;
+        if (d >= CUT_REACH) return;
+        if (d >= BANK_REACH) {
+            // past the bank reach only a cut keeps going, until its slope meets the hillside (no sheer face at the reach)
+            if (m.kind[i] != EdgePlan.GROUND) return;
+            int ground = groundAt(x, z, top);
+            if (ground <= top + 1) return;
+            cutSlope(x, z, top, d, ground, m.y[i]);
+            settle(x, z, top, false);
+            return;
+        }
         besideShape(x, z, top, d, m, i);
         settle(x, z, top, false);
     }
@@ -926,14 +945,7 @@ public final class RoadPainter {
             set(x, top, z, natural);
             support(x, top - 1, z);
         } else if (ground > top + 1) {
-            // cut: a 1:1 bank up from the road edge (beyond the reach the hillside keeps its own face); measured from the
-            // road's smooth height, so the bank's steps follow the road instead of each column's rounding
-            int bank = Math.max(top, Math.round(roadY + Math.max(0f, d - 0.5f)));
-            if (ground > bank) {
-                clear(x, bank + 1, ground + 2, z);
-                set(x, bank, z, natural);
-                support(x, bank - 1, z);
-            }
+            cutSlope(x, z, top, d, ground, roadY);
         } else if (ground == top - 1 && d < 1.5f) {
             set(x, top, z, natural);
             set(x, top - 1, z, Blocks.DIRT.defaultBlockState());
@@ -948,6 +960,34 @@ public final class RoadPainter {
             }
         }
         feather(x, z, top, d, h);
+    }
+
+    /**
+     * A cut's slope up from the road edge: about 1 block per column in soil, 2 in rock (rock stands steeper), measured from
+     * the road's smooth height, with a smooth wobble of up to CUT_WOBBLE so the steps do not run in long straight lines.
+     * It goes out to CUT_REACH or until it meets the hillside. Rock keeps its own stone on top (soil gets grass), and
+     * the foot of a rock cut collects a little scree.
+     */
+    private void cutSlope(int x, int z, int top, float d, int ground, float roadY) {
+        if (tree(x, Math.min(top, ground) + 1, Math.max(top + 3, ground + 2), z)) return;
+        BlockState at = get(x, ground, z);
+        boolean rock = rock(at);
+        float rise = rock ? CUT_ROCK : CUT_SOIL;
+        float wobble = (clump(x * 3 + 11, z * 3 - 5) / 1024f - 0.5f) * 2 * CUT_WOBBLE;
+        int bank = Math.max(top, Math.round(roadY + rise * Math.max(0f, d - 0.5f) + wobble));
+        if (ground <= bank) return;
+        clear(x, bank + 1, ground + 2, z);
+        BlockState face = rock ? at : PaintRules.surfaceOf(at);
+        long h = hash(x * 7 - 1, z * 13 + 5);
+        if (rock && d < 2.5f && bank <= top + 1 && (h & 7) == 0) face = ((h >>> 3) & 1) == 0 ? Blocks.GRAVEL.defaultBlockState() : Blocks.COARSE_DIRT.defaultBlockState();
+        set(x, bank, z, face);
+        support(x, bank - 1, z);
+    }
+
+    static boolean rock(BlockState s) {
+        return s.is(Blocks.STONE) || s.is(Blocks.ANDESITE) || s.is(Blocks.GRANITE) || s.is(Blocks.DIORITE) || s.is(Blocks.TUFF)
+            || s.is(Blocks.DEEPSLATE) || s.is(Blocks.CALCITE) || s.is(Blocks.SANDSTONE) || s.is(Blocks.RED_SANDSTONE) || s.is(Blocks.TERRACOTTA)
+            || s.is(BlockTags.TERRACOTTA) || s.is(Blocks.SMOOTH_BASALT) || s.is(Blocks.PACKED_ICE);
     }
 
     /** The road frays into the verge: flush columns just outside the edge sometimes take an edge block. */

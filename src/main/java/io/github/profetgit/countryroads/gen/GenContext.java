@@ -111,7 +111,7 @@ public final class GenContext {
                 int top = (int) Math.floor(m.surface(i)), g = c.ground(region, x, z, top);
                 drop = pos.getY() >= Math.min(top, g + 1) && pos.getY() <= Math.max(top + 3, g + 2);
             }
-            if (!drop && c.track > 0 && in >= -RoadPainter.BANK_REACH && woody(state) && painted(region, x >> 4, z >> 4)) drop = true;
+            if (!drop && c.track > 0 && in >= -RoadPainter.CUT_REACH && woody(state) && painted(region, x >> 4, z >> 4)) drop = true;
         }
         if (DEBUG.equals(x + "," + z))
             io.github.profetgit.countryroads.CountryRoads.LOG.info("CR-TRACE write " + pos.toShortString() + " " + state + " drop=" + drop + " track=" + c.track,

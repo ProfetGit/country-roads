@@ -160,7 +160,9 @@ public final class Planner {
                     continue;
                 }
                 int a = i, b = i, gap = 0;
-                for (int k = i + 1; k < L && gap <= 6; k++) {
+                // a road that leaves the shared line for a few samples (it bulged more than 9 blocks off it) is still on
+                // it: two shared stretches with a short gap overlapped there at different heights
+                for (int k = i + 1; k < L && gap <= SHARE_GAP; k++) {
                     if (match[k] >= 0) {
                         b = k;
                         gap = 0;
@@ -188,12 +190,32 @@ public final class Planner {
                         pinY[best] = t.p.y[match[best]];
                         pinKind[best] = t.p.kind[match[best]];
                     }
+                    // every sample whose road overlaps the other one there shares its height too (two roads meeting at
+                    // a shallow angle overlapped for a few blocks 1.5 apart in height)
+                    for (int k = Math.max(1, a); k <= Math.min(L - 2, b); k++) {
+                        if (match[k] < 0 || !Float.isNaN(pinY[k]) || t.p.kind[match[k]] != EdgePlan.GROUND) continue;
+                        double[] q = line.get(k);
+                        double dx = t.p.x[match[k]] - q[0], dz = t.p.z[match[k]] - q[1];
+                        if (dx * dx + dz * dz < OVERLAP * OVERLAP) {
+                            pinY[k] = t.p.y[match[k]];
+                            pinKind[k] = EdgePlan.GROUND;
+                        }
+                    }
                     continue;
                 }
                 double[] offA = null, offB = null;
                 int j = match[a];
                 for (int k = a; k <= b; k++) {
                     if (match[k] >= 0) j = match[k];
+                    else {
+                        // inside a gap: walk the trunk evenly from the last matched sample to the next one
+                        int k1 = k;
+                        while (k1 < b && match[k1] < 0) k1++;
+                        int prev = k - 1;
+                        while (prev > a && match[prev] < 0) prev--;
+                        if (match[k1] >= 0 && match[prev] >= 0)
+                            j = (int) Math.round(match[prev] + (match[k1] - match[prev]) * (double) (k - prev) / (k1 - prev));
+                    }
                     double[] q = line.get(k);
                     if (k == a) offA = new double[]{t.p.x[j] - q[0], t.p.z[j] - q[1]};
                     if (k == b) offB = new double[]{t.p.x[j] - q[0], t.p.z[j] - q[1]};
@@ -220,6 +242,7 @@ public final class Planner {
             }
         }
 
+        if (!Boolean.getBoolean("countryroads.noNudge")) nudgeOffFlanks(line, pinY, connA, connB, trunks);
         int start = 0, end = line.size() - 1;
         if (ca == null) {
             while (start < end && fa.contains((int) Math.floor(line.get(start)[0]), (int) Math.floor(line.get(start)[1]), 1)) start++;
@@ -935,6 +958,7 @@ public final class Planner {
             else if (y[i] > ground[i] + 5) kind[i] = EdgePlan.BRIDGE;
         }
         dropShortRuns(kind, EdgePlan.TUNNEL, 16);
+        if (!Boolean.getBoolean("countryroads.noCutCap")) capCuts(y, ground, water, kind, pin, connA, connB);
         // trestle samples that joined a crossing above (the climb to a raised stone deck) are part of the bridge: the
         // whole crossing is level and the climb moves onto the ground before it. Until nothing changes: new trestle
         // samples from the last round joined two runs at different deck heights (a 3-block step inside one bridge)
@@ -1057,6 +1081,150 @@ public final class Planner {
                     if (kind[i] == EdgePlan.GROUND && Float.isNaN(pin[i])) y[i] = Math.max(y[i], y[i + 1] - (pinNear[i] || i < connA || i >= n - connB ? CONN_GRADE : MAX_GRADE));
             }
         return y;
+    }
+
+    /** Cross-section stations every NUDGE_STEP samples; shifts tried up to NUDGE_MAX blocks either way. */
+    /** Two roads whose centrelines are closer than this overlap (two half-widths of about 2). */
+    static final double OVERLAP = 4.5;
+    /** Samples off the shared line that still count as one shared stretch. */
+    static final int SHARE_GAP = 20;
+    static final int NUDGE_STEP = 8, NUDGE_MAX = 12, NUDGE_TRY = 3, NUDGE_KEEP = 24;
+    /** Station cost (squared blocks of hillside the cut slope cannot meet) above which shifts are tried at all. */
+    static final double NUDGE_FROM = 6;
+
+    /**
+     * Side-hill nudge: where the road runs along a slope steeper than its cut can meet, slide the centreline sideways
+     * (downhill, onto the flatter foot of the slope) by up to NUDGE_MAX blocks. Each station looks at the natural ground
+     * across the road; a shift is chosen by the hillside left standing above a 1.5-per-block cut slope, plus the drop
+     * a fill would need, plus a small cost per block moved. Shifts are smoothed along the road and eased in. Pinned
+     * (shared trunk) and connector samples never move, nor does anything near them; wet stations are not entered.
+     */
+    void nudgeOffFlanks(List<double[]> line, float[] pinY, int connA, int connB, List<Trunk> trunks) {
+        int L = line.size();
+        if (L < 4 * NUDGE_STEP) return;
+        int stations = L / NUDGE_STEP + 1;
+        double[] shift = new double[stations];
+        boolean[] locked = new boolean[stations];
+        boolean anyShift = false;
+        for (int k = 0; k < stations; k++) {
+            int i = Math.min(L - 1, k * NUDGE_STEP);
+            boolean lock = i < connA + NUDGE_STEP || i >= L - connB - NUDGE_STEP;
+            for (int j = Math.max(0, i - 2 * NUDGE_STEP); j <= Math.min(L - 1, i + 2 * NUDGE_STEP) && !lock; j++) lock = !Float.isNaN(pinY[j]);
+            // near another road (a trunk this one meets or runs beside) the line stays: both must meet at one height
+            double[] here0 = line.get(i);
+            for (Trunk t : trunks)
+                for (int q = 0; q < t.p.length() && !lock; q += 4)
+                    lock = Math.abs(t.p.x[q] - here0[0]) < NUDGE_KEEP && Math.abs(t.p.z[q] - here0[1]) < NUDGE_KEEP;
+            locked[k] = lock;
+            if (lock) continue;
+            double[] nrm = normal(line, i);
+            double[] p = line.get(i);
+            double here = flankCost(p[0], p[1], nrm);
+            if (here < NUDGE_FROM) continue;
+            double best = here, bestS = 0;
+            for (int sIdx = -NUDGE_MAX / NUDGE_TRY; sIdx <= NUDGE_MAX / NUDGE_TRY; sIdx++) {
+                int sft = sIdx * NUDGE_TRY;
+                if (sft == 0) continue;
+                double cx = p[0] + nrm[0] * sft, cz = p[1] + nrm[1] * sft;
+                if (terrain.sample((int) Math.floor(cx), (int) Math.floor(cz)).wet()) continue;
+                double c = flankCost(cx, cz, nrm) + 0.08 * sft * sft;
+                if (c < best - 1e-9 || c == best && Math.abs(sft) < Math.abs(bestS)) {
+                    best = c;
+                    bestS = sft;
+                }
+            }
+            shift[k] = bestS;
+            anyShift |= bestS != 0;
+        }
+        if (!anyShift) return;
+        // smooth: a little averaging, then no more than NUDGE_TRY of change between stations (no zig-zags)
+        double[] sm = new double[stations];
+        for (int k = 0; k < stations; k++) {
+            if (locked[k]) continue;
+            double sum = 0, w = 0;
+            for (int d = -2; d <= 2; d++) {
+                int q = k + d;
+                if (q < 0 || q >= stations) continue;
+                double wt = 3 - Math.abs(d);
+                sum += (locked[q] ? 0 : shift[q]) * wt;
+                w += wt;
+            }
+            sm[k] = sum / w;
+        }
+        for (int pass = 0; pass < 2; pass++) {
+            for (int k = 1; k < stations; k++) sm[k] = Math.clamp(sm[k], sm[k - 1] - NUDGE_TRY, sm[k - 1] + NUDGE_TRY);
+            for (int k = stations - 2; k >= 0; k--) sm[k] = Math.clamp(sm[k], sm[k + 1] - NUDGE_TRY, sm[k + 1] + NUDGE_TRY);
+            for (int k = 0; k < stations; k++) if (locked[k]) sm[k] = 0;
+        }
+        List<double[]> normals = new ArrayList<>(L);
+        for (int i = 0; i < L; i++) normals.add(normal(line, i));
+        for (int i = 0; i < L; i++) {
+            double u = i / (double) NUDGE_STEP;
+            int k0 = Math.min(stations - 1, (int) Math.floor(u)), k1 = Math.min(stations - 1, k0 + 1);
+            double t = u - k0;
+            t = t * t * (3 - 2 * t);
+            double off = sm[k0] + (sm[k1] - sm[k0]) * t;
+            if (off == 0 || !Float.isNaN(pinY[i]) || i < connA || i >= L - connB) continue;
+            double[] p = line.get(i), nrm = normals.get(i);
+            line.set(i, new double[]{p[0] + nrm[0] * off, p[1] + nrm[1] * off});
+        }
+    }
+
+    /** Unit normal (to the left of travel) at sample i, from the line around it. */
+    private static double[] normal(List<double[]> line, int i) {
+        int a = Math.max(0, i - 4), b = Math.min(line.size() - 1, i + 4);
+        double tx = line.get(b)[0] - line.get(a)[0], tz = line.get(b)[1] - line.get(a)[1], len = Math.hypot(tx, tz);
+        if (len < 1e-6) return new double[]{1, 0};
+        return new double[]{-tz / len, tx / len};
+    }
+
+    /**
+     * Earthworks a road centred at (cx, cz) would need across its width: on each side, hillside standing above a cut slope
+     * of 1.5 per block from the road edge (2 blocks out) and ground falling away further than a 4-block fill, squared
+     * and summed over two distances (5 and 9 blocks out). The road surface is taken as the ground at the centre.
+     */
+    double flankCost(double cx, double cz, double[] nrm) {
+        int g0 = terrain.sample((int) Math.floor(cx), (int) Math.floor(cz)).ground();
+        double cost = 0;
+        for (int side = -1; side <= 1; side += 2)
+            for (int d : new int[]{5, 9}) {
+                var smp = terrain.sample((int) Math.floor(cx + nrm[0] * side * d), (int) Math.floor(cz + nrm[1] * side * d));
+                if (smp.wet()) continue;
+                double rise = smp.ground() - g0 - 1.5 * (d - 2), drop = g0 - smp.ground() - 4 - (d - 2);
+                if (rise > 0) cost += rise * rise;
+                if (drop > 0) cost += 0.5 * drop * drop;
+            }
+        return cost;
+    }
+
+    /** Deepest cut (blocks below the natural ground) a ground road may sit in; deeper, short stretches climb instead. */
+    static final int MAX_CUT = 4;
+    /** Grade of the ramps that lift a road out of a would-be deep cut. */
+    static final float CUT_RAMP = 0.5f;
+
+    /**
+     * A ground road the grade limit left deep below the land (a short hump the profile could not climb, too short to be
+     * a tunnel) would be a slot with sheer walls: lift it to MAX_CUT below the ground and ramp the road up to it on both
+     * sides (raising only, never lowering, never moving pinned samples).
+     */
+    static void capCuts(float[] y, float[] ground, float[] water, byte[] kind, float[] pin, int connA, int connB) {
+        int n = y.length;
+        boolean any = false;
+        for (int i = 0; i < n; i++) {
+            if (kind[i] != EdgePlan.GROUND || !Float.isNaN(pin[i]) || water[i] > ground[i] || i < connA || i >= n - connB) continue;
+            float floor = ground[i] - MAX_CUT;
+            if (y[i] < floor) {
+                y[i] = floor;
+                any = true;
+            }
+        }
+        if (!any) return;
+        for (int pass = 0; pass < 2; pass++) {
+            for (int i = Math.max(1, connA); i < n - connB; i++)
+                if (Float.isNaN(pin[i]) && kind[i] == EdgePlan.GROUND) y[i] = Math.max(y[i], y[i - 1] - CUT_RAMP);
+            for (int i = n - 2 - connB; i >= connA; i--)
+                if (Float.isNaN(pin[i]) && kind[i] == EdgePlan.GROUND) y[i] = Math.max(y[i], y[i + 1] - CUT_RAMP);
+        }
     }
 
     /** Runs of `fill` shorter than max between two equal non-fill kinds take that kind. */

@@ -33,11 +33,14 @@ def main() -> int:
     ap.add_argument("--port", type=int, default=25591)
     ap.add_argument("--after", nargs="*", default=[], help="extra commands after pregen (e.g. 'countryroads staketest X Z keep')")
     ap.add_argument("--only-after", action="store_true", help="only the cameras the --after commands print (no road picks)")
+    ap.add_argument("--jar", help="this Country Roads jar instead of the build's (wg.py --jar)")
+    ap.add_argument("--regions", help="a saved world: copy its overworld region/entities/poi .mca files over the scene (look at a real world's chunks)")
+    ap.add_argument("--region-files", nargs="*", default=[], help="with --regions: only these files, e.g. r.-47.523.mca")
     a = ap.parse_args()
     x, z = a.at
     p = f"execute positioned {x} 80 {z} run countryroads"
     run = subprocess.run([sys.executable, str(ROOT / "dev/server/wg.py"), "--seed", a.seed, "--name", f"cap-{a.name}", "--port", str(a.port),
-                          *(["--mods", *a.mods] if a.mods else []), *[f"--jvm={j}" for j in a.jvm],
+                          *(["--mods", *a.mods] if a.mods else []), *[f"--jvm={j}" for j in a.jvm], *(["--jar", a.jar] if a.jar else []),
                           f"{p} pregen {a.radius + 128}", *a.after, *([] if a.only_after else [f"{p} shots {a.radius}"])], capture_output=True, text=True)
     print(run.stdout)
     shots = [] if a.only else [l.split()[1:] for l in run.stdout.splitlines() if l.startswith("CR-SHOT ") and "none" not in l]
@@ -49,6 +52,15 @@ def main() -> int:
     scene = HERE / ".work" / a.name / "world"
     shutil.rmtree(scene.parent, ignore_errors=True)
     shutil.copytree(world, scene)
+    if a.regions:
+        src = Path(a.regions) / "dimensions/minecraft/overworld"
+        dst = scene / "dimensions/minecraft/overworld"
+        for sub in ("region", "entities", "poi"):
+            for f in sorted((src / sub).glob("*.mca")):
+                if a.region_files and f.name not in a.region_files:
+                    continue
+                (dst / sub).mkdir(parents=True, exist_ok=True)
+                shutil.copy2(f, dst / sub / f.name)
     dp = scene / "datapacks/crcam"
     fn = dp / "data/crcam/function"
     fn.mkdir(parents=True)

@@ -84,9 +84,15 @@ public final class Router {
                 int ni = i + DX[nh], nj = j + DZ[nh];
                 if (Math.hypot(ni - ai, nj - aj) + Math.hypot(ni - bi, nj - bj) > limit) continue;
                 TerrainSampler.Sample next = sample(samples, ni, nj);
-                long step = trunk.test(cellKey(ni, nj))
-                    ? Math.round(((nh & 1) == 1 ? CELL * Math.sqrt(2) : CELL) * 10 * (0.6 + (Math.abs(t) == 0 ? 0 : Math.abs(t) == 1 ? 0.15 : 0.8)))
-                    : stepCost(here, next, (nh & 1) == 1, Math.abs(t));
+                long step;
+                if (trunk.test(cellKey(ni, nj))) {
+                    step = Math.round(((nh & 1) == 1 ? CELL * Math.sqrt(2) : CELL) * 10 * (0.6 + (Math.abs(t) == 0 ? 0 : Math.abs(t) == 1 ? 0.15 : 0.8)));
+                } else {
+                    // the cells either side of the one we move into: a road along a steep flank has to cut into it
+                    int ph = (nh + 2) & 7;
+                    TerrainSampler.Sample left = sample(samples, ni + DX[ph], nj + DZ[ph]), right = sample(samples, ni - DX[ph], nj - DZ[ph]);
+                    step = stepCost(here, next, (nh & 1) == 1, Math.abs(t), left, right, (ph & 1) == 1);
+                }
                 if (step < 0) continue;
                 long g = n.g + step;
                 long ns = state(ni, nj, nh);
@@ -113,8 +119,26 @@ public final class Router {
         return Math.round(Math.hypot(bi - i, bj - j) * CELL * 10);
     }
 
+    /**
+     * Side-hill cost. sideGrade: rise across the move between the cells either side (blocks per block); a road along a
+     * slope steeper than FLANK_FREE must cut into it. flank: how far the higher side stands above the road cell. Both are
+     * dry ground only (a lake beside the road is not a hill). Tuned so a mountain flank costs about as much as climbing a
+     * 0.3 grade, and a road prefers the flat ground at the mountain's foot.
+     */
+    static final double FLANK_FREE = 0.2, FLANK_W = 40, WALL_FREE = 10, WALL_W = 0.12;
+
+    static double flankFactor(int yb, TerrainSampler.Sample left, TerrainSampler.Sample right, boolean perpDiagonal) {
+        if (left.wet() || right.wet()) return 0;
+        double span = 2 * CELL * (perpDiagonal ? Math.sqrt(2) : 1);
+        double sideGrade = Math.abs(left.ground() - right.ground()) / span;
+        double over = Math.max(0, sideGrade - FLANK_FREE);
+        int wall = Math.max(left.ground(), right.ground()) - yb;
+        return FLANK_W * over * over + WALL_W * Math.max(0, wall - WALL_FREE);
+    }
+
     /** Integer cost of one move, -1 when impassable. Base 10 per block. */
-    private long stepCost(TerrainSampler.Sample a, TerrainSampler.Sample b, boolean diagonal, int turn) {
+    private long stepCost(TerrainSampler.Sample a, TerrainSampler.Sample b, boolean diagonal, int turn,
+                          TerrainSampler.Sample left, TerrainSampler.Sample right, boolean perpDiagonal) {
         double len = diagonal ? CELL * Math.sqrt(2) : CELL;
         if (b.ocean() && b.wet()) return -1;
         if (b.wet() && b.depth() > 10) return -1;
@@ -123,6 +147,7 @@ public final class Router {
         double grade = Math.abs(yb - ya) / len;
         double factor = 1 + 8 * grade + 60 * grade * grade;
         if (b.wet()) factor += b.river() ? 6 : 10 + b.depth();
+        else factor += flankFactor(yb, left, right, perpDiagonal);
         int top = terrain.maxY() - 12;
         if (yb > top) return -1;
         if (yb > top - 40) factor += (yb - (top - 40)) * 0.25;

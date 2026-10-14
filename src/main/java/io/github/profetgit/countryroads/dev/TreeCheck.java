@@ -158,6 +158,8 @@ final class TreeCheck {
                                                 long q = BlockPos.asLong(x + dx, y + dy, z + dz);
                         if (seen.contains(q)) continue;
                         BlockState s = get(x + dx, y + dy, z + dz);
+                        // logs built into planks, walls or fences are a building's beams (a pillager outpost), not a tree
+                        if (tree && !wood(s) && !s.is(BlockTags.LEAVES) && io.github.profetgit.countryroads.retro.Retrofit.isCrafted(s)) supported = true;
                         if (tree ? wood(s) : shroom(s)) {
                             seen.add(q);
                             todo.enqueue(q);
