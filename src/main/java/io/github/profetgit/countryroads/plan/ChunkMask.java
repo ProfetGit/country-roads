@@ -31,6 +31,7 @@ public final class ChunkMask {
         this.cz = cz;
         Arrays.fill(in, Float.NEGATIVE_INFINITY);
         Arrays.fill(run, (byte) -1);
+        Arrays.fill(connD, 99f);
     }
 
     public boolean any() {
@@ -44,6 +45,11 @@ public final class ChunkMask {
     public float in(int lx, int lz) {
         return in[idx(lx, lz)];
     }
+
+    /** Columns on or just beside a connector (road inside a village, from its street out to open ground). */
+    public final boolean[] conn = new boolean[256];
+    /** Samples between a connector column and its dock (the street end); 99 where the nearest segment is not a connector. */
+    public final float[] connD = new float[256];
 
     /** Whether the column carries a half step (a slab): only the row just below a one-block rise. */
     public final boolean[] half = new boolean[256];
@@ -111,8 +117,10 @@ public final class ChunkMask {
                         float hw = p.hw[i] + t * (p.hw[i + 1] - p.hw[i]);
                         float v = hw - dist;
                         int c = idx(lx, lz);
+                        if (v > -1.5f && (i < p.connA || i + 1 >= p.length() - p.connB)) m.conn[c] = true;
                         if (v > m.in[c]) {
                             m.in[c] = v;
+                            m.connD[c] = i < p.connA ? i + t : i + 1 >= p.length() - p.connB ? p.length() - 1 - (i + t) : 99f;
                             m.y[c] = p.y[i] + t * (p.y[i + 1] - p.y[i]);
                             int here = Math.round(m.y[c]);
                             m.half[c] = Math.max(Math.round(yAt(p, i + t + 1)), Math.round(yAt(p, i + t - 1))) > here;
@@ -153,8 +161,13 @@ public final class ChunkMask {
                                 m.in[idx(lx, lz)] = Float.NEGATIVE_INFINITY;
             for (VillageOracle.Footprint f : villages)
                 for (int lx = 0; lx < 16; lx++)
-                    for (int lz = 0; lz < 16; lz++)
-                        if (f.contains(bx + lx, bz + lz, 1)) m.in[idx(lx, lz)] = Float.NEGATIVE_INFINITY;
+                    for (int lz = 0; lz < 16; lz++) {
+                        int x = bx + lx, z = bz + lz, c = idx(lx, lz);
+                        if (!f.contains(x, z, 1)) continue;
+                        // a connector keeps its road through the village's ring, but never over a house or the street itself
+                        boolean keep = m.conn[c] && !f.inOther(x, z, 0) && !f.bands().contains(x, z);
+                        if (!keep) m.in[c] = Float.NEGATIVE_INFINITY;
+                    }
         }
         return m;
     }

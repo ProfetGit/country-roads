@@ -86,6 +86,19 @@ public final class Planner {
         }
         if (trunkA != null) ja = new int[]{(int) Math.floor(trunkA.p.x[trunkA.end()]), (int) Math.floor(trunkA.p.z[trunkA.end()])};
         if (trunkB != null) jb = new int[]{(int) Math.floor(trunkB.p.x[trunkB.end()]), (int) Math.floor(trunkB.p.z[trunkB.end()])};
+        Docking.Connector ca = null, cb = null;
+        if (trunkA == null) {
+            ca = Docking.connect(fa, e.b().pos().getX(), e.b().pos().getZ());
+            if (ca == null && !fa.bands().isEmpty())
+                io.github.profetgit.countryroads.CountryRoads.LOG.info("CR-DOCK-MISS village " + e.a().pos().toShortString() + " bands=" + fa.bands().size() + " pieces=" + fa.pieces().size() + " toward " + e.b().pos().toShortString());
+            if (ca != null) ja = new int[]{ca.exitX(), ca.exitZ()};
+        }
+        if (trunkB == null) {
+            cb = Docking.connect(fb, e.a().pos().getX(), e.a().pos().getZ());
+            if (cb == null && !fb.bands().isEmpty())
+                io.github.profetgit.countryroads.CountryRoads.LOG.info("CR-DOCK-MISS village " + e.b().pos().toShortString() + " bands=" + fb.bands().size() + " pieces=" + fb.pieces().size() + " toward " + e.a().pos().toShortString());
+            if (cb != null) jb = new int[]{cb.exitX(), cb.exitZ()};
+        }
         it.unimi.dsi.fastutil.longs.LongOpenHashSet trunkCells = new it.unimi.dsi.fastutil.longs.LongOpenHashSet();
         for (Trunk t : trunks)
             for (int i = 0; i < t.p.length(); i += 4)
@@ -102,6 +115,22 @@ public final class Planner {
         for (int k = 0; k < 4; k++) pts = chaikin(pts);
         List<double[]> line = resample(pts, 1.0);
         if (line.size() > straight * 2.3 + 64) return null;
+        int connA = 0, connB = 0;
+        if (ca != null) {
+            List<double[]> c = connectorLine(ca);
+            double[] first = line.getFirst();
+            while (c.size() > 1 && Math.hypot(c.getLast()[0] - first[0], c.getLast()[1] - first[1]) < 0.6) c.removeLast();
+            line.addAll(0, c);
+            connA = c.size();
+        }
+        if (cb != null) {
+            List<double[]> c = connectorLine(cb);
+            java.util.Collections.reverse(c);
+            double[] last = line.getLast();
+            while (c.size() > 1 && Math.hypot(c.getFirst()[0] - last[0], c.getFirst()[1] - last[1]) < 0.6) c.removeFirst();
+            line.addAll(c);
+            connB = c.size();
+        }
 
         // snap onto existing roads wherever this one runs alongside them: their exact line and heights
         int L = line.size();
@@ -168,10 +197,14 @@ public final class Planner {
         }
 
         int start = 0, end = line.size() - 1;
-        while (start < end && fa.contains((int) Math.floor(line.get(start)[0]), (int) Math.floor(line.get(start)[1]), 1)) start++;
-        while (end > start && fb.contains((int) Math.floor(line.get(end)[0]), (int) Math.floor(line.get(end)[1]), 1)) end--;
-        start = Math.max(0, start - 1);
-        end = Math.min(line.size() - 1, end + 1);
+        if (ca == null) {
+            while (start < end && fa.contains((int) Math.floor(line.get(start)[0]), (int) Math.floor(line.get(start)[1]), 1)) start++;
+            start = Math.max(0, start - 1);
+        }
+        if (cb == null) {
+            while (end > start && fb.contains((int) Math.floor(line.get(end)[0]), (int) Math.floor(line.get(end)[1]), 1)) end--;
+            end = Math.min(line.size() - 1, end + 1);
+        }
         int n = end - start + 1;
         if (n < 8) return null;
 
@@ -200,11 +233,16 @@ public final class Planner {
         if (Float.isNaN(pin[0]) && water[0] <= ground[0]) pin[0] = ground[0];
         if (Float.isNaN(pin[n - 1]) && water[n - 1] <= ground[n - 1]) pin[n - 1] = ground[n - 1];
         byte[] kind = new byte[n];
-        float[] y = profile(ground, water, river, kind, pin, kindPin);
+        float[] y = profile(ground, water, river, kind, pin, kindPin, connA, connB);
+        // inside a village the road is never a tunnel or a trestle: it climbs the slope on the ground like the street
+        for (int i = 0; i < n; i++)
+            if ((i < connA || i >= n - connB) && water[i] <= ground[i] && (kind[i] == EdgePlan.TUNNEL || kind[i] == EdgePlan.BRIDGE)) kind[i] = EdgePlan.GROUND;
         long seed = e.seed();
         double p1 = (seed & 0xffff) / 65536.0 * Math.PI * 2, p2 = ((seed >> 16) & 0xffff) / 65536.0 * Math.PI * 2;
         for (int i = 0; i < n; i++) hw[i] = (float) (1.75 + 0.35 * Math.sin(i * 0.045 + p1) + 0.18 * Math.sin(i * 0.13 + p2));
         EdgePlan plan = new EdgePlan(e, x, z, y, hw, kind, wood, System.nanoTime() - t0);
+        plan.connA = connA;
+        plan.connB = connB;
         plan.earth = new byte[n];
         for (int i = 0; i < n; i++) {
             int worst = 0;
@@ -234,11 +272,13 @@ public final class Planner {
         int n = p.length();
         if (n < 40) return;
         int dist = Math.round(n / 10f) * 10;
-        signEither(p, 4, 1, p.nameB, dist, p.nameA);
-        signEither(p, n - 5, -1, p.nameA, dist, p.nameB);
+        // posts count from where the connector leaves the village (the street end itself is inside it)
+        int a = p.connA, b = p.connB;
+        signEither(p, a + 4, 1, p.nameB, dist, p.nameA);
+        signEither(p, n - 1 - b - 4, -1, p.nameA, dist, p.nameB);
         for (int k = 1; k <= 3; k++) {
-            post(p, 10 * k, 1, k % 2 == 0 ? 1 : -1, EdgePlan.LAMP, "", "", "");
-            post(p, n - 1 - 10 * k, -1, k % 2 == 0 ? 1 : -1, EdgePlan.LAMP, "", "", "");
+            post(p, a + 10 * k, 1, k % 2 == 0 ? 1 : -1, EdgePlan.LAMP, "", "", "");
+            post(p, n - 1 - b - 10 * k, -1, k % 2 == 0 ? 1 : -1, EdgePlan.LAMP, "", "", "");
         }
         // orchard verge: a few blossoming fruit trees on one side of the last stretch into each village
         long oh = p.edge.seed() ^ 0x0C4A2DL;
@@ -247,8 +287,8 @@ public final class Planner {
             for (int k = 0; k < 4; k++) {
                 int i = 14 + 9 * k + (int) ((oh >>> (8 + k * 4 + end * 16)) & 3);
                 if (i >= n / 2) break;
-                if (end == 0) post(p, i, 1, side, EdgePlan.ORCHARD, "", "", "", 4.5f, 2);
-                else post(p, n - 1 - i, -1, side, EdgePlan.ORCHARD, "", "", "", 4.5f, 2);
+                if (end == 0) post(p, a + i, 1, side, EdgePlan.ORCHARD, "", "", "", 4.5f, 2);
+                else post(p, n - 1 - b - i, -1, side, EdgePlan.ORCHARD, "", "", "", 4.5f, 2);
             }
         }
         runs(p);
@@ -331,6 +371,7 @@ public final class Planner {
             int i = i0 + (shift % 2 == 0 ? shift / 2 : -(shift / 2 + 1)) * dir;
             if (i < 3 || i >= p.length() - 3 || p.kind[i] != EdgePlan.GROUND) continue;
             int a = i - 3, b = i + 3;
+            if (Math.abs(p.y[b] - p.y[a]) > 3.2f) continue;
             float tx = (p.x[b] - p.x[a]) * dir, tz = (p.z[b] - p.z[a]) * dir;
             float len = (float) Math.hypot(tx, tz);
             tx /= len;
@@ -344,9 +385,24 @@ public final class Planner {
             Direction toRoad = Direction.getApproximateNearest(-rx, 0, -rz);
             Direction along = Direction.getApproximateNearest(tx, 0, tz);
             if (along.getAxis() == toRoad.getAxis()) along = sideSign > 0 ? toRoad.getCounterClockWise() : toRoad.getClockWise();
+            if (type != EdgePlan.ORCHARD) {
+                // the arm reaches one column toward the road: never over a road column (a hanging lantern would be at head height)
+                double ax = x + toRoad.getStepX() + 0.5, az = z + toRoad.getStepZ() + 0.5;
+                boolean over = false;
+                for (int j = Math.max(0, i - 8); j <= Math.min(p.length() - 1, i + 8); j++) over |= Math.hypot(ax - p.x[j], az - p.z[j]) < p.hw[j] + 0.3;
+                if (over) continue;
+            }
             p.decor.add(new EdgePlan.Decor(x, z, p.y[i], type, toRoad, along, f1, f2, back));
             return;
         }
+    }
+
+    /** The connector's cells as a smooth line one block apart, from the dock to the exit. */
+    private static List<double[]> connectorLine(Docking.Connector c) {
+        List<double[]> pts = new ArrayList<>();
+        for (int[] cell : c.cells()) pts.add(new double[]{cell[0] + 0.5, cell[1] + 0.5});
+        for (int k = 0; k < 2; k++) pts = chaikin(pts);
+        return resample(pts, 1.0);
     }
 
     /** Outer street of the village toward the other village (centre of that street's box), else the village start. */
@@ -377,6 +433,13 @@ public final class Planner {
 
     /** pin: fixed heights (village streets, a shared trunk), NaN where free; pinKind: the trunk's kinds there. */
     static float[] profile(float[] ground, float[] water, boolean[] river, byte[] kind, float[] pin, byte[] pinKind) {
+        return profile(ground, water, river, kind, pin, pinKind, 0, 0);
+    }
+
+    /** Steepest grade (blocks per sample) of a connector inside a village: a step about every block and a third. */
+    static final float CONN_GRADE = 0.75f;
+
+    static float[] profile(float[] ground, float[] water, boolean[] river, byte[] kind, float[] pin, byte[] pinKind, int connA, int connB) {
         int n = ground.length;
         float[] base = new float[n];
         for (int i = 0; i < n; i++) {
@@ -426,11 +489,11 @@ public final class Planner {
             for (int i = 0; i < n; i++) if (!Float.isNaN(pin[i])) y[i] = pin[i];
             // a steeper grade is allowed on the last stretch into a village, so the road climbs into the street
             for (int i = 1; i < n; i++) {
-                float g = i < 24 || i > n - 25 ? 0.5f : MAX_GRADE;
+                float g = i < connA || i >= n - connB ? CONN_GRADE : i < 24 || i > n - 25 ? 0.5f : MAX_GRADE;
                 if (Float.isNaN(pin[i])) y[i] = Math.clamp(y[i], y[i - 1] - g, y[i - 1] + g);
             }
             for (int i = n - 2; i >= 0; i--) {
-                float g = i < 24 || i > n - 25 ? 0.5f : MAX_GRADE;
+                float g = i < connA || i >= n - connB ? CONN_GRADE : i < 24 || i > n - 25 ? 0.5f : MAX_GRADE;
                 if (Float.isNaN(pin[i])) y[i] = Math.clamp(y[i], y[i + 1] - g, y[i + 1] + g);
             }
         }

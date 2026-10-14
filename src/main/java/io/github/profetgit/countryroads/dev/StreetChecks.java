@@ -14,6 +14,7 @@ import net.minecraft.core.BlockPos;
 import net.minecraft.network.chat.Component;
 import net.minecraft.server.level.ServerLevel;
 import net.minecraft.world.level.block.Block;
+import net.minecraft.world.level.block.Blocks;
 import net.minecraft.world.level.block.state.BlockState;
 import net.minecraft.world.level.chunk.ChunkAccess;
 import net.minecraft.world.level.chunk.status.ChunkStatus;
@@ -146,6 +147,98 @@ final class StreetChecks {
                 report(src, "CR-STREETSNAP " + v.pos().toShortString() + " off=" + Long.toHexString(off) + " on=" + Long.toHexString(on) + " tops=" + tops);
             }
             report(src, "CR-STREETSNAP done villages=" + found.size());
+            return true;
+        });
+        return 1;
+    }
+
+    private static boolean roadBlock(BlockState st) {
+        return st.is(Blocks.DIRT_PATH) || st.is(Blocks.COARSE_DIRT) || st.is(Blocks.PACKED_MUD) || st.is(Blocks.ROOTED_DIRT) || st.is(Blocks.GRAVEL)
+            || st.is(Blocks.MOSS_BLOCK) || st.is(Blocks.SMOOTH_SANDSTONE) || st.is(Blocks.SMOOTH_RED_SANDSTONE) || st.is(Blocks.DIRT) || st.is(Blocks.GRASS_BLOCK)
+            || st.is(Blocks.PODZOL) || st.is(Blocks.MUD_BRICKS) || st.is(Blocks.STONE) || st.is(Blocks.COBBLESTONE) || st.is(Blocks.SAND) || st.is(Blocks.RED_SAND) || st.is(net.minecraft.tags.BlockTags.PLANKS) || st.is(net.minecraft.tags.BlockTags.LOGS) || st.is(net.minecraft.tags.BlockTags.SLABS) || st.is(net.minecraft.tags.BlockTags.STAIRS);
+    }
+
+    /** Highest road-ish block within y0-4..y0+4 of the column, or MIN_VALUE. */
+    private static int surfaceAt(ServerLevel level, int x, int z, int y0) {
+        ChunkAccess chunk = level.getChunkSource().getChunk(x >> 4, z >> 4, ChunkStatus.FULL, true);
+        for (int y = y0 + 4; y >= y0 - 4; y--) {
+            BlockState st = chunk.getBlockState(new BlockPos(x, y, z));
+            if (!st.isAir() && (st.isSolid() || st.is(Blocks.DIRT_PATH))) return y;
+        }
+        return Integer.MIN_VALUE;
+    }
+
+    /** Whether the point lies on a connector of another plan (roads that share a trunk leave the village over its connector). */
+    private static boolean sharesConnector(RoadNetwork n, io.github.profetgit.countryroads.plan.EdgePlan self, float x, float z) {
+        for (var q : n.readyPlans()) {
+            if (q == self) continue;
+            for (int i = 0; i < q.length(); i++) {
+                boolean conn = i < q.connA || i >= q.length() - q.connB;
+                if (conn && Math.abs(q.x[i] - x) <= 3 && Math.abs(q.z[i] - z) <= 3) return true;
+            }
+        }
+        return false;
+    }
+
+    /** CR-DOCK: where each planned road meets a village street: dock on the band, same height, a walkable run of road onto it. */
+    static int docks(CommandSourceStack src, int radius) {
+        ServerLevel level = src.getLevel();
+        RoadNetwork n = RoadNetwork.get(level);
+        if (n == null) return 0;
+        BlockPos at = BlockPos.containing(src.getPosition());
+        DevCommands.queue(() -> {
+            int ends = 0, ok = 0, noConn = 0;
+            for (var p : n.readyPlans()) {
+                for (int side = 0; side < 2; side++) {
+                    int conn = side == 0 ? p.connA : p.connB;
+                    var village = side == 0 ? p.edge.a() : p.edge.b();
+                    int i0 = side == 0 ? 0 : p.length() - 1;
+                    if (Math.abs(p.x[i0] - at.getX()) > radius || Math.abs(p.z[i0] - at.getZ()) > radius) continue;
+                    ends++;
+                    VillageOracle.Footprint fp = n.oracle.footprint(village);
+                    if (conn == 0 && sharesConnector(n, p, p.x[i0], p.z[i0])) {
+                        ends--;
+                        report(src, "CR-DOCK SHARED " + village.pos().toShortString() + " end=" + (side == 0 ? "A" : "B") + " rides another road's connector");
+                        continue;
+                    }
+                    if (conn == 0) {
+                        noConn++;
+                        report(src, "CR-DOCK " + village.pos().toShortString() + " end=" + (side == 0 ? "A" : "B") + " NO-CONNECTOR bands=" + fp.bands().size());
+                        continue;
+                    }
+                    int dx = (int) Math.floor(p.x[i0]), dz = (int) Math.floor(p.z[i0]);
+                    boolean inBand = fp.bands().contains(dx, dz);
+                    int dockY = surfaceAt(level, dx, dz, Math.round(p.y[i0]));
+                    int dy = dockY == Integer.MIN_VALUE ? 99 : dockY - Math.round(p.y[i0]);
+                    int maxStep = 0, nonRoad = 0, prev = Integer.MIN_VALUE, samples = 0;
+                    StringBuilder trail = new StringBuilder();
+                    int from = side == 0 ? 0 : p.length() - 1, dir = side == 0 ? 1 : -1;
+                    for (int k = 0; k < conn + 10; k++) {
+                        int i = from + dir * k;
+                        if (i < 0 || i >= p.length()) break;
+                        int x = (int) Math.floor(p.x[i]), z = (int) Math.floor(p.z[i]);
+                        int y = surfaceAt(level, x, z, Math.round(p.y[i]));
+                        if (y == Integer.MIN_VALUE) {
+                            nonRoad++;
+                            trail.append(' ').append(x).append(',').append(z).append(":none");
+                            continue;
+                        }
+                        ChunkAccess chunk = level.getChunkSource().getChunk(x >> 4, z >> 4, ChunkStatus.FULL, true);
+                        BlockState top = chunk.getBlockState(new BlockPos(x, y, z));
+                        trail.append(' ').append(x).append(',').append(z).append(':').append(y).append('/').append(top.getBlock().getDescriptionId().replace("block.minecraft.", ""))
+                            .append(k < conn ? "*" : "");
+                        if (!roadBlock(top)) nonRoad++;
+                        if (prev != Integer.MIN_VALUE) maxStep = Math.max(maxStep, Math.abs(y - prev));
+                        prev = y;
+                        samples++;
+                    }
+                    boolean pass = inBand && Math.abs(dy) <= 1 && maxStep <= 1 && nonRoad == 0;
+                    if (pass) ok++;
+                    report(src, "CR-DOCK " + (pass ? "PASS " : "FAIL ") + village.pos().toShortString() + " end=" + (side == 0 ? "A" : "B") + " conn=" + conn
+                        + " dockInBand=" + inBand + " dockDy=" + dy + " maxStep=" + maxStep + " nonRoad=" + nonRoad + " samples=" + samples + " planY0=" + Math.round(p.y[i0]) + " trail:" + trail);
+                }
+            }
+            report(src, "CR-DOCKS " + (ok == ends - noConn && noConn == 0 ? "PASS" : "FAIL") + " ends=" + ends + " ok=" + ok + " noConnector=" + noConn);
             return true;
         });
         return 1;

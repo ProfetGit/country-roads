@@ -135,6 +135,10 @@ final class RoadChecks {
                         boolean half = q - top >= 0.5;
                         int x = (cx << 4) + lx, z = (cz << 4) + lz;
                         cols[0]++;
+                        if (m.conn[c]) {
+                            sha.update(chunk.getBlockState(pos.set(x, top, z)).toString().getBytes());
+                            continue;
+                        }
                         BlockState surf = chunk.getBlockState(pos.set(x, top, z));
                         BlockState above = chunk.getBlockState(pos.set(x, top + 1, z));
                         boolean ok = isSurface(surf) && (above.getBlock() instanceof SlabBlock || above.isAir() || above.is(Blocks.STONE_BUTTON))
@@ -175,7 +179,7 @@ final class RoadChecks {
     }
 
     private static void breaks(ChunkMask m, int c, ChunkMask m2, int c2, long[] breaks, long[] steps) {
-        if (m2.in[c2] < 0) return;
+        if (m2.in[c2] < 0 || m.conn[c] || m2.conn[c2]) return;
         double d = Math.abs(m.surface(c) - m2.surface(c2));
         if (d > 1) breaks[0]++;
         else if (d == 1) steps[0]++;
@@ -475,14 +479,17 @@ final class RoadChecks {
                     if (!mask.any()) continue;
                     var chunk = (net.minecraft.world.level.chunk.LevelChunk) level.getChunk(cx, cz);
                     var cols = ((net.fabricmc.fabric.api.attachment.v1.AttachmentTarget) chunk).getAttached(io.github.profetgit.countryroads.world.RoadColumns.TYPE);
+                    var streets = n.streets(cx, cz);
                     for (int lz = 0; lz < 16; lz++)
                         for (int lx = 0; lx < 16; lx++) {
                             int c = ChunkMask.idx(lx, lz);
                             boolean plan = mask.in[c] >= 0;
                             boolean have = cols != null && cols.road(lx, lz);
+                            boolean street = false;
+                            for (var b : streets) street |= b.contains((cx << 4) + lx, (cz << 4) + lz);
                             if (plan) planned++;
                             if (have) saved++;
-                            if (plan != have) mismatch++;
+                            if (plan != have && !(street && have)) mismatch++;
                             int x = (cx << 4) + lx, z = (cz << 4) + lz;
                             int y = level.getHeight(net.minecraft.world.level.levelgen.Heightmap.Types.MOTION_BLOCKING_NO_LEAVES, x, z);
                             var mobs = level.getChunkSource().getGenerator().getMobsAt(level, level.structureManager(), net.minecraft.world.entity.MobCategory.MONSTER, new BlockPos(x, y, z)).unwrap();

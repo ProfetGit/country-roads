@@ -53,6 +53,7 @@ public final class StreetPainter {
                     Palette.Surface pal = Palette.surface(canvas.biome(x, y, z));
                     BlockState next = Palette.surface(pal, band.edge(x, z) == 0 ? 0.3f : 1f, RoadPainter.hash(x, z), here, true);
                     if (next.getBlock() != here.getBlock()) canvas.set(pos.set(x, y, z), next);
+                    if (cols != null) cols.set(lx, lz, true);
                     painted++;
                 }
         } finally {

@@ -32,6 +32,8 @@ public final class EdgePlan {
     public net.minecraft.resources.Identifier camp;
     public java.util.List<net.minecraft.world.level.levelgen.structure.BoundingBox> campBoxes = java.util.List.of();
     public String nameA = "", nameB = "";
+    /** Samples at the start (a) and end (b) that run inside the village, from its street (the dock) out to open ground. */
+    public int connA, connB;
 
     public static final byte SIGN = 0, LAMP = 1, ORCHARD = 2;
     /** Earthworks per sample: the largest cut or fill (blocks) within 6 samples; 99 on bridges, boardwalks, tunnels. */

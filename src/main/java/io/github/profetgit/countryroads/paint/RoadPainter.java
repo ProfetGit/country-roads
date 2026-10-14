@@ -61,8 +61,11 @@ public final class RoadPainter {
         int painted = 0;
         GenContext.bypass(true);
         try {
+            int[] ctop = new int[256];
+            java.util.Arrays.fill(ctop, Integer.MIN_VALUE);
             // the road first, then banks and walls beside it (they read the finished road columns)
             for (int pass = 0; pass < 2; pass++) {
+                if (pass == 1) p.evenConnector(m, ctop);
                 for (int lz = 0; lz < 16; lz++) {
                     for (int lx = 0; lx < 16; lx++) {
                         int i = ChunkMask.idx(lx, lz);
@@ -72,7 +75,20 @@ public final class RoadPainter {
                         int top = (int) Math.floor(q);
                         if (top <= canvas.minY() + 4 || top >= canvas.maxY() - 8) continue;
                         int x = (m.cx << 4) + lx, z = (m.cz << 4) + lz;
+                        // a connector inside a village is laid on the ground, like the street it joins (the planner's ground
+                        // estimate misses the village's own terrain shaping by a block or two)
+                        if (m.conn[i] && m.kind[i] == EdgePlan.GROUND) {
+                            // laid on the ground at the street end, easing to the planned height over the first CONN_EASE blocks
+                            double u = Math.clamp(m.connD[i] / CONN_EASE, 0.0, 1.0);
+                            if (u < 1) {
+                                double w = u * u * (3 - 2 * u);
+                                int g = p.groundAt(x, z, top);
+                                top = (int) Math.round(g + (Math.round(m.y[i]) - g) * w);
+                                q = top;
+                            }
+                        }
                         if (pass == 0 && in >= 0) {
+                            if (m.conn[i] && m.kind[i] == EdgePlan.GROUND) ctop[i] = top;
                             p.road(x, z, top, q - top >= 0.5, in, m, i);
                             p.settle(x, z, top, true);
                             cols.set(lx, lz, m.kind[i] != EdgePlan.TUNNEL);
@@ -88,6 +104,29 @@ public final class RoadPainter {
             GenContext.bypass(false);
         }
         return painted;
+    }
+
+    /** A connector eased from the ground can still meet a cliff: raise the lower column of any two-block step (inside this chunk). */
+    private void evenConnector(ChunkMask m, int[] ctop) {
+        int[][] dirs = {{1, 0}, {-1, 0}, {0, 1}, {0, -1}};
+        for (int round = 0; round < 4; round++) {
+            boolean changed = false;
+            for (int lz = 0; lz < 16; lz++)
+                for (int lx = 0; lx < 16; lx++) {
+                    int i = ChunkMask.idx(lx, lz);
+                    if (ctop[i] == Integer.MIN_VALUE) continue;
+                    for (int[] d : dirs) {
+                        int nx = lx + d[0], nz = lz + d[1];
+                        if (nx < 0 || nx > 15 || nz < 0 || nz > 15) continue;
+                        int j = ChunkMask.idx(nx, nz);
+                        if (ctop[j] == Integer.MIN_VALUE || ctop[j] - ctop[i] < 2) continue;
+                        ctop[i] = ctop[j] - 1;
+                        road((m.cx << 4) + lx, (m.cz << 4) + lz, ctop[i], false, m.in[i], m, i);
+                        changed = true;
+                    }
+                }
+            if (!changed) break;
+        }
     }
 
     private void decor(EdgePlan.Decor d, ChunkMask m) {
@@ -297,6 +336,9 @@ public final class RoadPainter {
             if (!get(x, y, z).isAir()) set(x, y, z, AIR);
         }
     }
+
+    /** Blocks over which a connector eases from the ground at its street end to the road's planned height. */
+    static final double CONN_EASE = 8;
 
     static final String DEBUG = System.getProperty("countryroads.debugColumn", "");
     static final boolean TRACE = Boolean.getBoolean("countryroads.traceClear");

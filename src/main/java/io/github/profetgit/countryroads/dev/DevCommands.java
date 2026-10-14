@@ -106,6 +106,8 @@ public final class DevCommands {
                 .then(Commands.argument("radius", IntegerArgumentType.integer(16, 4000)).executes(c -> StreetChecks.streets(c.getSource(), IntegerArgumentType.getInteger(c, "radius")))))
             .then(Commands.literal("streetsnap")
                 .then(Commands.argument("radius", IntegerArgumentType.integer(16, 4000)).executes(c -> StreetChecks.snap(c.getSource(), IntegerArgumentType.getInteger(c, "radius")))))
+            .then(Commands.literal("docks")
+                .then(Commands.argument("radius", IntegerArgumentType.integer(16, 4000)).executes(c -> StreetChecks.docks(c.getSource(), IntegerArgumentType.getInteger(c, "radius")))))
             .then(Commands.literal("decor")
                 .then(Commands.argument("radius", IntegerArgumentType.integer(16, 4000)).executes(c -> RoadChecks.decor(c.getSource(), IntegerArgumentType.getInteger(c, "radius")))))
             .then(Commands.literal("perks")

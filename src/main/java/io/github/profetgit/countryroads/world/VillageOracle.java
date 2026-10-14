@@ -39,9 +39,16 @@ public final class VillageOracle {
     }
 
     /** Piece boxes of a generated village; streets are the jigsaw pieces whose template path has "/streets/". */
-    public record Footprint(List<BoundingBox> pieces, List<BoundingBox> streets, StreetBands bands) {
+    public record Footprint(List<BoundingBox> pieces, List<BoundingBox> streets, StreetBands bands, List<BoundingBox> others) {
         public boolean contains(int x, int z, int inflate) {
             for (BoundingBox b : pieces)
+                if (x >= b.minX() - inflate && x <= b.maxX() + inflate && z >= b.minZ() - inflate && z <= b.maxZ() + inflate) return true;
+            return false;
+        }
+
+        /** Inside a house, farm, well or other non-street piece box (street and terminator boxes do not count). */
+        public boolean inOther(int x, int z, int inflate) {
+            for (BoundingBox b : others)
                 if (x >= b.minX() - inflate && x <= b.maxX() + inflate && z >= b.minZ() - inflate && z <= b.maxZ() + inflate) return true;
             return false;
         }
@@ -145,6 +152,7 @@ public final class VillageOracle {
             List<BoundingBox> pieces = new ArrayList<>();
             List<BoundingBox> streets = new ArrayList<>();
             List<PoolElementStructurePiece> bandPieces = new ArrayList<>();
+            List<BoundingBox> others = new ArrayList<>();
             var holder = level.registryAccess().lookupOrThrow(net.minecraft.core.registries.Registries.STRUCTURE).get(v.structure());
             if (holder.isPresent()) {
                 Structure structure = holder.get().value();
@@ -157,11 +165,12 @@ public final class VillageOracle {
                         String el = pe.getElement().toString();
                         if (el.contains("/streets/")) streets.add(p.getBoundingBox());
                         if (el.contains("/streets/") || el.contains("/terminators/")) bandPieces.add(pe);
-                    }
+                        else others.add(p.getBoundingBox());
+                    } else others.add(p.getBoundingBox());
                 }
             }
             if (pieces.isEmpty()) pieces.add(new BoundingBox(v.pos().getX() - 8, 0, v.pos().getZ() - 8, v.pos().getX() + 8, 0, v.pos().getZ() + 8));
-            return new Footprint(List.copyOf(pieces), List.copyOf(streets), jigsaw(() -> StreetBands.of(level.getStructureTemplateManager(), bandPieces)));
+            return new Footprint(List.copyOf(pieces), List.copyOf(streets), jigsaw(() -> StreetBands.of(level.getStructureTemplateManager(), bandPieces)), List.copyOf(others));
         });
     }
 
