@@ -716,43 +716,31 @@ public final class RoadPainter {
         }
     }
 
-    /** Chances (of 1024) of a campfire post on a walkway edge column and of a pile under a walkway column. */
-    static final int WALKWAY_POST = 230, WALKWAY_PILE = 150;
-
     /**
-     * A tiny walkway over shallow still water (the boardwalk kind), all spruce, just above the water: a deck of bottom
-     * slabs edged by closed trapdoors lying flat, unlit campfires here and there on the edges as stubby posts and
-     * waterlogged ones under the deck as piles. Posts and piles are scattered per column (never two posts side by side
-     * along an edge), not in matching rows: the user wanted it irregular. The deck sits on the planned surface.
+     * A tiny walkway over shallow still water (the boardwalk kind), after the user's own build (tinybridge.litematic):
+     * one layer of flat spruce pieces just above the water, following the road's line, each column a spruce bottom slab
+     * (60%), a closed spruce trapdoor lying flat in any direction (27%) or an unlit campfire (13%); no rails, posts or
+     * piles. Columns just outside the road edge are paved about half the time, so the edges are ragged like the build's.
      */
     private void walkway(int x, int z, int top, float d, ChunkMask m, int i) {
-        float sl = m.slant[i] / 2;
-        boolean rail = d >= 0 && d - 0.5f >= -sl && d - 0.5f < sl, deck = !rail && d - 0.5f < sl;
-        int water = top - 1;
-        if (!rail && !deck) {
-            lilyPad(x, z, water);
+        long h = hash(x * 3 + 17, z * 5 - 29);
+        boolean edge = d >= 0 && d < 1f;
+        if (d >= 0 && !(edge && ((h >>> 50) & 1023) < 470)) {
+            lilyPad(x, z, top - 1);
             return;
         }
-        Direction along = Direction.getApproximateNearest(m.tx[i], 0, m.tz[i]);
-        // a post here unless the edge column just before it (along the walkway) drew one too
-        boolean post = rail && walkwayPost(x, z) && !walkwayPost(x - along.getStepX(), z - along.getStepZ());
-        BlockState campfire = Blocks.CAMPFIRE.defaultBlockState().setValue(net.minecraft.world.level.block.CampfireBlock.LIT, false)
-            .setValue(net.minecraft.world.level.block.CampfireBlock.FACING, Direction.from2DDataValue((int) ((hash(x, z) >>> 7) & 3)));
-        // piles under the deck where the water is (a campfire holds water like a slab); always under a post
-        boolean pile = post || (int) ((hash(x * 5 + 3, z * 3 - 7) >>> 20) & 1023) < WALKWAY_PILE;
-        if (pile && !get(x, water, z).getFluidState().isEmpty())
-            set(x, water, z, campfire.setValue(net.minecraft.world.level.block.CampfireBlock.WATERLOGGED, true));
-        if (deck) set(x, top, z, Blocks.SPRUCE_SLAB.defaultBlockState());
-        else if (post) set(x, top, z, campfire);
-        else set(x, top, z, Blocks.SPRUCE_TRAPDOOR.defaultBlockState()
-            .setValue(net.minecraft.world.level.block.TrapDoorBlock.FACING, along)
+        int r = (int) ((h >>> 20) & 1023);
+        Direction facing = Direction.from2DDataValue((int) ((h >>> 40) & 3));
+        BlockState piece;
+        if (r < 615) piece = Blocks.SPRUCE_SLAB.defaultBlockState();
+        else if (r < 890) piece = Blocks.SPRUCE_TRAPDOOR.defaultBlockState()
+            .setValue(net.minecraft.world.level.block.TrapDoorBlock.FACING, facing)
             .setValue(net.minecraft.world.level.block.TrapDoorBlock.OPEN, false)
-            .setValue(net.minecraft.world.level.block.TrapDoorBlock.HALF, net.minecraft.world.level.block.state.properties.Half.BOTTOM));
+            .setValue(net.minecraft.world.level.block.TrapDoorBlock.HALF, net.minecraft.world.level.block.state.properties.Half.BOTTOM);
+        else piece = Blocks.CAMPFIRE.defaultBlockState().setValue(net.minecraft.world.level.block.CampfireBlock.LIT, false)
+            .setValue(net.minecraft.world.level.block.CampfireBlock.FACING, facing);
+        set(x, top, z, piece);
         clear(x, top + 1, top + 3, z);
-    }
-
-    private static boolean walkwayPost(int x, int z) {
-        return (int) ((hash(x * 11 - 3, z * 7 + 5) >>> 30) & 1023) < WALKWAY_POST;
     }
 
     /** Lowest masonry block under the deck at u: a flattened round arch between piers, crown one block under the deck. */
