@@ -27,6 +27,9 @@ public interface Canvas {
 
     int minY();
 
+    /** First free y of the world surface heightmap at this column (the top solid block is one below). */
+    int surface(int x, int z);
+
     int maxY();
 
     /** Called before a log in the road's way is removed: a live canvas fells the whole tree. */
@@ -61,6 +64,10 @@ public interface Canvas {
                 return chunk.getMinY();
             }
 
+            public int surface(int x, int z) {
+                return chunk.getHeight(net.minecraft.world.level.levelgen.Heightmap.Types.WORLD_SURFACE_WG, x & 15, z & 15);
+            }
+
             public int maxY() {
                 return chunk.getMaxY();
             }
@@ -92,6 +99,10 @@ public interface Canvas {
 
             public int minY() {
                 return level.getMinY();
+            }
+
+            public int surface(int x, int z) {
+                return level.getHeight(net.minecraft.world.level.levelgen.Heightmap.Types.WORLD_SURFACE_WG, x, z);
             }
 
             public int maxY() {

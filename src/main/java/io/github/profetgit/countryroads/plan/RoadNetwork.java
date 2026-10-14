@@ -262,6 +262,23 @@ public final class RoadNetwork {
         return m;
     }
 
+    /** Street bands of the villages whose streets can reach this chunk (empty when there are none or the feature is off). */
+    public List<io.github.profetgit.countryroads.world.StreetBands> streets(int cx, int cz) {
+        if (!io.github.profetgit.countryroads.paint.StreetPainter.ENABLED) return List.of();
+        List<io.github.profetgit.countryroads.world.StreetBands> out = new ArrayList<>();
+        int x0 = cx << 4, z0 = cz << 4;
+        for (var v : oracle.find(cx - 12, cz - 12, cx + 12, cz + 12)) {
+            VillageOracle.Footprint f = oracle.footprint(v);
+            if (f.bands().isEmpty()) continue;
+            for (var b : f.pieces())
+                if (b.maxX() >= x0 && b.minX() <= x0 + 15 && b.maxZ() >= z0 && b.minZ() <= z0 + 15) {
+                    out.add(f.bands());
+                    break;
+                }
+        }
+        return out;
+    }
+
     private static boolean hasDecorOrCamp(EdgePlan p, int cx, int cz) {
         long key = ChunkPos.pack(cx, cz);
         for (EdgePlan.Decor d : p.decor) if (d.chunk() == key) return true;

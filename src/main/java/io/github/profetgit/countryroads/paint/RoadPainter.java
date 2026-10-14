@@ -46,9 +46,11 @@ public final class RoadPainter {
     }
 
     /** Worldgen: paints a generating chunk and records its road columns (empty too: "this chunk was handled"). */
-    public static int paint(ChunkAccess chunk, ChunkMask m) {
+    public static int paint(ChunkAccess chunk, ChunkMask m, java.util.List<io.github.profetgit.countryroads.world.StreetBands> streets) {
         RoadColumns cols = RoadColumns.empty();
-        int painted = m.any() ? paint(Canvas.proto(chunk), m, cols) : 0;
+        Canvas canvas = Canvas.proto(chunk);
+        int painted = m.any() ? paint(canvas, m, cols) : 0;
+        painted += StreetPainter.paint(canvas, streets, chunk.getPos().x(), chunk.getPos().z(), cols);
         RoadColumns.store(chunk, cols);
         return painted;
     }

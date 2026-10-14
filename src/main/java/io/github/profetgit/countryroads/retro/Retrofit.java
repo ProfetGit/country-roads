@@ -29,7 +29,7 @@ public final class Retrofit {
     public static final long LIVED_IN = 72_000;
     private static final long BUDGET_NANOS = 3_000_000;
 
-    private record Job(ServerLevel level, ChunkPos pos, ChunkMask mask) {}
+    private record Job(ServerLevel level, ChunkPos pos, ChunkMask mask, java.util.List<io.github.profetgit.countryroads.world.StreetBands> streets) {}
 
     private static final ConcurrentLinkedQueue<Job> READY = new ConcurrentLinkedQueue<>();
     /** Its own threads: a job waits on road plans, so it must never occupy a planner thread (deadlock). */
@@ -40,7 +40,7 @@ public final class Retrofit {
     });
     private static final Set<Long> PENDING = ConcurrentHashMap.newKeySet();
     public static final java.util.Map<String, Integer> craftedSeen = new java.util.concurrent.ConcurrentHashMap<>();
-    public static long queued, painted, skippedLivedIn, skippedCrafted, plain;
+    public static long queued, painted, skippedLivedIn, skippedCrafted, plain, streetsPainted;
     /** Tests only: hold finished jobs until resumed (-Dcountryroads.retrofit.paused=true). */
     public static volatile boolean paused = Boolean.getBoolean("countryroads.retrofit.paused");
 
@@ -53,12 +53,12 @@ public final class Retrofit {
         ChunkPos pos = chunk.getPos();
         if (!PENDING.add(pos.pack())) return;
         queued++;
-        CompletableFuture.supplyAsync(() -> n.mask(pos.x(), pos.z()), WAITERS)
+        CompletableFuture.supplyAsync(() -> new Job(level, pos, n.mask(pos.x(), pos.z()), n.streets(pos.x(), pos.z())), WAITERS)
             .whenComplete((m, err) -> {
                 if (err != null) {
                     PENDING.remove(pos.pack());
                     CountryRoads.LOG.error("Road retrofit planning failed for {}", pos, err);
-                } else READY.add(new Job(level, pos, m));
+                } else READY.add(m);
             });
     }
 
@@ -84,15 +84,17 @@ public final class Retrofit {
         LevelChunk chunk = j.level.getChunkSource().getChunkNow(j.pos.x(), j.pos.z());
         if (chunk == null || RoadColumns.handled(chunk)) return;
         RoadColumns cols = RoadColumns.empty();
+        boolean lived = livedIn(j.level, j.pos);
         if (!j.mask.any()) plain++;
         else {
-            if (livedIn(j.level, j.pos)) skippedLivedIn++;
+            if (lived) skippedLivedIn++;
             else if (crafted(j.level, j.mask)) skippedCrafted++;
             else {
                 RoadPainter.paint(Canvas.live(j.level, chunk), j.mask, cols);
                 painted++;
             }
         }
+        if (!lived && !j.streets.isEmpty()) streetsPainted += io.github.profetgit.countryroads.paint.StreetPainter.paint(Canvas.live(j.level, chunk), j.streets, j.pos.x(), j.pos.z(), cols);
         RoadColumns.store(chunk, cols);
         chunk.markUnsaved();
     }
