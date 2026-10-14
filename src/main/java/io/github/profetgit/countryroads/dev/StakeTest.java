@@ -31,16 +31,20 @@ final class StakeTest {
 
     /** staketest ... door / doorkeep: start the path from a door with the stake item (and make it permanent after the build). */
     static boolean doorMode, commitMode;
+    /** staketest X Z via VX VZ WX WZ: a second waypoint (the chain test). */
+    static int[] via2;
 
     static int run(CommandSourceStack src, int x, int z, boolean keep, int viaX, int viaZ, int preload) {
         final boolean door = doorMode, commitTest = commitMode;
+        final int[] secondVia = via2;
+        via2 = null;
         doorMode = false;
         commitMode = false;
         ServerLevel level = src.getLevel();
         int r = preload, cr = (r >> 4) + 1;
         int[] phase = {-2}, settle = {0, 0};
         int[] built = new int[2];
-        BlockPos[] stakeRef = new BlockPos[1], viaRef = new BlockPos[1];
+        BlockPos[] stakeRef = new BlockPos[1], viaRef = new BlockPos[1], viaRef2 = new BlockPos[1];
         int[][] before = new int[1][];
         java.util.Map<BlockPos, net.minecraft.world.level.block.state.BlockState>[] beforeStates = new java.util.Map[1];
         @SuppressWarnings("unchecked")
@@ -81,6 +85,15 @@ final class StakeTest {
                     level.setBlock(vp, Stake.BLOCK.defaultBlockState(), 3);
                     viaRef[0] = vp;
                     HousePaths.placed(level, vp, null);
+                    if (secondVia != null) {
+                        for (int dx = -1; dx <= 1; dx++)
+                            for (int dz = -1; dz <= 1; dz++) hold(level, (secondVia[0] >> 4) + dx, (secondVia[1] >> 4) + dz, true);
+                        int vy2 = level.getHeight(Heightmap.Types.MOTION_BLOCKING_NO_LEAVES, secondVia[0], secondVia[1]);
+                        BlockPos vp2 = new BlockPos(secondVia[0], vy2, secondVia[1]);
+                        level.setBlock(vp2, Stake.BLOCK.defaultBlockState(), 3);
+                        viaRef2[0] = vp2;
+                        HousePaths.placed(level, vp2, null);
+                    }
                 }
                 phase[0] = 0;
                 return false;
@@ -109,6 +122,34 @@ final class StakeTest {
                     }
                     built[0] = be.survey.cells().size();
                     cells[0] = be.survey.cells();
+                    if (secondVia != null) {
+                        var wps = be.waypoints;
+                        int[] at = new int[wps.size()];
+                        int prev = -1;
+                        boolean inOrder = wps.size() == 2;
+                        for (int wi = 0; wi < wps.size(); wi++) {
+                            at[wi] = -1;
+                            for (int ci = 0; ci < cells[0].size(); ci++) {
+                                var cc = cells[0].get(ci);
+                                if (!cc.edge() && cc.x() == wps.get(wi).getX() && cc.z() == wps.get(wi).getZ()) {
+                                    at[wi] = ci;
+                                    break;
+                                }
+                            }
+                            if (at[wi] <= prev) inOrder = false;
+                            prev = at[wi];
+                        }
+                        int[] legs = HousePaths.legsOf(cells[0], wps);
+                        PathData wd = HousePaths.data(level, viaRef2[0]);
+                        var enc = PathData.CODEC.encodeStart(net.minecraft.nbt.NbtOps.INSTANCE, wd).result();
+                        var dec = enc.flatMap(t -> PathData.CODEC.parse(net.minecraft.nbt.NbtOps.INSTANCE, t).result());
+                        var enc0 = PathData.CODEC.encodeStart(net.minecraft.nbt.NbtOps.INSTANCE, be).result();
+                        var dec0 = enc0.flatMap(t -> PathData.CODEC.parse(net.minecraft.nbt.NbtOps.INSTANCE, t).result());
+                        boolean saved = dec.isPresent() && dec.get().role == PathData.WAYPOINT && stake.equals(dec.get().door)
+                            && dec0.isPresent() && dec0.get().waypoints.equals(be.waypoints);
+                        CountryRoads.LOG.info("CR-STAKE-CHAIN " + (inOrder && legs[legs.length - 1] == 2 && saved ? "PASS" : "FAIL") + " waypoints=" + wps.size() + " at=" + java.util.Arrays.toString(at)
+                            + " lastLeg=" + legs[legs.length - 1] + " roles=" + wd.role + " savedRoundTrip=" + saved + " cells=" + cells[0].size());
+                    }
                     skips[0] = be.survey.skipped();
                     before[0] = snapshot(level, cells[0]);
                     beforeStates[0] = states(level, cells[0]);
@@ -308,12 +349,14 @@ final class StakeTest {
                     }
                     // a waypoint stake is used up by the build (it comes back as an item): put it back for the comparison
                     if (viaRef[0] != null) level.setBlock(viaRef[0], Stake.BLOCK.defaultBlockState(), 3);
+                    if (viaRef2[0] != null) level.setBlock(viaRef2[0], Stake.BLOCK.defaultBlockState(), 3);
                     int[] after = snapshot(level, cells[0]);
                     int left = diff(before[0], after);
                     if (left > 0) explain(level, cells[0], beforeStates[0]);
                     level.setBlock(stake, Blocks.AIR.defaultBlockState(), 3);
                     if (door) level.setBlock(stake.above(), Blocks.AIR.defaultBlockState(), 3);
                     if (viaRef[0] != null) level.setBlock(viaRef[0], Blocks.AIR.defaultBlockState(), 3);
+                    if (viaRef2[0] != null) level.setBlock(viaRef2[0], Blocks.AIR.defaultBlockState(), 3);
                     CountryRoads.LOG.info("CR-STAKE " + (built[0] > 0 && changed > 0 && left == 0 ? "PASS" : "FAIL") + " cells=" + built[0]
                         + " journal=" + built[1] + " changedColumns=" + changed + " notRestored=" + left);
                     return true;

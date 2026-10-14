@@ -202,7 +202,13 @@ public final class DevCommands {
                         .executes(c -> StakeTest.run(c.getSource(), IntegerArgumentType.getInteger(c, "x"), IntegerArgumentType.getInteger(c, "z"), false, Integer.MIN_VALUE, 0, StakeTest.COLD)))
                     .then(Commands.literal("via").then(Commands.argument("vx", IntegerArgumentType.integer()).then(Commands.argument("vz", IntegerArgumentType.integer())
                         .executes(c -> StakeTest.run(c.getSource(), IntegerArgumentType.getInteger(c, "x"), IntegerArgumentType.getInteger(c, "z"), false,
-                            IntegerArgumentType.getInteger(c, "vx"), IntegerArgumentType.getInteger(c, "vz")))))))))
+                            IntegerArgumentType.getInteger(c, "vx"), IntegerArgumentType.getInteger(c, "vz")))
+                        .then(Commands.argument("wx", IntegerArgumentType.integer()).then(Commands.argument("wz", IntegerArgumentType.integer())
+                            .executes(c -> {
+                                StakeTest.via2 = new int[]{IntegerArgumentType.getInteger(c, "wx"), IntegerArgumentType.getInteger(c, "wz")};
+                                return StakeTest.run(c.getSource(), IntegerArgumentType.getInteger(c, "x"), IntegerArgumentType.getInteger(c, "z"), false,
+                                    IntegerArgumentType.getInteger(c, "vx"), IntegerArgumentType.getInteger(c, "vz"), StakeTest.WARM);
+                            })))))))))
             .then(Commands.literal("nearroad")
                 .then(Commands.argument("x", IntegerArgumentType.integer()).then(Commands.argument("z", IntegerArgumentType.integer())
                     .executes(c -> nearRoad(c.getSource(), IntegerArgumentType.getInteger(c, "x"), IntegerArgumentType.getInteger(c, "z"))))))

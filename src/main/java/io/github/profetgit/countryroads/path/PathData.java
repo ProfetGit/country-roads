@@ -32,9 +32,13 @@ public final class PathData {
         ItemStack.CODEC.listOf().optionalFieldOf("paid", List.of()).forGetter(d -> d.paid),
         Codec.LONG.listOf().optionalFieldOf("columns", List.of()).forGetter(d -> d.columns),
         Codec.LONG.listOf().optionalFieldOf("torches", List.of()).forGetter(d -> d.torchPos),
-        Codec.LONG.optionalFieldOf("built_at", 0L).forGetter(d -> d.builtAt)).apply(i, PathData::of));
+        Codec.LONG.optionalFieldOf("built_at", 0L).forGetter(d -> d.builtAt),
+        Codec.INT.optionalFieldOf("role", DOOR).forGetter(d -> d.role),
+        BlockPos.CODEC.optionalFieldOf("door").forGetter(d -> Optional.ofNullable(d.door)),
+        BlockPos.CODEC.listOf().optionalFieldOf("waypoints", List.of()).forGetter(d -> d.waypoints)).apply(i, PathData::of));
 
-    private static PathData of(int status, List<Entry> journal, List<ItemStack> paid, List<Long> columns, List<Long> torches, long builtAt) {
+    private static PathData of(int status, List<Entry> journal, List<ItemStack> paid, List<Long> columns, List<Long> torches, long builtAt, int role, Optional<BlockPos> door,
+                               List<BlockPos> waypoints) {
         PathData d = new PathData(() -> {});
         d.status = status;
         d.journal.addAll(journal);
@@ -42,6 +46,9 @@ public final class PathData {
         d.columns.addAll(columns);
         d.torchPos.addAll(torches);
         d.builtAt = builtAt;
+        d.role = role;
+        d.door = door.orElse(null);
+        d.waypoints.addAll(waypoints);
         return d;
     }
 
@@ -54,10 +61,10 @@ public final class PathData {
     public final List<Long> torchPos = new ArrayList<>();
     /** Game time the path was built (0 = not built, or built before 0.1.20: never made permanent by itself). */
     public long builtAt;
-    /** A stake is the door's (the first one, which builds) or a waypoint placed to steer the route; not saved: after a reload every stake is a door. */
-    public transient int role = DOOR;
-    public transient BlockPos door;
-    public final transient List<BlockPos> waypoints = new ArrayList<>();
+    /** A stake is the door's (the first one, which builds) or a waypoint placed to steer the route (then `door` is its path's start, and the start lists its waypoints in route order). */
+    public int role = DOOR;
+    public BlockPos door;
+    public final List<BlockPos> waypoints = new ArrayList<>();
     /** The surveyed path while it is only a preview; not saved (a reload means a fresh survey). */
     public transient HousePaths.Survey survey;
     /** Where a path from a door or fence gate starts (the cell outside it); null for a stake, which starts where it stands. */

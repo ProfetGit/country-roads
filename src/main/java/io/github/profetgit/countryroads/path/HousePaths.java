@@ -76,7 +76,7 @@ public final class HousePaths {
     private record Rollout(ServerLevel level, BlockPos stake, List<Cell> cells, int[] next, java.util.Set<Long> chunks, int[] age, java.util.Set<Long> cols, java.util.Set<Long> rocky,
                            List<BridgeKit.Bridge> bridges, java.util.Set<Integer> stamped) {}
 
-    private record Preview(ServerLevel level, BlockPos stake, ServerPlayer player, List<Cell> cells, long until) {}
+    private record Preview(ServerLevel level, BlockPos stake, ServerPlayer player, List<Cell> cells, long until, int[] legs) {}
 
     private static final List<PathSearch> SURVEYS = new ArrayList<>();
     private static final List<Rollout> ROLLOUTS = new ArrayList<>();
@@ -101,7 +101,7 @@ public final class HousePaths {
     }
 
     public static boolean busy() {
-        return !SURVEYS.isEmpty() || !ROLLOUTS.isEmpty();
+        return !SURVEYS.isEmpty() || !ROLLOUTS.isEmpty() || !DEBOUNCE.isEmpty();
     }
 
     static long key(int x, int z) {
@@ -110,6 +110,31 @@ public final class HousePaths {
 
     /** The stake that placed a path's survey, for messages when a waypoint is added or taken away. */
     private static final Map<BlockPos, ServerPlayer> OWNERS = new HashMap<>();
+    /** Paths being planned (surveyed, not built): a stake placed near one is its waypoint, whenever the last survey finished. */
+    private record Open(ServerLevel level, ServerPlayer player) {}
+    private static final Map<BlockPos, Open> OPEN = new HashMap<>();
+    /** A path whose waypoints changed is surveyed again once the player stops placing stakes (about a second). */
+    private record Due(ServerLevel level, ServerPlayer player, long tick) {}
+    private static final Map<BlockPos, Due> DEBOUNCE = new HashMap<>();
+    static final int DEBOUNCE_TICKS = 20;
+    /** Dust colours of the legs of a path with waypoints (door to the first stake, then on). */
+    static final int[] LEG_COLORS = {0xF5D76E, 0x4FC3F7, 0x81C784, 0xBA68C8, 0xFFB74D, 0xE57373};
+
+    /** The leg of every cell: how many waypoints the route has passed (the cell on a waypoint ends its leg). */
+    public static int[] legsOf(List<Cell> cells, List<BlockPos> waypoints) {
+        int[] legs = new int[cells.size()];
+        int k = 0;
+        for (int i = 0; i < legs.length; i++) {
+            legs[i] = k;
+            Cell c = cells.get(i);
+            if (!c.edge && k < waypoints.size() && c.x == waypoints.get(k).getX() && c.z == waypoints.get(k).getZ()) k++;
+        }
+        return legs;
+    }
+
+    private static void later(ServerLevel level, BlockPos door, ServerPlayer player) {
+        DEBOUNCE.put(door, new Due(level, player, level.getGameTime() + DEBOUNCE_TICKS));
+    }
 
     /**
      * What a path remembers: the stake's own block entity, or the record of a path started from a door or fence gate
@@ -151,6 +176,10 @@ public final class HousePaths {
     public static void useDoor(ServerLevel level, BlockPos door, ServerPlayer player, Direction outside) {
         BlockPos anchor = anchorOf(level, door);
         PathData d = PathRecords.of(level).open(anchor);
+        if (d.status == PathData.BUILT && player != null && player.isShiftKeyDown()) {
+            keep(level, anchor, player);
+            return;
+        }
         if (d.status != PathData.BUILT) d.start = startOutside(level, anchor, outside);
         use(level, anchor, player);
     }
@@ -168,17 +197,19 @@ public final class HousePaths {
         }
         wbe.role = PathData.WAYPOINT;
         wbe.door = door;
-        dbe.waypoints.add(pos);
+        dbe.waypoints.add(pos.immutable());
+        dbe.setChanged();
+        wbe.setChanged();
         tell(player, Component.translatable("countryroads.stake.waypoint", dbe.waypoints.size()).withStyle(ChatFormatting.AQUA), true);
-        survey(level, door, player);
+        later(level, door, player);
     }
 
     private static BlockPos nearestDoor(ServerLevel level, BlockPos pos, ServerPlayer player) {
         BlockPos best = null;
         double bestD = Double.MAX_VALUE;
         List<BlockPos> doors = new ArrayList<>();
-        for (PathSearch j : SURVEYS) if (j.level == level && j.player == player) doors.add(j.stake);
-        for (Preview p : PREVIEWS.values()) if (p.level == level && p.player == player) doors.add(p.stake);
+        OPEN.entrySet().removeIf(e -> !anchored(e.getValue().level, e.getKey()));
+        for (var e : OPEN.entrySet()) if (e.getValue().level == level && e.getValue().player == player) doors.add(e.getKey());
         for (BlockPos d : doors) {
             if (d.equals(pos) || Math.max(Math.abs(d.getX() - pos.getX()), Math.abs(d.getZ() - pos.getZ())) > WAYPOINT_RADIUS) continue;
             PathData be = data(level, d);
@@ -312,6 +343,8 @@ public final class HousePaths {
         ROLLOUTS.clear();
         PREVIEWS.clear();
         OWNERS.clear();
+        OPEN.clear();
+        DEBOUNCE.clear();
     }
 
     public static void survey(ServerLevel level, BlockPos stake, ServerPlayer player) {
@@ -330,28 +363,21 @@ public final class HousePaths {
             }
         }
         if (player != null) OWNERS.put(stake, player);
+        OPEN.put(stake, new Open(level, player));
+        DEBOUNCE.remove(stake);
         SURVEYS.add(new PathSearch(level, stake, start, player, waypoints));
         tell(player, Component.translatable("countryroads.stake.surveying").withStyle(ChatFormatting.GRAY), true);
-    }
-
-    /** The path is built and still undoable: say so, with the two choices as chat buttons. */
-    private static void builtChoice(BlockPos anchor, ServerPlayer player) {
-        if (player == null) return;
-        String at = anchor.getX() + " " + anchor.getY() + " " + anchor.getZ();
-        player.sendSystemMessage(Component.translatable("countryroads.path.built_choice")
-            .append(" ").append(button("countryroads.path.keep", "roadpath keep " + at, ChatFormatting.GREEN))
-            .append(" ").append(button("countryroads.path.undo", "roadpath undo " + at, ChatFormatting.RED)));
-    }
-
-    private static Component button(String key, String command, ChatFormatting color) {
-        return Component.translatable(key).withStyle(st -> st.withColor(color).withBold(true).withClickEvent(new net.minecraft.network.chat.ClickEvent.RunCommand(command)));
     }
 
     public static void use(ServerLevel level, BlockPos stake, ServerPlayer player) {
         PathData be = data(level, stake);
         if (be == null) return;
+        if (be.role == PathData.WAYPOINT && be.door != null && data(level, be.door) != null) {
+            use(level, be.door, player);
+            return;
+        }
         if (be.status == PathData.BUILT) {
-            builtChoice(stake, player);
+            tell(player, Component.translatable("countryroads.path.built_hint"), true);
             return;
         }
         if (be.status != PathData.PREVIEW || be.survey == null) {
@@ -364,6 +390,8 @@ public final class HousePaths {
         be.paid.addAll(paid);
         be.status = PathData.BUILT;
         be.survey = null;
+        OPEN.remove(stake);
+        DEBOUNCE.remove(stake);
         be.builtAt = level.getGameTime();
         PathRecords.of(level).mark(stake, be.builtAt);
         be.setChanged();
@@ -378,20 +406,22 @@ public final class HousePaths {
         tell(player, Component.translatable("countryroads.stake.building", s.cells.size()), true);
     }
 
-    /** The chat buttons of a built path: keep it for good, or take it up again (the player must be near it). */
-    public static void answer(ServerLevel level, BlockPos anchor, ServerPlayer player, boolean keep) {
-        PathData d = data(level, anchor);
-        if (d == null || d.status != PathData.BUILT || !anchored(level, anchor) || player.distanceToSqr(net.minecraft.world.phys.Vec3.atCenterOf(anchor)) > 128 * 128) {
-            tell(player, Component.translatable("countryroads.path.gone").withStyle(ChatFormatting.RED), false);
-            return;
-        }
-        if (keep) {
-            commit(level, anchor);
-            tell(player, Component.translatable("countryroads.path.committed"), false);
-        } else {
-            takeUp(level, anchor);
-            tell(player, Component.translatable("countryroads.path.undone"), false);
-        }
+    /** Sneak + right-click on a built path: it stays for good. */
+    public static void keep(ServerLevel level, BlockPos anchor, ServerPlayer player) {
+        if (commit(level, anchor)) tell(player, Component.translatable("countryroads.path.committed"), true);
+    }
+
+    /**
+     * Left-click on the door or gate a path started from with the stake in hand: take the path up (or drop the preview).
+     * False when this door has no path, so a normal click breaks the door.
+     */
+    public static boolean undoDoor(ServerLevel level, BlockPos door, ServerPlayer player) {
+        BlockPos anchor = anchorOf(level, door);
+        if (PathRecords.of(level).door(anchor) == null) return false;
+        takeUp(level, anchor);
+        PathRecords.of(level).drop(anchor);
+        tell(player, Component.translatable("countryroads.path.undone"), true);
+        return true;
     }
 
     /** Built paths can be undone for a day (24000 ticks of game time); then the stake goes and the path is part of the land. */
@@ -421,6 +451,8 @@ public final class HousePaths {
     /** The stake is being broken (or the path undone from a door): put back every block the path changed and give back the materials. */
     public static void takeUp(ServerLevel level, BlockPos stake) {
         PREVIEWS.remove(stake);
+        OPEN.remove(stake);
+        DEBOUNCE.remove(stake);
         cancelSurveys(stake);
         ROLLOUTS.removeIf(r -> r.stake.equals(stake));
         PathData first = data(level, stake);
@@ -432,7 +464,8 @@ public final class HousePaths {
                 PathData dbe = door == null ? null : data(level, door);
                 if (dbe != null && dbe.status != PathData.BUILT) {
                     dbe.waypoints.remove(stake);
-                    survey(level, door, OWNERS.get(door));
+                    dbe.setChanged();
+                    later(level, door, OWNERS.get(door));
                 }
                 return;
             }
@@ -512,6 +545,15 @@ public final class HousePaths {
                 SurveyStats.last = j.stats;
             }
         }
+        if (!DEBOUNCE.isEmpty()) {
+            for (Iterator<Map.Entry<BlockPos, Due>> it = DEBOUNCE.entrySet().iterator(); it.hasNext(); ) {
+                var e = it.next();
+                Due due = e.getValue();
+                if (due.level.getGameTime() < due.tick) continue;
+                it.remove();
+                if (anchored(due.level, e.getKey())) survey(due.level, e.getKey(), due.player);
+            }
+        }
         if (server.getTickCount() % 200 == 0) {
             for (ServerLevel lv : server.getAllLevels()) {
                 for (long k : PathRecords.of(lv).older(lv.getGameTime(), COMMIT_TICKS)) {
@@ -535,17 +577,23 @@ public final class HousePaths {
                 }
                 PathData pbe = data(p.level, p.stake);
                 if (pbe != null) {
-                    DustParticleOptions blue = new DustParticleOptions(0x4FC3F7, 1.4f);
-                    for (BlockPos w : pbe.waypoints)
-                        for (int dy = 1; dy <= 4; dy++) p.level.sendParticles(p.player, blue, true, false, w.getX() + 0.5, w.getY() + dy * 0.5, w.getZ() + 0.5, 1, 0.05, 0.1, 0.05, 0);
+                    // waypoint n shows n dots above its stake, in the colour of the leg that ends there
+                    for (int wi = 0; wi < pbe.waypoints.size(); wi++) {
+                        BlockPos w = pbe.waypoints.get(wi);
+                        DustParticleOptions mark = new DustParticleOptions(LEG_COLORS[wi % LEG_COLORS.length], 1.6f);
+                        for (int dot = 0; dot <= wi; dot++) p.level.sendParticles(p.player, mark, true, false, w.getX() + 0.5, w.getY() + 1.3 + dot * 0.45, w.getZ() + 0.5, 1, 0.03, 0.03, 0.03, 0);
+                    }
                 }
-                DustParticleOptions dust = new DustParticleOptions(0xF5D76E, 1.1f);
+                DustParticleOptions[] legDust = new DustParticleOptions[LEG_COLORS.length];
+                for (int li = 0; li < legDust.length; li++) legDust[li] = new DustParticleOptions(LEG_COLORS[li], 1.1f);
                 double px = p.player.getX(), pz = p.player.getZ();
-                for (Cell c : p.cells) {
+                for (int ci = 0; ci < p.cells.size(); ci++) {
+                    Cell c = p.cells.get(ci);
                     if (c.bank || c.rail) continue;
                     // cells far from the player would not be seen: no packet for them
                     double dx = c.x + 0.5 - px, dz = c.z + 0.5 - pz;
                     if (dx * dx + dz * dz > PREVIEW_REACH * PREVIEW_REACH) continue;
+                    DustParticleOptions dust = legDust[p.legs[ci] % legDust.length];
                     p.level.sendParticles(p.player, dust, true, false, c.x + 0.5, c.y + 1.15 + c.arch / 2.0, c.z + 0.5, 1, 0.15, 0.02, 0.15, 0);
                 }
             }
@@ -564,7 +612,7 @@ public final class HousePaths {
         if (be != null && be.status != PathData.BUILT) {
             be.status = PathData.PREVIEW;
             be.survey = sv;
-            if (j.player != null) PREVIEWS.put(j.stake, new Preview(j.level, j.stake, j.player, sv.cells, j.level.getGameTime() + PREVIEW_TICKS));
+            if (j.player != null) PREVIEWS.put(j.stake, new Preview(j.level, j.stake, j.player, sv.cells, j.level.getGameTime() + PREVIEW_TICKS, legsOf(sv.cells, be.waypoints)));
             tell(j.player, Component.translatable("countryroads.stake.preview", sv.length, sv.tunnelCells).withStyle(ChatFormatting.YELLOW), false);
         }
     }

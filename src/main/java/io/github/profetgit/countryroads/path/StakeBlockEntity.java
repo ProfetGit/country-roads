@@ -44,5 +44,9 @@ public final class StakeBlockEntity extends BlockEntity {
         data.columns.addAll(read.columns);
         data.torchPos.addAll(read.torchPos);
         data.builtAt = read.builtAt;
+        data.role = read.role;
+        data.door = read.door;
+        data.waypoints.clear();
+        data.waypoints.addAll(read.waypoints);
     }
 }
