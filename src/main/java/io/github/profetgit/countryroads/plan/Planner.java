@@ -899,9 +899,14 @@ public final class Planner {
                 float deck = Float.NEGATIVE_INFINITY;
                 for (int k = i; k <= j; k++) deck = Math.max(deck, base[k]);
                 // stone bridges stand three higher than timber so their arches clear the water
-                // ...unless a pinned stretch (a shared road's fixed heights) starts too close to either end to ramp down to
+                // ...unless a pinned stretch (a shared road's fixed heights) or a village connector (it climbs from the street)
+                // starts too close to either end to ramp down to (a connector climbed 62 -> 68 with a 2-block step)
                 boolean pinned = false;
-                for (int k = Math.max(0, i - RAISE_CLEAR); k <= Math.min(n - 1, j + RAISE_CLEAR) && !pinned; k++) pinned = !Float.isNaN(pin[k]) && k > 0 && k < n - 1;
+                for (int k = Math.max(0, i - RAISE_CLEAR); k <= Math.min(n - 1, j + RAISE_CLEAR) && !pinned; k++)
+                    pinned = !Float.isNaN(pin[k]) && k > 0 && k < n - 1;
+                // a connector needs twice the room: the deck's dry end stays level up to it and the connector eases from
+                // the street ground (a bridge 17 samples before a connector still left it a 2-block step)
+                pinned |= i < connA + 2 * RAISE_CLEAR || j >= n - connB - 2 * RAISE_CLEAR;
                 if (kind[i] == EdgePlan.BRIDGE && j - i + 1 > STONE_BRIDGE && !pinned) {
                     deck += 3;
                     for (int k = i; k <= j; k++) base[k] = deck;
@@ -964,9 +969,9 @@ public final class Planner {
             }
             if (!changed) break;
             for (int i = 1; i < n; i++)
-                if (kind[i] == EdgePlan.GROUND && Float.isNaN(pin[i])) y[i] = Math.max(y[i], y[i - 1] - (pinNear[i] ? CONN_GRADE : i < 24 || i > n - 25 ? 0.5f : MAX_GRADE));
+                if (kind[i] == EdgePlan.GROUND && Float.isNaN(pin[i])) y[i] = Math.max(y[i], y[i - 1] - (pinNear[i] || i < connA || i >= n - connB ? CONN_GRADE : i < 24 || i > n - 25 ? 0.5f : MAX_GRADE));
             for (int i = n - 2; i >= 0; i--)
-                if (kind[i] == EdgePlan.GROUND && Float.isNaN(pin[i])) y[i] = Math.max(y[i], y[i + 1] - (pinNear[i] ? CONN_GRADE : i < 24 || i > n - 25 ? 0.5f : MAX_GRADE));
+                if (kind[i] == EdgePlan.GROUND && Float.isNaN(pin[i])) y[i] = Math.max(y[i], y[i + 1] - (pinNear[i] || i < connA || i >= n - connB ? CONN_GRADE : i < 24 || i > n - 25 ? 0.5f : MAX_GRADE));
             for (int i = 0; i < n; i++)
                 if (kind[i] == EdgePlan.GROUND && Float.isNaN(pin[i]) && y[i] > ground[i] + 5) kind[i] = EdgePlan.BRIDGE;
         }
@@ -1047,9 +1052,9 @@ public final class Planner {
         if (tiny)
             for (int pass = 0; pass < 2; pass++) {
                 for (int i = 1; i < n; i++)
-                    if (kind[i] == EdgePlan.GROUND && Float.isNaN(pin[i])) y[i] = Math.max(y[i], y[i - 1] - (pinNear[i] ? CONN_GRADE : MAX_GRADE));
+                    if (kind[i] == EdgePlan.GROUND && Float.isNaN(pin[i])) y[i] = Math.max(y[i], y[i - 1] - (pinNear[i] || i < connA || i >= n - connB ? CONN_GRADE : MAX_GRADE));
                 for (int i = n - 2; i >= 0; i--)
-                    if (kind[i] == EdgePlan.GROUND && Float.isNaN(pin[i])) y[i] = Math.max(y[i], y[i + 1] - (pinNear[i] ? CONN_GRADE : MAX_GRADE));
+                    if (kind[i] == EdgePlan.GROUND && Float.isNaN(pin[i])) y[i] = Math.max(y[i], y[i + 1] - (pinNear[i] || i < connA || i >= n - connB ? CONN_GRADE : MAX_GRADE));
             }
         return y;
     }
