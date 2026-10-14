@@ -43,6 +43,8 @@ public final class RoadPainter {
     private final BlockPos.MutableBlockPos pos = new BlockPos.MutableBlockPos();
     private java.util.function.IntBinaryOperator neighbourTop;
 
+    private int chunkX, chunkZ;
+
     private RoadPainter(Canvas chunk) {
         this.chunk = chunk;
     }
@@ -72,6 +74,8 @@ public final class RoadPainter {
     public static int paint(Canvas canvas, ChunkMask m, RoadColumns cols, java.util.function.IntBinaryOperator neighbourTop) {
         if (!m.any()) return 0;
         RoadPainter p = new RoadPainter(canvas);
+        p.chunkX = m.cx;
+        p.chunkZ = m.cz;
         p.neighbourTop = neighbourTop;
         int painted = 0;
         GenContext.bypass(true);
@@ -114,6 +118,13 @@ public final class RoadPainter {
                     }
                 }
             }
+            // bushes and field stones last, once every column of the chunk is shaped (they reach a neighbour column)
+            for (int lz = 0; lz < 16; lz++)
+                for (int lx = 0; lx < 16; lx++) {
+                    int i = ChunkMask.idx(lx, lz);
+                    if (m.in[i] >= 0 || m.in[i] == Float.NEGATIVE_INFINITY) continue;
+                    p.scatter((m.cx << 4) + lx, (m.cz << 4) + lz, (int) Math.floor(m.surface(i)), -m.in[i], m, i);
+                }
             for (EdgePlan.Decor d : m.decor) p.decor(d, m);
         } finally {
             GenContext.bypass(false);
@@ -305,6 +316,80 @@ public final class RoadPainter {
             case 4 -> Blocks.JUNGLE_LEAVES.defaultBlockState();
             default -> (((h >>> 26) & 7) == 0 ? Blocks.FLOWERING_AZALEA_LEAVES : ((h >>> 26) & 7) < 3 ? Blocks.AZALEA_LEAVES : Blocks.OAK_LEAVES).defaultBlockState();
         };
+    }
+
+    /** Chances (of 1024, before the patch noise) of a roadside bush and of a field stone on a verge column. */
+    static final int BUSH = 70, STONE = 9;
+
+    /**
+     * Roadside bushes and field stones, 2.2-4.6 blocks out from the road edge on level soil: a bush is one to four leaf
+     * blocks of the biome's hedge leaves (persistent), now and then two high; a field stone is a stone or andesite block
+     * with a slab of the same stone beside it. Bushes come in patches (smooth noise), stones are rare. Everything stays
+     * inside this chunk, so neighbouring chunks never disagree, and is placed after the chunk's shaping is done.
+     */
+    private void scatter(int x, int z, int top, float d, ChunkMask m, int i) {
+        if (d < 2.2f || d > 4.6f || m.kind[i] != EdgePlan.GROUND || m.conn[i]) return;
+        long h = hash(x * 13 + 5, z * 7 - 11);
+        int r = (int) (h & 1023), patch = clump(x + 31, z - 17);
+        boolean stone = r < STONE, bush = !stone && r < STONE + BUSH * patch * patch / (1024 * 1024 / 2);
+        if (!stone && !bush) return;
+        int g = groundAt(x, z, top);
+        if (Math.abs(g - top) > 2 || !verge(x, g, z)) return;
+        Palette.Surface pal = pal(x, g, z);
+        boolean dry = pal == Palette.DESERT || pal == Palette.BADLANDS;
+        net.minecraft.core.Direction[] dirs = {net.minecraft.core.Direction.NORTH, net.minecraft.core.Direction.EAST, net.minecraft.core.Direction.SOUTH, net.minecraft.core.Direction.WEST};
+        int start = (int) ((h >>> 20) & 3);
+        if (stone) {
+            boolean andesite = ((h >>> 24) & 1) == 0;
+            for (int k = 0; k < 4; k++) {
+                net.minecraft.core.Direction dir = dirs[(start + k) & 3];
+                int sx = x + dir.getStepX(), sz = z + dir.getStepZ();
+                if (!inChunk(sx, sz) || !verge(sx, g, sz) || !besideOnly(sx, sz, m)) continue;
+                place(x, g + 1, z, (andesite ? Blocks.ANDESITE : Blocks.STONE).defaultBlockState());
+                // the slab is now and then the other stone, so the pair reads as two stones, not a cut block
+                boolean other = ((h >>> 26) & 3) == 0;
+                place(sx, g + 1, sz, ((andesite ^ other) ? Blocks.ANDESITE_SLAB : Blocks.STONE_SLAB).defaultBlockState());
+                return;
+            }
+            return;
+        }
+        if (dry) return;
+        BlockState leaf = hedgeLeaves(m.wood[i], h).setValue(net.minecraft.world.level.block.LeavesBlock.PERSISTENT, true);
+        place(x, g + 1, z, leaf);
+        if (((h >>> 30) & 3) == 0 && get(x, g + 2, z).isAir()) set(x, g + 2, z, leaf);
+        int more = (int) ((h >>> 33) % 4);
+        for (int k = 0; k < 4 && more > 0; k++) {
+            net.minecraft.core.Direction dir = dirs[(start + k) & 3];
+            int sx = x + dir.getStepX(), sz = z + dir.getStepZ();
+            if (!inChunk(sx, sz) || !verge(sx, g, sz) || !besideOnly(sx, sz, m)) continue;
+            place(sx, g + 1, sz, leaf);
+            more--;
+        }
+    }
+
+    /** Soil a bush or stone can stand on at y, with room above (plants and snow get replaced), no tree in the way. */
+    private boolean verge(int x, int y, int z) {
+        BlockState ground = get(x, y, z), above = get(x, y + 1, z);
+        if (!Palette.plantable(Blocks.SHORT_GRASS.defaultBlockState(), ground)) return false;
+        if (!above.isAir() && !(above.canBeReplaced() && above.getFluidState().isEmpty())) return false;
+        return !tree(x, y + 1, y + 3, z);
+    }
+
+    /** A neighbour column off the road and its rails (the road, a fence or a wall line is never covered). */
+    private static boolean besideOnly(int x, int z, ChunkMask m) {
+        float in = m.in[ChunkMask.idx(x & 15, z & 15)];
+        return in == Float.NEGATIVE_INFINITY || in < -2.0f && m.kind[ChunkMask.idx(x & 15, z & 15)] == EdgePlan.GROUND;
+    }
+
+    private boolean inChunk(int x, int z) {
+        return x >> 4 == chunkX && z >> 4 == chunkZ;
+    }
+
+    /** Replaces a plant (both halves of a tall one) or snow layer, then sets the block. */
+    private void place(int x, int y, int z, BlockState s) {
+        BlockState here = get(x, y, z);
+        if (!here.isAir() && Palette.upperHalf(here) != null && get(x, y + 1, z).is(here.getBlock())) set(x, y + 1, z, AIR);
+        set(x, y, z, s);
     }
 
     /** Dry-stone wall or split-rail fence on the shoulder, where a run says so and the shoulder is level with the road. */
