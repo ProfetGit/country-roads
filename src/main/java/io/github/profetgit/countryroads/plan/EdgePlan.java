@@ -27,6 +27,8 @@ public final class EdgePlan {
     public static final byte TIMBER = 0, STONE = 1;
     /** Per bridge crossing (same value over the whole run): TIMBER or STONE, wood pair (Palette.bridgeWoods index), arch rise. */
     public byte[] bridge, bridgeWood, bridgeRise;
+    /** Samples laid on an earlier road's exact line (a shared trunk): that road paints them, this one does not. */
+    public boolean[] shared;
     /** Wood style for decks: 0 spruce, 1 oak, 2 mangrove, 3 dark oak. */
     public final byte[] wood;
     public final long routeNanos;

@@ -135,6 +135,7 @@ public final class Planner {
         // snap onto existing roads wherever this one runs alongside them: their exact line and heights
         int L = line.size();
         float[] pinY = new float[L];
+        boolean[] onTrunk = new boolean[L];
         byte[] pinKind = new byte[L];
         java.util.Arrays.fill(pinY, Float.NaN);
         List<int[]> joins = new ArrayList<>();
@@ -176,6 +177,7 @@ public final class Planner {
                     if (k == b) offB = new double[]{t.p.x[j] - q[0], t.p.z[j] - q[1]};
                     line.set(k, new double[]{t.p.x[j], t.p.z[j]});
                     pinY[k] = t.p.y[j];
+                    onTrunk[k] = true;
                     pinKind[k] = t.p.kind[j];
                 }
                 // ease the free road into and out of the shared stretch
@@ -209,6 +211,7 @@ public final class Planner {
         if (n < 8) return null;
 
         float[] x = new float[n], z = new float[n], ground = new float[n], water = new float[n], hw = new float[n], pin = new float[n];
+        boolean[] shared = new boolean[n];
         byte[] kindPin = new byte[n];
         boolean[] river = new boolean[n];
         byte[] wood = new byte[n];
@@ -217,6 +220,7 @@ public final class Planner {
             x[i] = (float) p[0];
             z[i] = (float) p[1];
             pin[i] = pinY[start + i];
+            shared[i] = onTrunk[start + i];
             kindPin[i] = pinKind[start + i];
         }
         for (int i = 0; i < n; i++) sampleAt(i, x, z, ground, water, river);
@@ -291,6 +295,7 @@ public final class Planner {
             if (near < 99) hw[i] += (BRIDGE_HW - hw[i]) * Math.min(1f, (5 - near) / 4f);
         }
         EdgePlan plan = new EdgePlan(e, x, z, y, hw, kind, wood, System.nanoTime() - t0);
+        plan.shared = shared;
         bridges(plan, ground, water);
         plan.connA = connA;
         plan.connB = connB;
@@ -333,6 +338,8 @@ public final class Planner {
     static final int STONE_BRIDGE = 20;
     /** Samples over which the road eases from its own line onto a straightened bridge (more for a sharper turn). */
     static final boolean TRACE_BRIDGES = Boolean.getBoolean("countryroads.traceBridges");
+    /** A new turn sharper than this over 4 samples makes an eased line a hairpin (55 kept 45-degree crossings diagonal). */
+    static final double KINK = 100;
     static final int BRIDGE_EASE = 10, BRIDGE_EASE_TURN = 10, LANDING = 6, WET_REACH = 12;
 
     /**
@@ -387,22 +394,28 @@ public final class Planner {
      * near a village building. Returns whether it moved them.
      */
     private static boolean apply(Line l, float[] x, float[] z, float[] pin, java.util.function.BiPredicate<Float, Float> blocked, boolean[] moved) {
-        // a long ease that swings past a building gets shorter eases, then a shorter straight past the water, before the
-        // crossing gives up
+        // a long ease that swings past a building (or onto a shared stretch, or into a kink) gets shorter on that side,
+        // then the straight past the water gets shorter, before the crossing gives up
         for (Line t = l; ; ) {
-            if (applyOnce(t, x, z, pin, blocked, moved)) return true;
+            int bad = applyOnce(t, x, z, pin, blocked, moved);
+            if (bad == Integer.MIN_VALUE) return true;
             int ea = t.a0() - t.lo(), eb = t.hi() - t.b0();
-            if (ea >= 6 || eb >= 6) {
-                t = new Line(t.a(), t.b(), t.a0(), t.b0(), t.a0() - ea / 2, t.b0() + eb / 2, t.ox(), t.oz(), t.dx(), t.dz());
-                continue;
+            if (bad < t.a0() && ea >= 6) t = new Line(t.a(), t.b(), t.a0(), t.b0(), t.a0() - ea / 2, t.hi(), t.ox(), t.oz(), t.dx(), t.dz());
+            else if (bad > t.b0() && eb >= 6) t = new Line(t.a(), t.b(), t.a0(), t.b0(), t.lo(), t.b0() + eb / 2, t.ox(), t.oz(), t.dx(), t.dz());
+            else {
+                if (t.a0() == t.a() && t.b0() == t.b()) return false;
+                int a0 = bad <= t.a() ? t.a0() + (t.a() - t.a0() + 1) / 2 : t.a0(), b0 = bad >= t.b() ? t.b0() - (t.b0() - t.b() + 1) / 2 : t.b0();
+                if (a0 == t.a0() && b0 == t.b0()) {
+                    a0 = t.a0() + (t.a() - t.a0() + 1) / 2;
+                    b0 = t.b0() - (t.b0() - t.b() + 1) / 2;
+                }
+                t = new Line(t.a(), t.b(), a0, b0, Math.max(t.lo(), a0 - (t.a0() - t.lo())), Math.min(t.hi(), b0 + (t.hi() - t.b0())), t.ox(), t.oz(), t.dx(), t.dz());
             }
-            if (t.a0() == t.a() && t.b0() == t.b()) return false;
-            int a0 = t.a0() + (t.a() - t.a0() + 1) / 2, b0 = t.b0() - (t.b0() - t.b() + 1) / 2;
-            t = new Line(t.a(), t.b(), a0, b0, Math.max(t.lo(), a0 - 8), Math.min(t.hi(), b0 + 8), t.ox(), t.oz(), t.dx(), t.dz());
         }
     }
 
-    private static boolean applyOnce(Line l, float[] x, float[] z, float[] pin, java.util.function.BiPredicate<Float, Float> blocked, boolean[] moved) {
+    /** Integer.MIN_VALUE when the line was applied, else the sample that stopped it. */
+    private static int applyOnce(Line l, float[] x, float[] z, float[] pin, java.util.function.BiPredicate<Float, Float> blocked, boolean[] moved) {
         float[] nx = new float[l.hi() - l.lo() + 1], nz = new float[nx.length];
         for (int k = l.lo(); k <= l.hi(); k++) {
             float u = k < l.a0() ? (k - l.lo()) / (float) (l.a0() - l.lo()) : k > l.b0() ? (l.hi() - k) / (float) (l.hi() - l.b0()) : 1f;
@@ -413,10 +426,21 @@ public final class Planner {
             if (shift > 1e-4f && !Float.isNaN(pin[k]) || shift > 0.5f && blocked.test(px, pz)) {
                 if (TRACE_BRIDGES) io.github.profetgit.countryroads.CountryRoads.LOG.info("CR-STRAIGHT skip " + l.a() + ".." + l.b() + " at sample " + k + " ("
                     + px + ", " + pz + ") " + (Float.isNaN(pin[k]) ? "near a building" : "pinned (shared trunk)"));
-                return false;
+                return k;
             }
             nx[k - l.lo()] = px;
             nz[k - l.lo()] = pz;
+        }
+        // the eased road must not fold onto itself or kink: a turn of more than KINK degrees over 4 samples that was not
+        // there before (a short ease left a kink whose two strands were side by side, 1.5 blocks apart in height)
+        int n = x.length;
+        for (int k = Math.max(2, l.lo() - 2); k <= Math.min(n - 3, l.hi() + 2); k++) {
+            float[] p0 = at(l, x, z, nx, nz, k - 2), p1 = at(l, x, z, nx, nz, k), p2 = at(l, x, z, nx, nz, k + 2);
+            double now = turn(p0[0], p0[1], p1[0], p1[1], p2[0], p2[1]), was = turn(x[k - 2], z[k - 2], x[k], z[k], x[k + 2], z[k + 2]);
+            if (now > KINK && now > was + 15) {
+                if (TRACE_BRIDGES) io.github.profetgit.countryroads.CountryRoads.LOG.info("CR-STRAIGHT skip " + l.a() + ".." + l.b() + " kink at sample " + k + " (" + Math.round(now) + " deg)");
+                return k;
+            }
         }
         for (int k = l.lo(); k <= l.hi(); k++) {
             if (Math.abs(nx[k - l.lo()] - x[k]) + Math.abs(nz[k - l.lo()] - z[k]) <= 1e-4f) continue;
@@ -424,7 +448,18 @@ public final class Planner {
             z[k] = nz[k - l.lo()];
             moved[k] = true;
         }
-        return true;
+        return Integer.MIN_VALUE;
+    }
+
+    private static float[] at(Line l, float[] x, float[] z, float[] nx, float[] nz, int k) {
+        return k >= l.lo() && k <= l.hi() ? new float[]{nx[k - l.lo()], nz[k - l.lo()]} : new float[]{x[k], z[k]};
+    }
+
+    /** Degrees the line turns at (bx, bz) coming from a and going to c. */
+    private static double turn(float ax, float az, float bx, float bz, float cx, float cz) {
+        double ux = bx - ax, uz = bz - az, vx = cx - bx, vz = cz - bz, lu = Math.hypot(ux, uz), lv = Math.hypot(vx, vz);
+        if (lu < 1e-3 || lv < 1e-3) return 180;
+        return Math.toDegrees(Math.acos(Math.clamp((ux * vx + uz * vz) / (lu * lv), -1.0, 1.0)));
     }
 
     /** The straight line for the crossing a..b (see straighten). */

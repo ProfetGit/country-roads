@@ -110,6 +110,9 @@ public final class ChunkMask {
             int[] segs = p.segmentsIn(key);
             if (segs == null) continue;
             for (int i : segs) {
+                // a stretch shared with an earlier road is that road's to paint: two plans of one crossing tied column by
+                // column, so the posts on its two rails came from different bridges and did not line up
+                if (p.shared != null && p.shared[i] && p.shared[i + 1]) continue;
                 float x0 = p.x[i], z0 = p.z[i], x1 = p.x[i + 1], z1 = p.z[i + 1];
                 float r = Math.max(p.hw[i], p.hw[i + 1]) + EdgePlan.REACH;
                 int lx0 = Math.max(0, (int) Math.floor(Math.min(x0, x1) - r) - bx), lx1 = Math.min(15, (int) Math.ceil(Math.max(x0, x1) + r) - bx);
