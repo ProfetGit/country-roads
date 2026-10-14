@@ -219,20 +219,19 @@ public final class Planner {
             pin[i] = pinY[start + i];
             kindPin[i] = pinKind[start + i];
         }
-        for (int i = 0; i < n; i++) {
-            TerrainSampler.Sample s = terrain.sample((int) Math.floor(x[i]), (int) Math.floor(z[i]));
-            ground[i] = s.ground();
-            water[i] = s.water();
-            river[i] = s.river();
-            if (i % 16 == 0) {
-                byte w = Palette.wood(terrain.biome((int) x[i], s.water(), (int) z[i]));
-                for (int k = i; k < Math.min(n, i + 16); k++) wood[k] = w;
-            }
-        }
+        for (int i = 0; i < n; i++) sampleAt(i, x, z, ground, water, river);
         // village ends meet the street at its own height
         if (Float.isNaN(pin[0]) && water[0] <= ground[0]) pin[0] = ground[0];
         if (Float.isNaN(pin[n - 1]) && water[n - 1] <= ground[n - 1]) pin[n - 1] = ground[n - 1];
         byte[] kind = new byte[n];
+        profile(ground, water, river, kind, pin, kindPin, connA, connB);
+        // bridges cross straight: the wobbling line over the water made every rail a staircase
+        boolean[] moved = straighten(x, z, kind, water, ground, pin, connA, connB);
+        for (int i = 0; i < n; i++) if (moved[i]) sampleAt(i, x, z, ground, water, river);
+        for (int i = 0; i < n; i += 16) {
+            byte w = Palette.wood(terrain.biome((int) x[i], (int) water[i], (int) z[i]));
+            for (int k = i; k < Math.min(n, i + 16); k++) wood[k] = w;
+        }
         float[] y = profile(ground, water, river, kind, pin, kindPin, connA, connB);
         // inside a village the road is never a tunnel or a trestle: it climbs the slope on the ground like the street
         for (int i = 0; i < n; i++)
@@ -240,7 +239,14 @@ public final class Planner {
         long seed = e.seed();
         double p1 = (seed & 0xffff) / 65536.0 * Math.PI * 2, p2 = ((seed >> 16) & 0xffff) / 65536.0 * Math.PI * 2;
         for (int i = 0; i < n; i++) hw[i] = (float) (1.75 + 0.35 * Math.sin(i * 0.045 + p1) + 0.18 * Math.sin(i * 0.13 + p2));
+        // bridges keep one width: 3 deck columns between the parapets on a column-centred line
+        for (int i = 0; i < n; i++) {
+            int near = 99;
+            for (int k = Math.max(0, i - 4); k <= Math.min(n - 1, i + 4); k++) if (kind[k] == EdgePlan.BRIDGE) near = Math.min(near, Math.abs(k - i));
+            if (near < 99) hw[i] += (BRIDGE_HW - hw[i]) * Math.min(1f, (5 - near) / 4f);
+        }
         EdgePlan plan = new EdgePlan(e, x, z, y, hw, kind, wood, System.nanoTime() - t0);
+        bridges(plan, ground, water);
         plan.connA = connA;
         plan.connB = connB;
         plan.earth = new byte[n];
@@ -265,6 +271,105 @@ public final class Planner {
         if (camps != null) camps.choose(plan);
         plan.decor.removeIf(d -> !standable(d));
         return plan;
+    }
+
+    private void sampleAt(int i, float[] x, float[] z, float[] ground, float[] water, boolean[] river) {
+        TerrainSampler.Sample s = terrain.sample((int) Math.floor(x[i]), (int) Math.floor(z[i]));
+        ground[i] = s.ground();
+        water[i] = s.water();
+        river[i] = s.river();
+    }
+
+    static final float BRIDGE_HW = 1.75f;
+    /** Samples beyond a stone bridge's ends whose too-high fill becomes a masonry abutment instead of a timber trestle. */
+    static final int APPROACH = 14;
+
+    /** Bridges longer than this are stone arches, shorter ones timber. */
+    static final int STONE_BRIDGE = 20;
+    /** Samples over which the road eases from its own line onto a straightened bridge (more for a sharper turn). */
+    static final int BRIDGE_EASE = 10, BRIDGE_EASE_TURN = 10;
+
+    /**
+     * Each bridge over water becomes a straight line along the nearer world axis, centred on a block column, through
+     * the middle of the crossing and as long as its chord; the road eases onto it each side. Diagonal and wobbling
+     * bridges made every rail, post and arch a staircase. Crossings near a village end or on a shared (pinned) stretch
+     * keep their line. Sample count stays the same (samples on the bridge sit a little closer than a block).
+     */
+    static boolean[] straighten(float[] x, float[] z, byte[] kind, float[] water, float[] ground, float[] pin, int connA, int connB) {
+        int n = x.length;
+        boolean[] moved = new boolean[n];
+        for (int i = 0; i < n; ) {
+            int j = i;
+            while (j + 1 < n && kind[j + 1] == kind[i]) j++;
+            int a = i, b = j;
+            i = j + 1;
+            if (kind[a] != EdgePlan.BRIDGE || b - a < 3) continue;
+            boolean wet = false;
+            for (int k = a; k <= b; k++) wet |= water[k] > ground[k];
+            float cx = x[b] - x[a], cz = z[b] - z[a], len = (float) Math.hypot(cx, cz);
+            if (!wet || len < 1) continue;
+            float turn = (float) Math.toDegrees(Math.atan2(Math.min(Math.abs(cx), Math.abs(cz)), Math.max(Math.abs(cx), Math.abs(cz))));
+            int ease = BRIDGE_EASE + Math.round(BRIDGE_EASE_TURN * turn / 45f);
+            int lo = a - ease, hi = b + ease;
+            if (lo < Math.max(1, connA) || hi > n - 2 - connB) continue;
+            boolean pinned = false;
+            for (int k = lo; k <= hi; k++) pinned |= !Float.isNaN(pin[k]);
+            if (pinned) continue;
+            boolean alongX = Math.abs(cx) >= Math.abs(cz);
+            float ax = alongX ? Math.signum(cx) : 0, az = alongX ? 0 : Math.signum(cz);
+            float mid = (a + b) / 2f, mx = (x[a] + x[b]) / 2, mz = (z[a] + z[b]) / 2, step = len / (b - a);
+            if (alongX) mz = (float) Math.floor(mz) + 0.5f;
+            else mx = (float) Math.floor(mx) + 0.5f;
+            for (int k = lo; k <= hi; k++) {
+                float u = k < a ? (k - lo) / (float) (a - lo) : k > b ? (hi - k) / (float) (hi - b) : 1f;
+                float w = u * u * (3 - 2 * u);
+                x[k] += (mx + ax * (k - mid) * step - x[k]) * w;
+                z[k] += (mz + az * (k - mid) * step - z[k]) * w;
+                moved[k] = true;
+            }
+        }
+        return moved;
+    }
+
+    /** Style, wood pair and arch rise per bridge run, decided once per crossing so the whole bridge matches. */
+    private void bridges(EdgePlan p, float[] ground, float[] water) {
+        int n = p.length();
+        p.bridge = new byte[n];
+        p.bridgeWood = new byte[n];
+        p.bridgeRise = new byte[n];
+        for (int i = 0; i < n; ) {
+            int j = i;
+            while (j + 1 < n && p.kind[j + 1] == p.kind[i]) j++;
+            if (p.kind[i] == EdgePlan.BRIDGE) {
+                // headroom over the crossing's usual water level (a pond up on the bank must not flatten the arches);
+                // over the lowest ground on a dry trestle
+                int len = j - i + 1, clear;
+                it.unimi.dsi.fastutil.ints.Int2IntOpenHashMap levels = new it.unimi.dsi.fastutil.ints.Int2IntOpenHashMap();
+                float low = Float.MAX_VALUE;
+                for (int k = i; k <= j; k++) {
+                    if (water[k] > ground[k]) levels.addTo((int) water[k], 1);
+                    low = Math.min(low, ground[k]);
+                }
+                int level = (int) low, best = 0;
+                for (var en : levels.int2IntEntrySet()) if (en.getIntValue() > best) {
+                    best = en.getIntValue();
+                    level = en.getIntKey();
+                }
+                clear = Math.round(p.y[(i + j) / 2]) - level - 2;
+                byte style = len > STONE_BRIDGE ? EdgePlan.STONE : EdgePlan.TIMBER;
+                int mid = (i + j) / 2;
+                byte pair = Palette.bridgeWoods(terrain.biome((int) p.x[mid], (int) water[mid], (int) p.z[mid]));
+                // the raised approaches too: where their fill is too high for an embankment the painter walls them in stone
+                int from = style == EdgePlan.STONE ? Math.max(0, i - APPROACH) : i, to = style == EdgePlan.STONE ? Math.min(n - 1, j + APPROACH) : j;
+                for (int k = from; k <= to; k++) {
+                    if (p.kind[k] != EdgePlan.BRIDGE && p.kind[k] != EdgePlan.GROUND || p.kind[k] == EdgePlan.GROUND && p.bridge[k] == EdgePlan.STONE) continue;
+                    p.bridge[k] = style;
+                    p.bridgeWood[k] = pair;
+                    p.bridgeRise[k] = (byte) Math.clamp(clear, 0, 12);
+                }
+            }
+            i = j + 1;
+        }
     }
 
     /** Signpost at each village end (pointing to the other village), lamp posts on the last 30 blocks into each village. */
@@ -460,6 +565,15 @@ public final class Planner {
         smoothKinds(kind, EdgePlan.GROUND, 6);
         for (int i = 0; i < n; i++) if (!Float.isNaN(pin[i]) && (i > 0 && i < n - 1 || pinKind[i] != 0)) kind[i] = pinKind[i];
         for (int i = 0; i < n; i++) if (kind[i] == EdgePlan.BOARDWALK && river[i]) kind[i] = EdgePlan.BRIDGE;
+        // a boardwalk touching a bridge is part of that crossing: one deck, one height (it stepped down into a raft)
+        for (boolean changed = true; changed; ) {
+            changed = false;
+            for (int i = 0; i < n; i++)
+                if (kind[i] == EdgePlan.BOARDWALK && (i > 0 && kind[i - 1] == EdgePlan.BRIDGE || i + 1 < n && kind[i + 1] == EdgePlan.BRIDGE)) {
+                    kind[i] = EdgePlan.BRIDGE;
+                    changed = true;
+                }
+        }
 
         float[] y = new float[n];
         int r = 4;
@@ -480,6 +594,11 @@ public final class Planner {
             if (kind[i] == EdgePlan.BRIDGE || kind[i] == EdgePlan.BOARDWALK) {
                 float deck = Float.NEGATIVE_INFINITY;
                 for (int k = i; k <= j; k++) deck = Math.max(deck, base[k]);
+                // stone bridges stand three higher than timber so their arches clear the water
+                if (kind[i] == EdgePlan.BRIDGE && j - i + 1 > STONE_BRIDGE) {
+                    deck += 3;
+                    for (int k = i; k <= j; k++) base[k] = deck;
+                }
                 for (int k = i; k <= j; k++) y[k] = deck;
             }
             i = j + 1;
@@ -504,6 +623,36 @@ public final class Planner {
             else if (y[i] > ground[i] + 5) kind[i] = EdgePlan.BRIDGE;
         }
         dropShortRuns(kind, EdgePlan.TUNNEL, 16);
+        // trestle samples that joined a crossing above (the climb to a raised stone deck) are part of the bridge: the
+        // whole crossing is level and the climb moves onto the ground before it
+        for (int round = 0; round < 3; round++) {
+            boolean changed = false;
+            for (int i = 0; i < n; ) {
+                int j = i;
+                while (j + 1 < n && kind[j + 1] == kind[i]) j++;
+                if (kind[i] == EdgePlan.BRIDGE) {
+                    boolean wet = false;
+                    float deck = Float.NEGATIVE_INFINITY;
+                    for (int k = i; k <= j; k++) {
+                        wet |= water[k] > ground[k];
+                        deck = Math.max(deck, y[k]);
+                    }
+                    for (int k = i; k <= j && wet; k++)
+                        if (Float.isNaN(pin[k]) && y[k] != deck) {
+                            y[k] = deck;
+                            changed = true;
+                        }
+                }
+                i = j + 1;
+            }
+            if (!changed) break;
+            for (int i = 1; i < n; i++)
+                if (kind[i] == EdgePlan.GROUND && Float.isNaN(pin[i])) y[i] = Math.max(y[i], y[i - 1] - (i < 24 || i > n - 25 ? 0.5f : MAX_GRADE));
+            for (int i = n - 2; i >= 0; i--)
+                if (kind[i] == EdgePlan.GROUND && Float.isNaN(pin[i])) y[i] = Math.max(y[i], y[i + 1] - (i < 24 || i > n - 25 ? 0.5f : MAX_GRADE));
+            for (int i = 0; i < n; i++)
+                if (kind[i] == EdgePlan.GROUND && Float.isNaN(pin[i]) && y[i] > ground[i] + 5) kind[i] = EdgePlan.BRIDGE;
+        }
         return y;
     }
 

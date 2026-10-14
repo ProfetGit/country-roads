@@ -35,8 +35,10 @@ final class TreeCheck {
         return level.getBlockState(pos.set(x, y, z));
     }
 
+    /** Tree wood: logs and mangrove roots; stripped logs are bridge beams (no tree grows them), not trees. */
     private static boolean wood(BlockState s) {
-        return s.is(BlockTags.LOGS) || s.is(Blocks.MANGROVE_ROOTS) || s.is(Blocks.MUDDY_MANGROVE_ROOTS);
+        if (s.is(BlockTags.LOGS)) return !net.minecraft.core.registries.BuiltInRegistries.BLOCK.getKey(s.getBlock()).getPath().startsWith("stripped_");
+        return s.is(Blocks.MANGROVE_ROOTS) || s.is(Blocks.MUDDY_MANGROVE_ROOTS);
     }
 
     private static boolean shroom(BlockState s) {

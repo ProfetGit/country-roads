@@ -174,7 +174,7 @@ public final class BridgeKit {
      * The biome's wood pair {main, trim}: main takes the file's oak (deck, posts, beams), trim its spruce (stripped
      * beams, trapdoors, stairs, shelves, gates). User, 2026-10-14: wood per biome, the trim darker than the main wood.
      */
-    static String[] woods(net.minecraft.core.Holder<net.minecraft.world.level.biome.Biome> b) {
+    public static String[] woods(net.minecraft.core.Holder<net.minecraft.world.level.biome.Biome> b) {
         String forced = System.getProperty("countryroads.kitWoods");
         if (forced != null && forced.contains(",")) return forced.split(",", 2);
         if (b.is(net.minecraft.world.level.biome.Biomes.MANGROVE_SWAMP)) return new String[]{"mangrove", "dark_oak"};

@@ -22,6 +22,11 @@ public final class EdgePlan {
     public final byte[] kind;
     /** Length of the run of equal kind this sample is in, and distance (samples) to the nearer end of that run. */
     public final short[] runLen, runPos;
+    /** Samples from the start of the run of equal kind. */
+    public final short[] runAt;
+    public static final byte TIMBER = 0, STONE = 1;
+    /** Per bridge crossing (same value over the whole run): TIMBER or STONE, wood pair (Palette.bridgeWoods index), arch rise. */
+    public byte[] bridge, bridgeWood, bridgeRise;
     /** Wood style for decks: 0 spruce, 1 oak, 2 mangrove, 3 dark oak. */
     public final byte[] wood;
     public final long routeNanos;
@@ -71,12 +76,14 @@ public final class EdgePlan {
         int n = x.length;
         this.runLen = new short[n];
         this.runPos = new short[n];
+        this.runAt = new short[n];
         for (int i = 0; i < n; ) {
             int j = i;
             while (j + 1 < n && kind[j + 1] == kind[i]) j++;
             for (int k = i; k <= j; k++) {
                 runLen[k] = (short) Math.min(Short.MAX_VALUE, j - i + 1);
                 runPos[k] = (short) Math.min(k - i, j - k);
+                runAt[k] = (short) Math.min(Short.MAX_VALUE, k - i);
             }
             i = j + 1;
         }

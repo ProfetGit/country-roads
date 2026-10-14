@@ -457,4 +457,36 @@ public final class Palette {
     static BlockState rubble(long h) {
         return ((h >>> 16) & 3) == 0 ? Blocks.MOSSY_COBBLESTONE.defaultBlockState() : Blocks.COBBLESTONE.defaultBlockState();
     }
+
+    /** Road bridge woods: {main, trim} pairs as the house-path kit uses them (trim always darker). */
+    static final String[][] BRIDGE_PAIRS = {{"oak", "spruce"}, {"birch", "spruce"}, {"spruce", "dark_oak"}, {"dark_oak", "spruce"},
+        {"jungle", "dark_oak"}, {"acacia", "dark_oak"}, {"mangrove", "dark_oak"}, {"cherry", "dark_oak"}, {"pale_oak", "dark_oak"}};
+
+    /** One wood's bridge blocks. */
+    public record BridgeWood(BlockState planks, BlockState log, BlockState stripped, BlockState fence, BlockState slab, BlockState stairs) {}
+
+    private static final BridgeWood[] BRIDGE_WOODS = new BridgeWood[BRIDGE_PAIRS.length * 2];
+
+    public static byte bridgeWoods(Holder<Biome> biome) {
+        String[] w = io.github.profetgit.countryroads.path.BridgeKit.woods(biome);
+        for (int k = 0; k < BRIDGE_PAIRS.length; k++) if (BRIDGE_PAIRS[k][0].equals(w[0]) && BRIDGE_PAIRS[k][1].equals(w[1])) return (byte) k;
+        return 0;
+    }
+
+    /** The main (trim false) or trim wood of a pair from bridgeWoods. */
+    static BridgeWood bridgeWood(int pair, boolean trim) {
+        int k = Math.clamp(pair, 0, BRIDGE_PAIRS.length - 1) * 2 + (trim ? 1 : 0);
+        BridgeWood w = BRIDGE_WOODS[k];
+        if (w == null) {
+            String n = BRIDGE_PAIRS[k / 2][k % 2];
+            String log = n + "_log";
+            w = new BridgeWood(named(n + "_planks"), named(log), named("stripped_" + log), named(n + "_fence"), named(n + "_slab"), named(n + "_stairs"));
+            BRIDGE_WOODS[k] = w;
+        }
+        return w;
+    }
+
+    private static BlockState named(String id) {
+        return net.minecraft.core.registries.BuiltInRegistries.BLOCK.getValue(net.minecraft.resources.Identifier.fromNamespaceAndPath("minecraft", id)).defaultBlockState();
+    }
 }

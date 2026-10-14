@@ -518,6 +518,14 @@ final class RoadChecks {
         return 1;
     }
 
+    /** kind letter + rounded y per sample, for reading a crossing's profile. */
+    private static String profileText(EdgePlan p, int from, int to) {
+        StringBuilder sb = new StringBuilder();
+        for (int k = Math.max(0, from); k <= Math.min(p.length() - 1, to); k++)
+            sb.append("GCBWT".charAt(p.kind[k])).append(Math.round(p.y[k])).append(' ');
+        return sb.toString().trim();
+    }
+
     static int roads(CommandSourceStack src, int radius) {
         ServerLevel level = src.getLevel();
         RoadNetwork n = RoadNetwork.get(level);
@@ -544,6 +552,16 @@ final class RoadChecks {
                 String line = "CR-ROAD " + e.a().pos().toShortString() + " -> " + e.b().pos().toShortString() + " straight=" + (int) e.length()
                     + (p == null ? " NONE" : " length=" + p.length() + " ms=" + p.routeNanos / 1_000_000) + " trunks=" + n.trunkDeps(e).size();
                 CountryRoads.LOG.info(line);
+                if (p != null && p.bridge != null)
+                    for (int i = 0; i < p.length(); i += Math.max(1, p.runLen[i])) {
+                        if (p.kind[i] != EdgePlan.BRIDGE) continue;
+                        int mid = i + p.runLen[i] / 2, e2 = i + p.runLen[i] - 1;
+                        float dev = 0, cx = p.x[e2] - p.x[i], cz = p.z[e2] - p.z[i], cl = (float) Math.hypot(cx, cz);
+                        for (int k = i; k <= e2 && cl > 0; k++) dev = Math.max(dev, Math.abs((p.x[k] - p.x[i]) * cz - (p.z[k] - p.z[i]) * cx) / cl);
+                        report(src, "CR-BRIDGE at " + (int) p.x[mid] + " " + Math.round(p.y[mid]) + " " + (int) p.z[mid] + " len=" + p.runLen[i]
+                            + " style=" + (p.bridge[i] == EdgePlan.STONE ? "stone" : "timber") + " rise=" + p.bridgeRise[i] + " woods=" + p.bridgeWood[i] + " dev=" + Math.round(dev * 10) / 10f + " from=" + i + "/" + p.length() + " conn=" + p.connA + "/" + p.connB + (p.runLen[i] > 20 ? " ys=" + profileText(p, i - 8, e2 + 8) : "")
+                            + " dir=" + Math.round(Math.toDegrees(Math.atan2(p.z[i + p.runLen[i] - 1] - p.z[i], p.x[i + p.runLen[i] - 1] - p.x[i]))));
+                    }
                 return false;
             }
             report(src, "CR-ROADS edges=" + list.size() + " routed=" + ok[0] + " totalLength=" + len[0]);
