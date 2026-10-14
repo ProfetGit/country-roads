@@ -70,6 +70,13 @@ final class StakeTest {
         }
     }
 
+    /** Road decoration (fences, walls, lamps) is built too, but it belongs to the road: a road column within 3. */
+    static boolean roadNear(ServerLevel level, int x, int z) {
+        for (int dx = -3; dx <= 3; dx++)
+            for (int dz = -3; dz <= 3; dz++) if (io.github.profetgit.countryroads.world.RoadColumns.isRoad(level, x + dx, z + dz)) return true;
+        return false;
+    }
+
     static int run(CommandSourceStack src, int x, int z, boolean keep, int viaX, int viaZ, int preload) {
         final boolean door = doorMode, commitTest = commitMode;
         final int house = houseMode;
@@ -162,6 +169,34 @@ final class StakeTest {
                     }
                     built[0] = be.survey.cells().size();
                     cells[0] = be.survey.cells();
+                    {
+                        // the margin: past the first cells (the start may sit inside it), no centre cell within 2 columns of a built top block
+                        int near = 0, minD = 99, checked = 0, nearAfterStart = 0;
+                        int[] shown = {0};
+                        for (int ci = 0; ci < cells[0].size(); ci++) {
+                            var cc = cells[0].get(ci);
+                            if (cc.edge() || cc.bank() || cc.rail()) continue;
+                            int dmin = 99;
+                            for (int dx = -3; dx <= 3; dx++)
+                                for (int dz = -3; dz <= 3; dz++) {
+                                    int top = level.getHeight(Heightmap.Types.MOTION_BLOCKING_NO_LEAVES, cc.x() + dx, cc.z() + dz) - 1;
+                                    var tb = level.getBlockState(new BlockPos(cc.x() + dx, top, cc.z() + dz));
+                                    if (io.github.profetgit.countryroads.retro.Retrofit.isCrafted(tb) && !roadNear(level, cc.x() + dx, cc.z() + dz)) {
+                                        int dd = Math.max(Math.abs(dx), Math.abs(dz));
+                                        if (dd <= 2 && ci >= 12 && shown[0]++ < 3)
+                                            CountryRoads.LOG.info("CR-STAKE-MARGIN-NEAR cell " + ci + " at " + cc.x() + "," + cc.z() + " d=" + dd + " " + tb.getBlock().getDescriptionId() + " at " + (cc.x() + dx) + "," + (cc.z() + dz));
+                                        dmin = Math.min(dmin, dd);
+                                    }
+                                }
+                            if (ci >= 12) {
+                                checked++;
+                                minD = Math.min(minD, dmin);
+                                if (dmin <= 2) nearAfterStart++;
+                            }
+                            if (dmin <= 2) near++;
+                        }
+                        CountryRoads.LOG.info("CR-STAKE-MARGIN " + (nearAfterStart == 0 ? "PASS" : "FAIL") + " centreCellsWithin2=" + near + " pastStart=" + nearAfterStart + " minDist=" + minD + " checked=" + checked);
+                    }
                     if (secondVia != null) {
                         var wps = be.waypoints;
                         int[] at = new int[wps.size()];

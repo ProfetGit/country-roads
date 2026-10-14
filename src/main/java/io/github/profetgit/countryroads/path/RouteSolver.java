@@ -24,6 +24,12 @@ final class RouteSolver {
     static final int TURN = 1, END_STEP = 12, START = 4, BEND_ON_SLOPE = 200, WOBBLE = 18, JITTER = 5;
     /** The path is a bed three wide: per block of cut or fill the columns either side need, and for a side that cannot be bed. */
     static final int SIDE = 4, SIDE_CLOSED = 12;
+    /**
+     * Extra cost of a column by its distance (columns, either axis) to the nearest built column: the bed is three wide, so
+     * a centre line 3 away leaves a margin of 2 between its edge and the building. A soft margin: the start may be inside it.
+     */
+    static final int MARGIN_NEAR = 60, MARGIN_MID = 30, MARGIN_FAR = 8;
+    static final boolean MARGIN = !"0".equals(System.getProperty("countryroads.margin"));
     /** Both sides closed (a trunk and deep water, two trunks): the path would be one wide there. */
     static final int BOTH_CLOSED = 120;
     /** A bend on the water: bridges cross straight (user saw a staircase deck over a diagonal river). */
@@ -108,6 +114,8 @@ final class RouteSolver {
     private final int[] cost, parent, tree;
     private final byte[] arrive;
     private final short[] bore;
+    /** Per column: 0 = not worked out yet, else margin cost + 1. */
+    private final byte[] margin;
     private int[] hf = new int[1 << 12], hg = new int[1 << 12], hi = new int[1 << 12];
     private long[] hk = new long[1 << 12];
     private int size;
@@ -149,6 +157,7 @@ final class RouteSolver {
         tree = new int[n];
         arrive = new byte[n];
         bore = new short[n];
+        margin = new byte[n];
         Arrays.fill(tree, Terrain.UNKNOWN);
     }
 
@@ -502,6 +511,7 @@ final class RouteSolver {
         if (dy < 0 && x == sx && z == sz) add += END_STEP;
         else if (dy > 0 && t.openRoad(nx, nz)) add += END_STEP;
         if (penalty != null) add += penalty[ni];
+        add += margin(nx, nz);
         int total = c + add;
         if (total >= cost[ni]) return;
         cost[ni] = total;
@@ -509,6 +519,23 @@ final class RouteSolver {
         arrive[ni] = (byte) d;
         bore[ni] = 0;
         push(total + h(ni), total, ni);
+    }
+
+    /** The margin cost of a column (see MARGIN_NEAR): worked out once, when all the chunks it reads are captured. */
+    private int margin(int x, int z) {
+        if (!MARGIN || !t.inside(x, z)) return 0;
+        int i = idx(x, z);
+        int m = margin[i];
+        if (m != 0) return m - 1;
+        int best = 4;
+        for (int dx = -3; dx <= 3; dx++)
+            for (int dz = -3; dz <= 3; dz++) {
+                int d = Math.max(Math.abs(dx), Math.abs(dz));
+                if (d < best && t.built(x + dx, z + dz)) best = d;
+            }
+        int c = best <= 1 ? MARGIN_NEAR : best == 2 ? MARGIN_MID : best == 3 ? MARGIN_FAR : 0;
+        if (t.known(x - 3, z - 3) && t.known(x + 3, z - 3) && t.known(x - 3, z + 3) && t.known(x + 3, z + 3)) margin[i] = (byte) (c + 1);
+        return c;
     }
 
     /** What the bed beside a step into (x, z) heading d costs: cut or fill of the two side columns, or a side that cannot be bed. */
@@ -605,7 +632,7 @@ final class RouteSolver {
         int close = 0;
         for (int m = 1; m <= exit; m++) {
             int cx = x + DX[d] * m, cz = z + DZ[d] * m;
-            close += closeLeg(k, cx, cz, m) + (penalty != null ? penalty[idx(cx, cz)] : 0);
+            close += closeLeg(k, cx, cz, m) + (penalty != null ? penalty[idx(cx, cz)] : 0) + margin(cx, cz);
         }
         int total = c + bend + borePerUsed * exit + boreFixedUsed + close;
         if (total >= cost[ei]) return;

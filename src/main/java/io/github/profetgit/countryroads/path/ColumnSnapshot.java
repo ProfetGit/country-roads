@@ -32,13 +32,13 @@ final class ColumnSnapshot {
      * logs: bit i = a log at logTop - i, for a column topped by a log or a built block (a tree, a house's posts; 0
      * elsewhere). road: RoadColumns bits.
      */
-    record Chunk(int[] ground, byte[] leaves, short[] logTop, long[] logs, long[] road) {
+    record Chunk(int[] ground, byte[] leaves, short[] logTop, long[] logs, long[] road, long[] built) {
         static final Chunk MISSING;
 
         static {
             int[] g = new int[256];
             Arrays.fill(g, Terrain.CLOSED);
-            MISSING = new Chunk(g, new byte[256], new short[256], new long[256], null);
+            MISSING = new Chunk(g, new byte[256], new short[256], new long[256], null, new long[4]);
         }
 
         boolean log(int i, int y) {
@@ -48,6 +48,11 @@ final class ColumnSnapshot {
 
         boolean road(int i) {
             return road != null && (road[i >> 6] & (1L << (i & 63))) != 0;
+        }
+
+        /** The top block of the column is something a player (or a village) built, and the column is not a road. */
+        boolean built(int i) {
+            return (built[i >> 6] & (1L << (i & 63))) != 0;
         }
 
         boolean open(int i) {
@@ -100,6 +105,7 @@ final class ColumnSnapshot {
         byte[] leaves = new byte[256];
         short[] logTop = new short[256];
         long[] logs = new long[256];
+        long[] built = new long[4];
         int bx = c.getPos().getMinBlockX(), bz = c.getPos().getMinBlockZ();
         BlockPos.MutableBlockPos p = new BlockPos.MutableBlockPos();
         for (int lz = 0; lz < 16; lz++)
@@ -131,6 +137,7 @@ final class ColumnSnapshot {
                     g = top - below >= 6 ? Terrain.DEEP + top : top + Terrain.WET;
                 } else if ((k & (FLUID | LOG)) != 0 || ((k & CRAFTED) != 0 && !(road != null && rc.road(lx, lz)))) {
                     g = Terrain.CLOSED;
+                    if ((k & CRAFTED) != 0) built[i >> 6] |= 1L << (i & 63);
                 } else g = top;
                 ground[i] = g;
                 // leaves above the ground raise MOTION_BLOCKING over MOTION_BLOCKING_NO_LEAVES: without that, none to look for
@@ -140,7 +147,7 @@ final class ColumnSnapshot {
                     leaves[i] = (byte) m;
                 }
             }
-        return new Chunk(ground, leaves, logTop, logs, road);
+        return new Chunk(ground, leaves, logTop, logs, road, built);
     }
 
     /**
@@ -252,6 +259,12 @@ final class ColumnSnapshot {
         public boolean road(int x, int z) {
             Chunk c = chunk(x, z);
             return c != null && c.road(((z & 15) << 4) | (x & 15));
+        }
+
+        @Override
+        public boolean built(int x, int z) {
+            Chunk c = chunk(x, z);
+            return c != null && c.built(((z & 15) << 4) | (x & 15));
         }
 
         @Override

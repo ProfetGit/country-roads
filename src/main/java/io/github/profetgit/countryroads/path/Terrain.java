@@ -22,6 +22,11 @@ interface Terrain {
 
     boolean road(int x, int z);
 
+    /** A built (crafted) block tops the column, it is not a road: houses, fences, walls. The path keeps its distance. */
+    default boolean built(int x, int z) {
+        return false;
+    }
+
     boolean openRoad(int x, int z);
 
     /** Walking level of a ground value: one above the water for a deck. */
