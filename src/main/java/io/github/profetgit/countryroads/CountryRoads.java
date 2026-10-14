@@ -23,6 +23,7 @@ public final class CountryRoads implements ModInitializer {
         RoadColumns.init();
         io.github.profetgit.countryroads.path.Stake.init();
         io.github.profetgit.countryroads.path.HousePaths.init();
+        io.github.profetgit.countryroads.path.PathBlocks.init();
         ServerTickEvents.END_SERVER_TICK.register(io.github.profetgit.countryroads.path.HousePaths::tick);
         ServerTickEvents.END_SERVER_TICK.register(server -> DevCommands.tick());
         ServerTickEvents.END_LEVEL_TICK.register(RoadSpeed::tick);

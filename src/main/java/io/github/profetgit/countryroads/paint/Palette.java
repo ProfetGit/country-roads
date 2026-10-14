@@ -188,18 +188,19 @@ public final class Palette {
         return flat(surface(surface(biome), in, h, natural, true));
     }
 
-    /** House paths never put full cubes of coarse dirt, moss, podzol or rooted dirt among the path blocks: they read as stray blocks on the path. */
+    /** House paths are made of path blocks, coarse dirt and rooted dirt only (user 2026-10-14: no mud, gravel or sand); the walked line is always path. */
     private static BlockState flat(BlockState s) {
-        if (s.is(Blocks.COARSE_DIRT) || s.is(Blocks.ROOTED_DIRT) || s.is(Blocks.MOSS_BLOCK) || s.is(Blocks.PODZOL)) return Blocks.DIRT_PATH.defaultBlockState();
-        return s;
+        return Blocks.DIRT_PATH.defaultBlockState();
     }
 
     /** A side column of a house path's bed: now and then the natural top block stays, so the path frays a little. */
     public static BlockState houseEdge(Holder<Biome> biome, long h, BlockState natural) {
         Surface pal = surface(biome);
         if (keepable(pal, natural) && ((h >>> 8) & 1023) < 200) return natural;
-        // coarse dirt at the edge of the bed (not on the walked line: a full cube beside path blocks reads as a worn verge there)
-        if (pal != SNOWY && pal != DESERT && pal != BADLANDS && ((h >>> 40) & 1023) < 260) return Blocks.COARSE_DIRT.defaultBlockState();
+        // coarse dirt (and, outside dry country, a little rooted dirt) at the edge of the bed, not on the walked line: a full cube beside path blocks reads as a worn verge there
+        int e = (int) ((h >>> 40) & 1023);
+        if (e < 260) return Blocks.COARSE_DIRT.defaultBlockState();
+        if (pal != DESERT && pal != BADLANDS && e < 330) return Blocks.ROOTED_DIRT.defaultBlockState();
         return flat(pal.pick(pal.edge(), pal.edgeW(), (int) ((h >>> 24) & 1023)));
     }
 
@@ -267,7 +268,7 @@ public final class Palette {
         if (!edge) {
             if (r < 460) return Blocks.DIRT_PATH.defaultBlockState();
             if (r < 640) return Blocks.GRAVEL.defaultBlockState();
-            if (r < 780) return Blocks.PACKED_MUD.defaultBlockState();
+            if (r < 780) return Blocks.COARSE_DIRT.defaultBlockState();
             if (r < 900) return Blocks.COBBLESTONE.defaultBlockState();
             return Blocks.ANDESITE.defaultBlockState();
         }

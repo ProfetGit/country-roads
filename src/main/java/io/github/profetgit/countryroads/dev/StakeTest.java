@@ -224,6 +224,39 @@ final class StakeTest {
                         for (var c : cells[0]) if (!c.edge() && c.x() == viaRef[0].getX() && c.z() == viaRef[0].getZ()) onRoute = true;
                         CountryRoads.LOG.info("CR-STAKE-WAYPOINT " + (onRoute ? "PASS" : "FAIL") + " onRoute=" + onRoute + " stakeRemoved=" + !level.getBlockState(viaRef[0]).is(Stake.BLOCK));
                     }
+                    {
+                        int mud = 0, tracked = 0, blocked = 0, dropped = 0, normalOk = 0, normalBad = 0;
+                        var fake = net.fabricmc.fabric.api.entity.FakePlayer.get(level);
+                        var pb = io.github.profetgit.countryroads.path.PathBlocks.of(level);
+                        for (var e : be.journal) {
+                            var cur = level.getBlockState(e.pos());
+                            if (cur.is(Blocks.PACKED_MUD) || cur.is(Blocks.MUD)) mud++;
+                        }
+                        for (var e : new java.util.ArrayList<>(be.journal)) {
+                            var cur = level.getBlockState(e.pos());
+                            if (cur.isAir()) continue;
+                            boolean free = cur.is(Blocks.DIRT) || cur.is(Blocks.DIRT_PATH) || cur.is(Blocks.COARSE_DIRT) || cur.is(Blocks.ROOTED_DIRT) || cur.is(Blocks.GRASS_BLOCK);
+                            if (free) {
+                                if (normalOk + normalBad < 20) {
+                                    boolean okb = net.fabricmc.fabric.api.event.player.PlayerBlockBreakEvents.BEFORE.invoker().beforeBlockBreak(level, fake, e.pos(), cur, null);
+                                    if (okb && !level.getBlockState(e.pos()).isAir()) normalOk++; else normalBad++;
+                                }
+                                continue;
+                            }
+                            if (cur.getBlock() instanceof net.minecraft.world.level.block.BushBlock || cur.is(Blocks.TALL_GRASS) || cur.is(Blocks.SHORT_GRASS) || cur.getCollisionShape(level, e.pos()).isEmpty() && cur.getFluidState().isEmpty() && !cur.is(Blocks.LANTERN) && !cur.is(Blocks.WALL_TORCH)) continue;
+                            tracked++;
+                            if (blocked + dropped >= 40) continue;
+                            boolean brk = net.fabricmc.fabric.api.event.player.PlayerBlockBreakEvents.BEFORE.invoker().beforeBlockBreak(level, fake, e.pos(), cur, null);
+                            boolean items = !level.getEntitiesOfClass(net.minecraft.world.entity.item.ItemEntity.class, new net.minecraft.world.phys.AABB(e.pos()).inflate(2)).isEmpty();
+                            if (!brk && level.getBlockState(e.pos()).isAir() && !items) blocked++;
+                            else {
+                                dropped++;
+                                CountryRoads.LOG.info("CR-STAKE-NODROP-WHY " + e.pos().toShortString() + " " + cur.getBlock().getDescriptionId() + " cancelled=" + !brk + " air=" + level.getBlockState(e.pos()).isAir() + " items=" + items);
+                            }
+                        }
+                        CountryRoads.LOG.info("CR-STAKE-NODROP " + (mud == 0 && dropped == 0 && normalBad == 0 && blocked > 0 ? "PASS" : "FAIL") + " mudPlaced=" + mud + " valuableTracked=" + tracked
+                            + " brokenNoDrop=" + blocked + " dropped=" + dropped + " plainOk=" + normalOk + " plainBad=" + normalBad + " free=" + (be.paid.isEmpty()));
+                    }
                     int[] mid = snapshot(level, cells[0]);
                     int changed = diff(before[0], mid);
                     HousePaths.takeUp(level, stake);

@@ -40,9 +40,9 @@ import net.minecraft.world.level.levelgen.Heightmap;
 
 /**
  * House paths. Placing a Surveyor's Stake runs a survey (time-sliced search over the real terrain to the nearest road
- * column), shows the route as a line of particles to the owner and lists the bill. Right-clicking the stake pays
- * (inventory first, then containers within 8 blocks) and the path rolls out from the door to the road. Breaking the
- * stake restores every block it changed and refunds what was paid.
+ * column) and shows the route as a line of particles to the owner. Right-clicking the stake builds it, free (since
+ * 0.1.19: the blocks with item value drop nothing, see PathBlocks), and the path rolls out from the door to the road.
+ * Breaking the stake restores every block it changed (and refunds what an older build was paid).
  */
 public final class HousePaths {
     static final int PREVIEW_TICKS = 2400, CONTAINER_REACH = 8, WAYPOINT_RADIUS = 128, PREVIEW_REACH = 96;
@@ -297,29 +297,6 @@ public final class HousePaths {
         }
         Survey s = be.survey;
         List<ItemStack> paid = new ArrayList<>();
-        if (player != null && !player.getAbilities().instabuild) {
-            List<Container> sources = sources(level, stake, player);
-            // cobblestone counts for both lines: each line takes its own items first and shares what is left
-            Predicate<ItemStack> earthOnly = st -> EARTH.contains(st.getItem()) && !STONE.contains(st.getItem()),
-                stoneOnly = st -> STONE.contains(st.getItem()) && !EARTH.contains(st.getItem()), both = st -> EARTH.contains(st.getItem()) && STONE.contains(st.getItem());
-            int eo = count(sources, earthOnly), so = count(sources, stoneOnly), sh = count(sources, both);
-            int earthShort = Math.max(0, s.earth - eo), stoneShort = Math.max(0, s.stone - so), over = Math.max(0, earthShort + stoneShort - sh);
-            int planksHave = count(sources, st -> st.is(ItemTags.PLANKS)), torchesHave = count(sources, st -> st.is(Items.TORCH));
-            int lanternsHave = count(sources, st -> st.is(Items.LANTERN));
-            if (over > 0 || planksHave < s.planks || torchesHave < s.torches || lanternsHave < s.lanterns) {
-                int earthMiss = Math.max(0, earthShort - Math.max(0, sh - stoneShort)), stoneMiss = Math.max(0, over - earthMiss);
-                tell(player, Component.translatable("countryroads.stake.missing", earthMiss, stoneMiss,
-                    Math.max(0, s.planks - planksHave), Math.max(0, s.torches - torchesHave), Math.max(0, s.lanterns - lanternsHave)).withStyle(ChatFormatting.RED), false);
-                return;
-            }
-            paid.addAll(take(sources, stoneOnly, s.stone));
-            paid.addAll(take(sources, both, stoneShort));
-            paid.addAll(take(sources, earthOnly, s.earth));
-            paid.addAll(take(sources, both, earthShort));
-            paid.addAll(take(sources, st -> st.is(ItemTags.PLANKS), s.planks));
-            paid.addAll(take(sources, st -> st.is(Items.TORCH), s.torches));
-            paid.addAll(take(sources, st -> st.is(Items.LANTERN), s.lanterns));
-        }
         be.paid.clear();
         be.paid.addAll(paid);
         be.status = StakeBlockEntity.BUILT;
@@ -368,6 +345,7 @@ public final class HousePaths {
         for (int i = be.journal.size() - 1; i >= 0; i--) {
             StakeBlockEntity.Entry e = be.journal.get(i);
             level.setBlock(e.pos(), e.state(), EXACT);
+            PathBlocks.of(level).forget(e.pos());
         }
         HousePathIndex index = HousePathIndex.of(level);
         for (long c : be.columns) {
@@ -462,7 +440,7 @@ public final class HousePaths {
             be.status = StakeBlockEntity.PREVIEW;
             be.survey = sv;
             if (j.player != null) PREVIEWS.put(j.stake, new Preview(j.level, j.stake, j.player, sv.cells, j.level.getGameTime() + PREVIEW_TICKS));
-            tell(j.player, Component.translatable("countryroads.stake.preview", sv.length, sv.tunnelCells, sv.earth, sv.stone, sv.planks, sv.torches, sv.lanterns).withStyle(ChatFormatting.YELLOW), false);
+            tell(j.player, Component.translatable("countryroads.stake.preview", sv.length, sv.tunnelCells).withStyle(ChatFormatting.YELLOW), false);
         }
     }
 
@@ -789,8 +767,8 @@ public final class HousePaths {
             plant = Blocks.SHORT_GRASS.defaultBlockState();
             upper = null;
         }
-        change(level, be, g.above(), plant);
-        if (upper != null) change(level, be, g.above(2), upper);
+        change(level, be, g.above(), plant, true);
+        if (upper != null) change(level, be, g.above(2), upper, true);
     }
 
     /** A path column joins the road columns (other stakes can connect to it) and the index surveys read. */
@@ -816,10 +794,16 @@ public final class HousePaths {
     }
 
     static void change(ServerLevel level, StakeBlockEntity be, BlockPos pos, BlockState to) {
+        change(level, be, pos, to, false);
+    }
+
+    /** `free`: the block drops as usual when broken (verge plants); every other valuable block drops nothing, see PathBlocks. */
+    static void change(ServerLevel level, StakeBlockEntity be, BlockPos pos, BlockState to, boolean free) {
         BlockState from = level.getBlockState(pos);
         if (from == to) return;
         be.journal.add(new StakeBlockEntity.Entry(pos.immutable(), from));
         level.setBlock(pos, to, EXACT);
+        PathBlocks.of(level).put(pos, to, free);
     }
 
     private static List<Container> sources(ServerLevel level, BlockPos stake, ServerPlayer player) {
