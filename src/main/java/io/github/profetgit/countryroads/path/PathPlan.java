@@ -216,7 +216,7 @@ final class PathPlan {
                 while (i < n && wet[i] && tm[i] <= 0) i++;
                 int w = i - a;
                 if (w < KIT_MIN) continue;
-                int k = Math.max(0, (int) Math.ceil((w + 2 - BridgeKit.length(0)) / (double) BridgeKit.SPAN));
+                int k = Math.max(BridgeKit.MIN_SPANS, (int) Math.ceil((w + 2 - BridgeKit.length(0)) / (double) BridgeKit.SPAN));
                 if (k > BridgeKit.MAX_SPANS) continue;
                 int len = BridgeKit.length(k), pad = len - w, s0 = a - (pad + 1) / 2, e0 = s0 + len - 1;
                 if (s0 < 1 || e0 > n - 2 || wet[s0] || wet[e0]) continue;

@@ -27,7 +27,8 @@ import net.minecraft.world.level.block.state.properties.Property;
  * slab; the deck stands 2.5 blocks above it.
  */
 public final class BridgeKit {
-    public static final int END = 5, SPAN = 6, WIDTH = 7, MID = 3, MAX_SPANS = 9;
+    /** At least one span (user, 2026-10-14: the bare ramp-post-ramp bridge looked wrong): 17..65 cells. */
+    public static final int END = 5, SPAN = 6, WIDTH = 7, MID = 3, MIN_SPANS = 1, MAX_SPANS = 9;
 
     /** A bridge to lay: z0 is the centre column of its first cell, dir the direction it runs (index into HousePaths.DIRS). */
     public record Bridge(int x, int z, int dir, int spans, int y0) {
