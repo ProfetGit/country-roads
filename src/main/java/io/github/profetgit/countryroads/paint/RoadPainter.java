@@ -47,6 +47,8 @@ public final class RoadPainter {
     private java.util.function.IntBinaryOperator neighbourTop;
 
     private int chunkX, chunkZ;
+    /** Columns of this chunk's roadside props: no verge plants, bushes or stones grow through them. */
+    private boolean[] propCols;
 
     private RoadPainter(Canvas chunk) {
         this.chunk = chunk;
@@ -84,6 +86,7 @@ public final class RoadPainter {
         p.chunkX = m.cx;
         p.chunkZ = m.cz;
         p.neighbourTop = neighbourTop;
+        p.propCols = PropPainter.footprint(m);
         int painted = 0;
         GenContext.bypass(true);
         try {
@@ -195,6 +198,10 @@ public final class RoadPainter {
     }
 
     private void decor(EdgePlan.Decor d, ChunkMask m) {
+        if (d.type() == EdgePlan.PROP) {
+            PropPainter.paint(chunk, m, d);
+            return;
+        }
         int i = ChunkMask.idx(d.x() & 15, d.z() & 15);
         if (m.in[i] >= 0) return;
         if (d.type() == EdgePlan.ORCHARD) {
@@ -336,7 +343,7 @@ public final class RoadPainter {
      * inside this chunk, so neighbouring chunks never disagree, and is placed after the chunk's shaping is done.
      */
     private void scatter(int x, int z, int top, float d, ChunkMask m, int i) {
-        if (d < 2.2f || d > 4.6f || m.kind[i] != EdgePlan.GROUND || m.conn[i]) return;
+        if (d < 2.2f || d > 4.6f || m.kind[i] != EdgePlan.GROUND || m.conn[i] || propCols != null && propCols[i]) return;
         long h = hash(x * 13 + 5, z * 7 - 11);
         int r = (int) (h & 1023), patch = clump(x + 31, z - 17);
         boolean stone = r < STONE, bush = !stone && r < STONE + BUSH * patch * patch / (1024 * 1024 / 2);
@@ -377,6 +384,7 @@ public final class RoadPainter {
 
     /** Soil a bush or stone can stand on at y, with room above (plants and snow get replaced), no tree in the way. */
     private boolean verge(int x, int y, int z) {
+        if (propCols != null && inChunk(x, z) && propCols[ChunkMask.idx(x & 15, z & 15)]) return false;
         BlockState ground = get(x, y, z), above = get(x, y + 1, z);
         if (!Palette.plantable(Blocks.SHORT_GRASS.defaultBlockState(), ground)) return false;
         if (!above.isAir() && !(above.canBeReplaced() && above.getFluidState().isEmpty())) return false;
@@ -940,7 +948,15 @@ public final class RoadPainter {
      */
     private void verge(int x, int z, int top, float d) {
         if (d < 0.6f || d >= VERGE_REACH) return;
+        if (propCols != null && propCols[ChunkMask.idx(x & 15, z & 15)]) return;
         long h = hash(x * 31 + 7, z * 17 - 3);
+        if (d < Palette.WILD_REACH) {
+            Palette.Wild wild = Palette.wild(chunk.biome(x, top + 1, z));
+            if (wild != null) {
+                wildVerge(x, z, top, d, wild, h);
+                return;
+            }
+        }
         int chance = (d < 1.5f ? 230 : 330) * clump(x, z) / 512;
         if ((int) (h & 1023) >= chance) return;
         int g = groundAt(x, z, top + 6);
@@ -956,6 +972,31 @@ public final class RoadPainter {
         }
         set(x, g + 1, z, plant);
         if (upper != null) set(x, g + 2, z, upper);
+    }
+
+    /**
+     * The first three rows out from the road edge in a flowery biome: the biome's mix, dense and in drifts (each 3x3-block
+     * cell has a lead plant, used 60% of the time). Taller plants only on the back two rows, sweet berries only on the last.
+     */
+    private void wildVerge(int x, int z, int top, float d, Palette.Wild wild, long h) {
+        if ((int) (h & 1023) >= (int) (1024 * wild.density() * Palette.wildRow(d))) return;
+        int g = groundAt(x, z, top + 6);
+        // the verge is usually under vanilla grass already (plains, swamp): the flowers take its place
+        if (!replaceablePlant(get(x, g + 1, z))) return;
+        long cell = hash(Math.floorDiv(x, 3) * 131 + 17, Math.floorDiv(z, 3) * 89 - 5);
+        BlockState plant = null;
+        if (d >= 1.6f && ((h >>> 40) & 1023) < 123) plant = Palette.wildTall(wild, h);
+        if (plant == null) plant = Palette.wildPlant(wild, cell, h, d >= 2.6f);
+        if (!Palette.wildPlantable(plant, get(x, g, z))) return;
+        BlockState upper = Palette.upperHalf(plant);
+        if (upper != null && !replaceablePlant(get(x, g + 2, z))) return;
+        place(x, g + 1, z, plant);
+        if (upper != null) set(x, g + 2, z, upper);
+    }
+
+    /** Air, or a plant that gives way (grass, either half of tall grass), not snow or water. Flowers are not replaceable. */
+    private static boolean replaceablePlant(BlockState s) {
+        return s.isAir() || s.canBeReplaced() && s.getFluidState().isEmpty() && !s.is(Blocks.SNOW);
     }
 
     /** Smooth 0..1024 density, bilinear over 6-block cells: plants come in patches, not evenly sprinkled. */

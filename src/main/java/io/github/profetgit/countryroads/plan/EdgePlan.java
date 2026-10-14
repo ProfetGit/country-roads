@@ -46,7 +46,7 @@ public final class EdgePlan {
     /** Samples at the start (a) and end (b) that run inside the village, from its street (the dock) out to open ground. */
     public int connA, connB;
 
-    public static final byte SIGN = 0, LAMP = 1, ORCHARD = 2;
+    public static final byte SIGN = 0, LAMP = 1, ORCHARD = 2, PROP = 3;
     /** Earthworks per sample: the largest cut or fill (blocks) within 6 samples; 99 on bridges, boardwalks, tunnels. */
     public byte[] earth;
 
@@ -54,6 +54,7 @@ public final class EdgePlan {
      * A post beside the road at (x, z). toRoad: horizontal direction from the post to the road (its arm or main sign
      * goes that way); along: direction along the road toward the destination (the welcome sign faces it).
      * SIGN: front1 destination, front2 distance, back this village. Uses the post column and its toRoad/along neighbours.
+     * PROP: (x, z) is the template's anchor, front1 the prop's name (paint.Props), toRoad the direction its local +z points to.
      */
     public record Decor(int x, int z, float y, byte type, net.minecraft.core.Direction toRoad, net.minecraft.core.Direction along,
                         String front1, String front2, String back) {

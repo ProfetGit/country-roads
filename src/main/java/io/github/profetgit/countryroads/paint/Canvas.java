@@ -32,6 +32,15 @@ public interface Canvas {
 
     int maxY();
 
+    /** The level entities are made for (null when unknown: entities are then skipped). */
+    default ServerLevel level() {
+        return null;
+    }
+
+    /** An entity standing in the chunk: stored with it while it generates, added to the level on a live chunk. */
+    default void addEntity(net.minecraft.world.entity.Entity entity) {
+    }
+
     /** Called before a log in the road's way is removed: a live canvas fells the whole tree. */
     default void beforeRemovingLog(BlockPos pos) {
     }
@@ -70,6 +79,14 @@ public interface Canvas {
 
             public int maxY() {
                 return chunk.getMaxY();
+            }
+
+            public ServerLevel level() {
+                return io.github.profetgit.countryroads.gen.GenContext.level();
+            }
+
+            public void addEntity(net.minecraft.world.entity.Entity entity) {
+                chunk.addEntity(entity);
             }
         };
     }
@@ -111,6 +128,14 @@ public interface Canvas {
 
             public void beforeRemovingLog(BlockPos pos) {
                 TreeClear.fell(level, pos);
+            }
+
+            public ServerLevel level() {
+                return level;
+            }
+
+            public void addEntity(net.minecraft.world.entity.Entity entity) {
+                level.addFreshEntity(entity);
             }
         };
     }

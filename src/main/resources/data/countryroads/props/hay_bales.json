@@ -1,0 +1,1 @@
+{"name":"hay_bales","asset":"cr_farm_props","version":"0.3.0","front":"road","palette":["minecraft:hay_block[axis=x]","minecraft:hay_block[axis=z]","minecraft:pumpkin"],"blocks":[[-2,0,1,0],[-1,0,0,0],[0,0,0,0],[0,0,1,1],[1,0,0,1],[2,0,1,2],[-1,1,0,1],[0,1,0,0]],"loot":[],"entities":[]}

@@ -398,7 +398,8 @@ public final class Planner {
             post(plan, jn, dir, jt[2], EdgePlan.SIGN, to, toDist + " blocks", back + "\n" + backDist + " blocks");
         }
         if (camps != null) camps.choose(plan);
-        plan.decor.removeIf(d -> !standable(d));
+        PropPlanner.dropNearCamps(plan);
+        plan.decor.removeIf(d -> d.type() != EdgePlan.PROP && !standable(d));
         return plan;
     }
 
@@ -770,6 +771,7 @@ public final class Planner {
                 else post(p, n - 1 - b - i, -1, side, EdgePlan.ORCHARD, "", "", "", 4.5f, 2);
             }
         }
+        PropPlanner.plan(p, terrain);
         runs(p);
     }
 

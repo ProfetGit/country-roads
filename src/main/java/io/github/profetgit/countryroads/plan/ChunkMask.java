@@ -89,6 +89,12 @@ public final class ChunkMask {
             .thenComparing(EdgePlan.Decor::front1));
         java.util.List<EdgePlan.Decor> out = new java.util.ArrayList<>();
         for (EdgePlan.Decor d : all) {
+            if (d.type() == EdgePlan.PROP) {
+                boolean clash = false;
+                for (EdgePlan.Decor o : out) clash |= Math.hypot(o.x() - d.x(), o.z() - d.z()) < (o.type() == EdgePlan.PROP ? 24 : 8);
+                if (!clash) out.add(d);
+                continue;
+            }
             int hit = -1;
             for (int k = 0; k < out.size() && hit < 0; k++) {
                 EdgePlan.Decor o = out.get(k);
@@ -171,7 +177,7 @@ public final class ChunkMask {
         for (EdgePlan.Decor d : resolveDecor(near)) {
             if (d.chunk() != key) continue;
             boolean inVillage = false;
-            for (VillageOracle.Footprint f : villages) inVillage |= f.contains(d.x(), d.z(), 1);
+            for (VillageOracle.Footprint f : villages) inVillage |= f.contains(d.x(), d.z(), d.type() == EdgePlan.PROP ? 8 : 1);
             if (!inVillage) {
                 m.decor.add(d);
                 m.any = true;

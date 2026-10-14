@@ -13,7 +13,7 @@ public final class PaintRules {
     }
 
     public static boolean connects(BlockState s) {
-        return s.is(BlockTags.FENCES) || s.is(BlockTags.WALLS) || s.is(BlockTags.STAIRS) || s.is(Blocks.LANTERN);
+        return s.is(BlockTags.FENCES) || s.is(BlockTags.WALLS) || s.is(BlockTags.STAIRS) || s.is(BlockTags.FENCE_GATES) || s.is(Blocks.LANTERN);
     }
 
     /** Ground itself: solid, not a fluid, not a tree or huge mushroom. */
@@ -31,5 +31,13 @@ public final class PaintRules {
             || natural.is(Blocks.MYCELIUM) || natural.is(Blocks.MUD) || natural.is(Blocks.TERRACOTTA) || natural.is(Blocks.MOSS_BLOCK))
             return natural;
         return Blocks.GRASS_BLOCK.defaultBlockState();
+    }
+
+    /** A seed for a block position (loot table seeds, placement noise). */
+    public static long mixPos(int x, int y, int z) {
+        long h = x * 0x2545F4914F6CDD1DL ^ y * 0x517CC1B727220A95L ^ z * 0x9E3779B97F4A7C15L;
+        h ^= h >>> 31;
+        h *= 0xBF58476D1CE4E5B9L;
+        return h ^ (h >>> 29);
     }
 }

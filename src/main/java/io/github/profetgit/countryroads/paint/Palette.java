@@ -390,6 +390,110 @@ public final class Palette {
         return b(r % 9 == 0 ? Blocks.FIREFLY_BUSH : Blocks.BUSH);
     }
 
+    /** Wildflower verges: rows (blocks out from the road edge) that carry the biome's flower mix, and their density factors. */
+    public static final float WILD_REACH = 3.6f;
+
+    public static float wildRow(float d) {
+        return d < 1.6f ? 1f : d < 2.6f ? 0.75f : 0.4f;
+    }
+
+    /** kind: 0 plain, 1 flower_amount + facing, 2 segment_amount + facing, 3 sweet berries (age 3, back row only). */
+    record Pick(Block block, int weight, int kind) {}
+
+    /** A biome's verge flowers: weighted picks, the two-block (or tall dry) plants of the back rows, and the base density. */
+    public record Wild(Pick[] picks, Block[] tall, float density) {}
+
+    private static Pick pk(Block b, int w) {
+        return new Pick(b, w, 0);
+    }
+
+    private static final Wild PLAINS_MIX = new Wild(new Pick[]{pk(Blocks.DANDELION, 4), pk(Blocks.POPPY, 3), pk(Blocks.OXEYE_DAISY, 3), pk(Blocks.AZURE_BLUET, 2),
+        pk(Blocks.CORNFLOWER, 2), pk(Blocks.RED_TULIP, 1), pk(Blocks.WHITE_TULIP, 1), pk(Blocks.GOLDEN_DANDELION, 1), pk(Blocks.SHORT_GRASS, 2)},
+        new Block[]{Blocks.SUNFLOWER}, 0.85f);
+    private static final Wild MEADOW_MIX = new Wild(new Pick[]{pk(Blocks.CORNFLOWER, 4), pk(Blocks.ALLIUM, 3), pk(Blocks.AZURE_BLUET, 3), pk(Blocks.OXEYE_DAISY, 3),
+        pk(Blocks.DANDELION, 2), pk(Blocks.SHORT_GRASS, 2)}, new Block[]{Blocks.TALL_GRASS}, 0.9f);
+    private static final Wild FOREST_MIX = new Wild(new Pick[]{pk(Blocks.LILY_OF_THE_VALLEY, 3), pk(Blocks.POPPY, 2), pk(Blocks.DANDELION, 2), pk(Blocks.ALLIUM, 1),
+        pk(Blocks.BUSH, 2), pk(Blocks.SHORT_GRASS, 2)}, new Block[]{Blocks.LILAC, Blocks.ROSE_BUSH, Blocks.PEONY}, 0.75f);
+    private static final Wild BIRCH_MIX = new Wild(new Pick[]{new Pick(Blocks.WILDFLOWERS, 6, 1), pk(Blocks.LILY_OF_THE_VALLEY, 2), new Pick(Blocks.LEAF_LITTER, 2, 2),
+        pk(Blocks.BUSH, 1), pk(Blocks.SHORT_GRASS, 1)}, null, 0.85f);
+    private static final Wild CHERRY_MIX = new Wild(new Pick[]{new Pick(Blocks.PINK_PETALS, 7, 1), pk(Blocks.ALLIUM, 1), pk(Blocks.SHORT_GRASS, 1)}, null, 0.85f);
+    private static final Wild TAIGA_MIX = new Wild(new Pick[]{pk(Blocks.FERN, 5), new Pick(Blocks.SWEET_BERRY_BUSH, 2, 3), new Pick(Blocks.LEAF_LITTER, 1, 2),
+        pk(Blocks.SHORT_GRASS, 2)}, new Block[]{Blocks.LARGE_FERN}, 0.75f);
+    private static final Wild SWAMP_MIX = new Wild(new Pick[]{pk(Blocks.BLUE_ORCHID, 5), pk(Blocks.FERN, 2), pk(Blocks.FIREFLY_BUSH, 1), pk(Blocks.SHORT_GRASS, 1)},
+        null, 0.75f);
+    private static final Wild SAVANNA_MIX = new Wild(new Pick[]{pk(Blocks.SHORT_DRY_GRASS, 6), pk(Blocks.DANDELION, 1), pk(Blocks.DEAD_BUSH, 1), pk(Blocks.ORANGE_TULIP, 1)},
+        new Block[]{Blocks.TALL_DRY_GRASS}, 0.75f);
+
+    /** The wildflower mix of a biome, or null (desert, badlands, snowy and the rest keep the plain verge). */
+    public static Wild wild(Holder<Biome> b) {
+        if (b.is(Biomes.PLAINS) || b.is(Biomes.SUNFLOWER_PLAINS)) return PLAINS_MIX;
+        if (b.is(Biomes.MEADOW)) return MEADOW_MIX;
+        if (b.is(Biomes.FOREST) || b.is(Biomes.FLOWER_FOREST)) return FOREST_MIX;
+        if (b.is(Biomes.BIRCH_FOREST) || b.is(Biomes.OLD_GROWTH_BIRCH_FOREST)) return BIRCH_MIX;
+        if (b.is(Biomes.CHERRY_GROVE)) return CHERRY_MIX;
+        if (b.is(Biomes.TAIGA) || b.is(Biomes.OLD_GROWTH_PINE_TAIGA) || b.is(Biomes.OLD_GROWTH_SPRUCE_TAIGA)) return TAIGA_MIX;
+        if (b.is(Biomes.SWAMP)) return SWAMP_MIX;
+        if (b.is(Biomes.SAVANNA) || b.is(Biomes.SAVANNA_PLATEAU) || b.is(Biomes.WINDSWEPT_SAVANNA)) return SAVANNA_MIX;
+        return null;
+    }
+
+    private static Pick weighted(Wild w, long r, boolean back) {
+        int total = 0;
+        for (Pick k : w.picks()) if (back || k.kind() != 3) total += k.weight();
+        int at = (int) Math.floorMod(r, (long) total);
+        for (Pick k : w.picks()) {
+            if (!back && k.kind() == 3) continue;
+            if (at < k.weight()) return k;
+            at -= k.weight();
+        }
+        return w.picks()[0];
+    }
+
+    /** One verge plant: the 3x3-block cell's lead plant (cellHash) 60% of the time, else a weighted pick (h). back: the berry row. */
+    public static BlockState wildPlant(Wild w, long cellHash, long h, boolean back) {
+        Pick lead = weighted(w, cellHash >>> 9, back);
+        Pick pick = Math.floorMod(h >>> 12, 100L) < 60 ? lead : weighted(w, h >>> 24, back);
+        BlockState s = pick.block().defaultBlockState();
+        long r = h >>> 36;
+        switch (pick.kind()) {
+            case 1 -> s = withInt(withFacing(s, (int) (r >> 3 & 3)), "flower_amount", 1 + (int) (r & 3));
+            case 2 -> s = withInt(withFacing(s, (int) (r >> 3 & 3)), "segment_amount", 1 + (int) (r & 3));
+            case 3 -> s = withInt(s, "age", 3);
+            default -> {
+            }
+        }
+        return s;
+    }
+
+    /** A two-block (or one-block tall dry) plant of the mix for the back rows, or null. */
+    public static BlockState wildTall(Wild w, long h) {
+        if (w.tall() == null) return null;
+        return w.tall()[(int) Math.floorMod(h >>> 30, (long) w.tall().length)].defaultBlockState();
+    }
+
+    private static BlockState withFacing(BlockState s, int k) {
+        var p = s.getBlock().getStateDefinition().getProperty("facing");
+        if (p instanceof net.minecraft.world.level.block.state.properties.EnumProperty<?> ep) return withEnum(s, ep, net.minecraft.core.Direction.from2DDataValue(k).getSerializedName());
+        return s;
+    }
+
+    private static <T extends Comparable<T>> BlockState withEnum(BlockState s, net.minecraft.world.level.block.state.properties.Property<T> p, String v) {
+        return p.getValue(v).map(val -> s.setValue(p, val)).orElse(s);
+    }
+
+    private static BlockState withInt(BlockState s, String name, int v) {
+        var p = s.getBlock().getStateDefinition().getProperty(name);
+        if (p instanceof net.minecraft.world.level.block.state.properties.IntegerProperty ip && ip.getPossibleValues().contains(v)) return s.setValue(ip, v);
+        return s;
+    }
+
+    /** plantable() plus dry plants on anything that holds vegetation (savanna grass), as vanilla lets them. */
+    public static boolean wildPlantable(BlockState plant, BlockState ground) {
+        if (plant.is(Blocks.SHORT_DRY_GRASS) || plant.is(Blocks.TALL_DRY_GRASS) || plant.is(Blocks.DEAD_BUSH))
+            return ground.is(net.minecraft.tags.BlockTags.SUPPORTS_DRY_VEGETATION) || plantable(plant, ground);
+        return plantable(plant, ground);
+    }
+
     /** The upper half of a two-block plant, or null for a one-block one. */
     public static BlockState upperHalf(BlockState plant) {
         if (!(plant.getBlock() instanceof net.minecraft.world.level.block.DoublePlantBlock)) return null;

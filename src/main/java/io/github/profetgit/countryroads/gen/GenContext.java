@@ -28,6 +28,7 @@ public final class GenContext {
     public static final java.util.concurrent.atomic.AtomicLong UNDONE = new java.util.concurrent.atomic.AtomicLong();
 
     private final RoadNetwork network;
+    private final ServerLevel level;
     private final Long2ObjectOpenHashMap<ChunkMask> masks = new Long2ObjectOpenHashMap<>();
     int featureDepth;
     private boolean bypass;
@@ -37,8 +38,15 @@ public final class GenContext {
     private BlockState[] tprev = new BlockState[256];
     private final it.unimi.dsi.fastutil.longs.Long2IntOpenHashMap grounds = new it.unimi.dsi.fastutil.longs.Long2IntOpenHashMap();
 
-    private GenContext(RoadNetwork network) {
+    private GenContext(RoadNetwork network, ServerLevel level) {
         this.network = network;
+        this.level = level;
+    }
+
+    /** The level whose chunk is generating on this thread (null outside a painting hook). */
+    public static ServerLevel level() {
+        GenContext c = CURRENT.get();
+        return c == null ? null : c.level;
     }
 
     public static void begin(ServerLevel level, ChunkPos center) {
@@ -47,7 +55,7 @@ public final class GenContext {
             CURRENT.remove();
             return;
         }
-        GenContext c = new GenContext(n);
+        GenContext c = new GenContext(n, level);
         boolean any = false;
         for (int dx = -1; dx <= 1; dx++)
             for (int dz = -1; dz <= 1; dz++) {
@@ -97,6 +105,8 @@ public final class GenContext {
     static final String DEBUG = System.getProperty("countryroads.debugColumn", "");
     /** Trees keep this far (blocks, square) from signposts and lamp posts: a crown low over a post would be cut by it. */
     static final int POST_CLEAR = 6;
+    /** Trees keep this far from a roadside prop's anchor (the widest prop reaches 5 blocks along the road, and a crown reaches further). */
+    static final int PROP_CLEAR = 10;
 
     public static boolean guardWrite(WorldGenRegion region, BlockPos pos, BlockState state) {
         GenContext c = CURRENT.get();
@@ -204,8 +214,10 @@ public final class GenContext {
         // signposts and lamp posts need their column and arm free of trees
         if (radius == 0)
             for (ChunkMask m : c.masks.values())
-                for (EdgePlan.Decor d : m.decor)
-                    if (d.type() != EdgePlan.ORCHARD && Math.abs(d.x() - origin.getX()) <= POST_CLEAR && Math.abs(d.z() - origin.getZ()) <= POST_CLEAR) return true;
+                for (EdgePlan.Decor d : m.decor) {
+                    int clear = d.type() == EdgePlan.PROP ? PROP_CLEAR : POST_CLEAR;
+                    if (d.type() != EdgePlan.ORCHARD && Math.abs(d.x() - origin.getX()) <= clear && Math.abs(d.z() - origin.getZ()) <= clear) return true;
+                }
         for (int dx = -radius; dx <= radius; dx += Math.max(1, radius)) {
             for (int dz = -radius; dz <= radius; dz += Math.max(1, radius)) {
                 int x = origin.getX() + dx, z = origin.getZ() + dz;

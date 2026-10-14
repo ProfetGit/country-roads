@@ -127,6 +127,8 @@ public final class DevCommands {
                     .executes(c -> StreetChecks.roadSpeed(c.getSource(), IntegerArgumentType.getInteger(c, "x"), IntegerArgumentType.getInteger(c, "z"))))))
             .then(Commands.literal("decor")
                 .then(Commands.argument("radius", IntegerArgumentType.integer(16, 4000)).executes(c -> RoadChecks.decor(c.getSource(), IntegerArgumentType.getInteger(c, "radius")))))
+            .then(Commands.literal("props")
+                .then(Commands.argument("radius", IntegerArgumentType.integer(16, 4000)).executes(c -> PropChecks.props(c.getSource(), IntegerArgumentType.getInteger(c, "radius")))))
             .then(Commands.literal("perks")
                 .then(Commands.argument("radius", IntegerArgumentType.integer(16, 4000)).executes(c -> RoadChecks.perks(c.getSource(), IntegerArgumentType.getInteger(c, "radius")))))
             .then(Commands.literal("inhabit")

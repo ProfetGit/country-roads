@@ -361,7 +361,7 @@ final class RoadChecks {
             var resolved = ChunkMask.resolveDecor(n.readyPlans());
             for (EdgePlan p : n.readyPlans()) {
                 for (EdgePlan.Decor d : p.decor) {
-                    if (!resolved.contains(d)) continue;
+                    if (!resolved.contains(d) || d.type() == EdgePlan.PROP) continue;
                     if (Math.abs(d.x() - at.getX()) > radius || Math.abs(d.z() - at.getZ()) > radius) continue;
                     if (n.oracle.footprint(p.edge.a()).contains(d.x(), d.z(), 1) || n.oracle.footprint(p.edge.b()).contains(d.x(), d.z(), 1)) continue;
                     ChunkAccess chunk = level.getChunkSource().getChunk(d.x() >> 4, d.z() >> 4, ChunkStatus.FULL, true);
