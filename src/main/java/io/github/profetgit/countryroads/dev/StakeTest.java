@@ -3,7 +3,7 @@ package io.github.profetgit.countryroads.dev;
 import io.github.profetgit.countryroads.CountryRoads;
 import io.github.profetgit.countryroads.path.HousePaths;
 import io.github.profetgit.countryroads.path.Stake;
-import io.github.profetgit.countryroads.path.StakeBlockEntity;
+import io.github.profetgit.countryroads.path.PathData;
 import java.util.Arrays;
 import net.minecraft.commands.CommandSourceStack;
 import net.minecraft.core.BlockPos;
@@ -29,7 +29,13 @@ final class StakeTest {
         return run(src, x, z, keep, viaX, viaZ, PRELOAD);
     }
 
+    /** staketest ... door / doorkeep: start the path from a door with the stake item (and make it permanent after the build). */
+    static boolean doorMode, commitMode;
+
     static int run(CommandSourceStack src, int x, int z, boolean keep, int viaX, int viaZ, int preload) {
+        final boolean door = doorMode, commitTest = commitMode;
+        doorMode = false;
+        commitMode = false;
         ServerLevel level = src.getLevel();
         int r = preload, cr = (r >> 4) + 1;
         int[] phase = {-2}, settle = {0, 0};
@@ -59,8 +65,14 @@ final class StakeTest {
                 if (settle[0] < 40 && ++settle[1] < 1200) return false;
                 int y = level.getHeight(Heightmap.Types.MOTION_BLOCKING_NO_LEAVES, x, z);
                 stakeRef[0] = new BlockPos(x, y, z);
-                level.setBlock(stakeRef[0], Stake.BLOCK.defaultBlockState(), 3);
-                HousePaths.survey(level, stakeRef[0], null);
+                if (door) {
+                    level.setBlock(stakeRef[0], Blocks.OAK_DOOR.defaultBlockState(), 3);
+                    level.setBlock(stakeRef[0].above(), Blocks.OAK_DOOR.defaultBlockState().setValue(net.minecraft.world.level.block.DoorBlock.HALF, net.minecraft.world.level.block.state.properties.DoubleBlockHalf.UPPER), 3);
+                    HousePaths.useDoor(level, stakeRef[0], null, net.minecraft.core.Direction.SOUTH);
+                } else {
+                    level.setBlock(stakeRef[0], Stake.BLOCK.defaultBlockState(), 3);
+                    HousePaths.survey(level, stakeRef[0], null);
+                }
                 if (viaX != Integer.MIN_VALUE) {
                     for (int dx = -1; dx <= 1; dx++)
                         for (int dz = -1; dz <= 1; dz++) hold(level, (viaX >> 4) + dx, (viaZ >> 4) + dz, true);
@@ -75,7 +87,7 @@ final class StakeTest {
             }
             BlockPos stake = stakeRef[0];
             if (HousePaths.busy()) return false;
-            StakeBlockEntity be = (StakeBlockEntity) level.getBlockEntity(stake);
+            PathData be = HousePaths.data(level, stake);
             if (phase[0] == 0) {
                 var st = io.github.profetgit.countryroads.path.SurveyStats.last;
                 if (st != null) {
@@ -91,7 +103,7 @@ final class StakeTest {
             }
             switch (phase[0]++) {
                 case 0 -> {
-                    if (be == null || be.status != StakeBlockEntity.PREVIEW) {
+                    if (be == null || be.status != PathData.PREVIEW) {
                         CountryRoads.LOG.info("CR-STAKE FAIL no survey (status " + (be == null ? "?" : be.status) + ")");
                         return true;
                     }
@@ -108,6 +120,21 @@ final class StakeTest {
                     walk(level, cells[0], stake, skips[0]);
                     map(level, cells[0]);
                     sim(level, cells[0]);
+                    if (commitTest) {
+                        int journalBefore = be.journal.size();
+                        var enc = PathData.CODEC.encodeStart(net.minecraft.nbt.NbtOps.INSTANCE, be).result();
+                        var dec = enc.flatMap(t -> PathData.CODEC.parse(net.minecraft.nbt.NbtOps.INSTANCE, t).result());
+                        boolean codecOk = dec.isPresent() && dec.get().journal.size() == journalBefore && dec.get().status == be.status && dec.get().builtAt == be.builtAt
+                            && dec.get().columns.size() == be.columns.size() && dec.get().journal.get(0).laid() != null;
+                        CountryRoads.LOG.info("CR-STAKE-CODEC " + (codecOk ? "PASS" : "FAIL") + " journal=" + journalBefore + " builtAt=" + be.builtAt);
+                        boolean ok = HousePaths.commit(level, stake);
+                        PathData after = HousePaths.data(level, stake);
+                        boolean gone = door ? after == null : !level.getBlockState(stake).is(Stake.BLOCK);
+                        boolean second = HousePaths.commit(level, stake);
+                        CountryRoads.LOG.info("CR-STAKE-COMMIT " + (ok && gone && !second && journalBefore > 0 ? "PASS" : "FAIL") + " door=" + door + " committed=" + ok + " anchorGone=" + gone
+                            + " secondCommit=" + second + " journalBefore=" + journalBefore + " journalAfter=" + be.journal.size());
+                        return true;
+                    }
                     if (keep) {
                         // leave it built and print a camera shot: behind the stake, looking down the path
                         var cs = cells[0];
@@ -259,13 +286,33 @@ final class StakeTest {
                     }
                     int[] mid = snapshot(level, cells[0]);
                     int changed = diff(before[0], mid);
+                    BlockPos built0 = null;
+                    net.minecraft.world.level.block.state.BlockState orig0 = null;
+                    if (door) {
+                        // a block the player built over the path afterwards must survive taking it up
+                        for (var e : be.journal) {
+                            var cur = level.getBlockState(e.pos());
+                            if (e.laid() != null && !cur.isAir() && !cur.is(Blocks.OBSIDIAN) && cur.getBlock() == e.laid().getBlock() && cur.isSolid() && e.state().isSolid()) {
+                                built0 = e.pos();
+                                orig0 = e.state();
+                                break;
+                            }
+                        }
+                        if (built0 != null) level.setBlock(built0, Blocks.OBSIDIAN.defaultBlockState(), 3);
+                    }
                     HousePaths.takeUp(level, stake);
+                    if (door) {
+                        boolean kept = built0 != null && level.getBlockState(built0).is(Blocks.OBSIDIAN);
+                        CountryRoads.LOG.info("CR-STAKE-UNDOSKIP " + (kept ? "PASS" : "FAIL") + " at=" + built0);
+                        if (kept) level.setBlock(built0, orig0, 3);
+                    }
                     // a waypoint stake is used up by the build (it comes back as an item): put it back for the comparison
                     if (viaRef[0] != null) level.setBlock(viaRef[0], Stake.BLOCK.defaultBlockState(), 3);
                     int[] after = snapshot(level, cells[0]);
                     int left = diff(before[0], after);
                     if (left > 0) explain(level, cells[0], beforeStates[0]);
                     level.setBlock(stake, Blocks.AIR.defaultBlockState(), 3);
+                    if (door) level.setBlock(stake.above(), Blocks.AIR.defaultBlockState(), 3);
                     if (viaRef[0] != null) level.setBlock(viaRef[0], Blocks.AIR.defaultBlockState(), 3);
                     CountryRoads.LOG.info("CR-STAKE " + (built[0] > 0 && changed > 0 && left == 0 ? "PASS" : "FAIL") + " cells=" + built[0]
                         + " journal=" + built[1] + " changedColumns=" + changed + " notRestored=" + left);
@@ -327,7 +374,7 @@ final class StakeTest {
                 if (HousePaths.busy() && age[0] < 4000) return false;
                 int previews = 0;
                 for (BlockPos s : stakes)
-                    if (level.getBlockEntity(s) instanceof StakeBlockEntity be && be.status == StakeBlockEntity.PREVIEW) previews++;
+                    { PathData be = HousePaths.data(level, s); if (be != null && be.status == PathData.PREVIEW) previews++; }
                 CountryRoads.LOG.info("CR-STAKE-MULTI " + (previews == n ? "PASS" : "FAIL") + " previews=" + previews + "/" + n + " ticks=" + age[0]
                     + " ticketsLeft=" + HousePaths.surveyTickets());
                 for (BlockPos s : stakes) level.setBlock(s, Blocks.AIR.defaultBlockState(), 3);
@@ -643,7 +690,7 @@ final class StakeTest {
         }
         if (tCells > 0) {
             int torches = 0;
-            if (level.getBlockEntity(stake) instanceof StakeBlockEntity sbe) torches = sbe.torchPos.size();
+            { PathData sbe = HousePaths.data(level, stake); if (sbe != null) torches = sbe.torchPos.size(); }
             CountryRoads.LOG.info("CR-STAKE-TUNNEL " + (tBad == 0 ? "PASS" : "FAIL") + " cells=" + tCells + " portals=" + tPortals + " frames=" + tFrames + " torches=" + torches + " bad=" + tBad);
         }
         int walled = 0, centreN = 0, stairWalled = 0, stairN = 0;

@@ -112,16 +112,61 @@ public final class HousePaths {
     private static final Map<BlockPos, ServerPlayer> OWNERS = new HashMap<>();
 
     /**
+     * What a path remembers: the stake's own block entity, or the record of a path started from a door or fence gate
+     * (keyed by the door's position). Null when there is none.
+     */
+    public static PathData data(ServerLevel level, BlockPos anchor) {
+        if (level.getBlockEntity(anchor) instanceof StakeBlockEntity s) return s.data;
+        return PathRecords.of(level).door(anchor);
+    }
+
+    /** A stake block, or the door or fence gate a path was started from. */
+    static boolean anchored(ServerLevel level, BlockPos pos) {
+        BlockState st = level.getBlockState(pos);
+        return st.is(Stake.BLOCK) || isDoorLike(st);
+    }
+
+    public static boolean isDoorLike(BlockState st) {
+        return st.getBlock() instanceof net.minecraft.world.level.block.DoorBlock || st.getBlock() instanceof net.minecraft.world.level.block.FenceGateBlock;
+    }
+
+    /** The key of a door: its lower half. */
+    public static BlockPos anchorOf(ServerLevel level, BlockPos pos) {
+        BlockState st = level.getBlockState(pos);
+        if (st.getBlock() instanceof net.minecraft.world.level.block.DoorBlock && st.getValue(net.minecraft.world.level.block.DoorBlock.HALF) == net.minecraft.world.level.block.state.properties.DoubleBlockHalf.UPPER)
+            return pos.below();
+        return pos;
+    }
+
+    /** The cell outside a door where the path starts: the first of the three cells that way that is not a doorstep or a wall. */
+    static BlockPos startOutside(ServerLevel level, BlockPos anchor, Direction outside) {
+        for (int i = 1; i <= 3; i++) {
+            BlockPos p = anchor.relative(outside, i);
+            if (level.getBlockState(p).getCollisionShape(level, p).isEmpty() && !Retrofit.isCrafted(level.getBlockState(p.below()))) return p;
+        }
+        return anchor.relative(outside);
+    }
+
+    /** The stake item was used on a door or fence gate: survey, build or ask what to do with the built path. `outside`: the side the player is on. */
+    public static void useDoor(ServerLevel level, BlockPos door, ServerPlayer player, Direction outside) {
+        BlockPos anchor = anchorOf(level, door);
+        PathData d = PathRecords.of(level).open(anchor);
+        if (d.status != PathData.BUILT) d.start = startOutside(level, anchor, outside);
+        use(level, anchor, player);
+    }
+
+    /**
      * A stake was placed. Near a stake of the same player whose path is not built yet it is a waypoint of that path
      * (the route is surveyed again through it); otherwise it is the door of a new path.
      */
     public static void placed(ServerLevel level, BlockPos pos, ServerPlayer player) {
         BlockPos door = player != null && player.isShiftKeyDown() ? null : nearestDoor(level, pos, player);
-        if (door == null || !(level.getBlockEntity(pos) instanceof StakeBlockEntity wbe) || !(level.getBlockEntity(door) instanceof StakeBlockEntity dbe)) {
+        PathData wbe = data(level, pos), dbe = door == null ? null : data(level, door);
+        if (door == null || wbe == null || dbe == null) {
             survey(level, pos, player);
             return;
         }
-        wbe.role = StakeBlockEntity.WAYPOINT;
+        wbe.role = PathData.WAYPOINT;
         wbe.door = door;
         dbe.waypoints.add(pos);
         tell(player, Component.translatable("countryroads.stake.waypoint", dbe.waypoints.size()).withStyle(ChatFormatting.AQUA), true);
@@ -136,7 +181,8 @@ public final class HousePaths {
         for (Preview p : PREVIEWS.values()) if (p.level == level && p.player == player) doors.add(p.stake);
         for (BlockPos d : doors) {
             if (d.equals(pos) || Math.max(Math.abs(d.getX() - pos.getX()), Math.abs(d.getZ() - pos.getZ())) > WAYPOINT_RADIUS) continue;
-            if (!(level.getBlockEntity(d) instanceof StakeBlockEntity be) || be.role != StakeBlockEntity.DOOR || be.status == StakeBlockEntity.BUILT) continue;
+            PathData be = data(level, d);
+            if (be == null || be.role != PathData.DOOR || be.status == PathData.BUILT) continue;
             double dist = d.distSqr(pos);
             if (dist < bestD) {
                 bestD = dist;
@@ -272,26 +318,43 @@ public final class HousePaths {
         cancelSurveys(stake);
         PREVIEWS.remove(stake);
         List<BlockPos> waypoints = new ArrayList<>();
-        if (level.getBlockEntity(stake) instanceof StakeBlockEntity be) {
+        BlockPos start = stake;
+        PathData be = data(level, stake);
+        if (be != null) {
             be.waypoints.removeIf(w -> !level.getBlockState(w).is(Stake.BLOCK));
             waypoints.addAll(be.waypoints);
-            if (be.status == StakeBlockEntity.PREVIEW) {
-                be.status = StakeBlockEntity.NONE;
+            if (be.start != null) start = be.start;
+            if (be.status == PathData.PREVIEW) {
+                be.status = PathData.NONE;
                 be.survey = null;
             }
         }
         if (player != null) OWNERS.put(stake, player);
-        SURVEYS.add(new PathSearch(level, stake, player, waypoints));
+        SURVEYS.add(new PathSearch(level, stake, start, player, waypoints));
         tell(player, Component.translatable("countryroads.stake.surveying").withStyle(ChatFormatting.GRAY), true);
     }
 
+    /** The path is built and still undoable: say so, with the two choices as chat buttons. */
+    private static void builtChoice(BlockPos anchor, ServerPlayer player) {
+        if (player == null) return;
+        String at = anchor.getX() + " " + anchor.getY() + " " + anchor.getZ();
+        player.sendSystemMessage(Component.translatable("countryroads.path.built_choice")
+            .append(" ").append(button("countryroads.path.keep", "roadpath keep " + at, ChatFormatting.GREEN))
+            .append(" ").append(button("countryroads.path.undo", "roadpath undo " + at, ChatFormatting.RED)));
+    }
+
+    private static Component button(String key, String command, ChatFormatting color) {
+        return Component.translatable(key).withStyle(st -> st.withColor(color).withBold(true).withClickEvent(new net.minecraft.network.chat.ClickEvent.RunCommand(command)));
+    }
+
     public static void use(ServerLevel level, BlockPos stake, ServerPlayer player) {
-        if (!(level.getBlockEntity(stake) instanceof StakeBlockEntity be)) return;
-        if (be.status == StakeBlockEntity.BUILT) {
-            tell(player, Component.translatable("countryroads.stake.built"), true);
+        PathData be = data(level, stake);
+        if (be == null) return;
+        if (be.status == PathData.BUILT) {
+            builtChoice(stake, player);
             return;
         }
-        if (be.status != StakeBlockEntity.PREVIEW || be.survey == null) {
+        if (be.status != PathData.PREVIEW || be.survey == null) {
             survey(level, stake, player);
             return;
         }
@@ -299,8 +362,10 @@ public final class HousePaths {
         List<ItemStack> paid = new ArrayList<>();
         be.paid.clear();
         be.paid.addAll(paid);
-        be.status = StakeBlockEntity.BUILT;
+        be.status = PathData.BUILT;
         be.survey = null;
+        be.builtAt = level.getGameTime();
+        PathRecords.of(level).mark(stake, be.builtAt);
         be.setChanged();
         PREVIEWS.remove(stake);
         java.util.Set<Long> chunks = new java.util.HashSet<>();
@@ -313,17 +378,59 @@ public final class HousePaths {
         tell(player, Component.translatable("countryroads.stake.building", s.cells.size()), true);
     }
 
-    /** The stake is being broken: put back every block the path changed and give back the materials. */
+    /** The chat buttons of a built path: keep it for good, or take it up again (the player must be near it). */
+    public static void answer(ServerLevel level, BlockPos anchor, ServerPlayer player, boolean keep) {
+        PathData d = data(level, anchor);
+        if (d == null || d.status != PathData.BUILT || !anchored(level, anchor) || player.distanceToSqr(net.minecraft.world.phys.Vec3.atCenterOf(anchor)) > 128 * 128) {
+            tell(player, Component.translatable("countryroads.path.gone").withStyle(ChatFormatting.RED), false);
+            return;
+        }
+        if (keep) {
+            commit(level, anchor);
+            tell(player, Component.translatable("countryroads.path.committed"), false);
+        } else {
+            takeUp(level, anchor);
+            tell(player, Component.translatable("countryroads.path.undone"), false);
+        }
+    }
+
+    /** Built paths can be undone for a day (24000 ticks of game time); then the stake goes and the path is part of the land. */
+    static final long COMMIT_TICKS = 24000;
+
+    /** The path stays for good: nothing can undo it any more, the stake (if any) is taken away and comes back as an item. */
+    public static boolean commit(ServerLevel level, BlockPos anchor) {
+        PathData d = data(level, anchor);
+        PathRecords records = PathRecords.of(level);
+        if (d == null || d.status != PathData.BUILT) {
+            records.unmark(anchor);
+            return false;
+        }
+        ROLLOUTS.removeIf(r -> r.stake.equals(anchor));
+        d.forget();
+        OWNERS.remove(anchor);
+        PREVIEWS.remove(anchor);
+        if (level.getBlockState(anchor).is(Stake.BLOCK)) {
+            records.unmark(anchor);
+            level.destroyBlock(anchor, true);
+        } else {
+            records.drop(anchor);
+        }
+        return true;
+    }
+
+    /** The stake is being broken (or the path undone from a door): put back every block the path changed and give back the materials. */
     public static void takeUp(ServerLevel level, BlockPos stake) {
         PREVIEWS.remove(stake);
         cancelSurveys(stake);
         ROLLOUTS.removeIf(r -> r.stake.equals(stake));
-        if (level.getBlockEntity(stake) instanceof StakeBlockEntity first) {
-            if (first.role == StakeBlockEntity.WAYPOINT) {
+        PathData first = data(level, stake);
+        if (first != null) {
+            if (first.role == PathData.WAYPOINT) {
                 // a waypoint taken away: the door surveys again without it
                 BlockPos door = first.door;
-                first.role = StakeBlockEntity.DOOR;
-                if (door != null && level.getBlockEntity(door) instanceof StakeBlockEntity dbe && dbe.status != StakeBlockEntity.BUILT) {
+                first.role = PathData.DOOR;
+                PathData dbe = door == null ? null : data(level, door);
+                if (dbe != null && dbe.status != PathData.BUILT) {
                     dbe.waypoints.remove(stake);
                     survey(level, door, OWNERS.get(door));
                 }
@@ -333,7 +440,11 @@ public final class HousePaths {
             first.waypoints.clear();
             OWNERS.remove(stake);
         }
-        if (!(level.getBlockEntity(stake) instanceof StakeBlockEntity be) || be.status != StakeBlockEntity.BUILT) return;
+        PathData be = first;
+        if (be == null || be.status != PathData.BUILT) {
+            if (be != null && !level.getBlockState(stake).is(Stake.BLOCK)) PathRecords.of(level).drop(stake);
+            return;
+        }
         // torches the player mined out of the tunnel are not paid back a second time
         // (and bridge lanterns: their positions are kept in the same list)
         int torchesLeft = 0, lanternsLeft = 0;
@@ -342,10 +453,14 @@ public final class HousePaths {
             if (ts.is(Blocks.WALL_TORCH)) torchesLeft++;
             else if (ts.is(Blocks.LANTERN)) lanternsLeft++;
         }
+        PathBlocks blocks = PathBlocks.of(level);
         for (int i = be.journal.size() - 1; i >= 0; i--) {
-            StakeBlockEntity.Entry e = be.journal.get(i);
+            PathData.Entry e = be.journal.get(i);
+            BlockState now = level.getBlockState(e.pos());
+            // a block the player built over the path since stays: only what the path laid (or what was dug out of it) goes back
+            if (e.laid() != null && !now.isAir() && now.getBlock() != e.laid().getBlock()) continue;
             level.setBlock(e.pos(), e.state(), EXACT);
-            PathBlocks.of(level).forget(e.pos());
+            blocks.forget(e.pos());
         }
         HousePathIndex index = HousePathIndex.of(level);
         for (long c : be.columns) {
@@ -363,11 +478,9 @@ public final class HousePaths {
             }
             if (!back.isEmpty()) Block.popResource(level, stake, back);
         }
-        be.torchPos.clear();
-        be.journal.clear();
-        be.paid.clear();
-        be.columns.clear();
-        be.status = StakeBlockEntity.NONE;
+        be.forget();
+        if (level.getBlockState(stake).is(Stake.BLOCK)) PathRecords.of(level).unmark(stake);
+        else PathRecords.of(level).drop(stake);
     }
 
     public static void tick(net.minecraft.server.MinecraftServer server) {
@@ -399,6 +512,16 @@ public final class HousePaths {
                 SurveyStats.last = j.stats;
             }
         }
+        if (server.getTickCount() % 200 == 0) {
+            for (ServerLevel lv : server.getAllLevels()) {
+                for (long k : PathRecords.of(lv).older(lv.getGameTime(), COMMIT_TICKS)) {
+                    BlockPos p = BlockPos.of(k);
+                    if (!lv.hasChunkAt(p) || ROLLOUTS.stream().anyMatch(r -> r.stake.equals(p))) continue;
+                    ServerPlayer owner = OWNERS.get(p);
+                    if (commit(lv, p) && owner != null) tell(owner, Component.translatable("countryroads.path.committed"), true);
+                }
+            }
+        }
         for (Iterator<Rollout> it = ROLLOUTS.iterator(); it.hasNext(); ) {
             Rollout r = it.next();
             if (roll(r)) it.remove();
@@ -406,11 +529,12 @@ public final class HousePaths {
         if ((server.getTickCount() & 7) == 0) {
             for (Iterator<Preview> it = PREVIEWS.values().iterator(); it.hasNext(); ) {
                 Preview p = it.next();
-                if (p.level.getGameTime() > p.until || p.player == null || p.player.isRemoved() || !p.level.getBlockState(p.stake).is(Stake.BLOCK)) {
+                if (p.level.getGameTime() > p.until || p.player == null || p.player.isRemoved() || !anchored(p.level, p.stake)) {
                     it.remove();
                     continue;
                 }
-                if (p.level.getBlockEntity(p.stake) instanceof StakeBlockEntity pbe) {
+                PathData pbe = data(p.level, p.stake);
+                if (pbe != null) {
                     DustParticleOptions blue = new DustParticleOptions(0x4FC3F7, 1.4f);
                     for (BlockPos w : pbe.waypoints)
                         for (int dy = 1; dy <= 4; dy++) p.level.sendParticles(p.player, blue, true, false, w.getX() + 0.5, w.getY() + dy * 0.5, w.getZ() + 0.5, 1, 0.05, 0.1, 0.05, 0);
@@ -436,8 +560,9 @@ public final class HousePaths {
             return;
         }
         Survey sv = j.survey;
-        if (j.level.hasChunkAt(j.stake) && j.level.getBlockEntity(j.stake) instanceof StakeBlockEntity be && be.status != StakeBlockEntity.BUILT) {
-            be.status = StakeBlockEntity.PREVIEW;
+        PathData be = j.level.hasChunkAt(j.stake) && anchored(j.level, j.stake) ? (isDoorLike(j.level.getBlockState(j.stake)) ? PathRecords.of(j.level).open(j.stake) : data(j.level, j.stake)) : null;
+        if (be != null && be.status != PathData.BUILT) {
+            be.status = PathData.PREVIEW;
             be.survey = sv;
             if (j.player != null) PREVIEWS.put(j.stake, new Preview(j.level, j.stake, j.player, sv.cells, j.level.getGameTime() + PREVIEW_TICKS));
             tell(j.player, Component.translatable("countryroads.stake.preview", sv.length, sv.tunnelCells).withStyle(ChatFormatting.YELLOW), false);
@@ -453,7 +578,8 @@ public final class HousePaths {
         if (r.age[0]++ % PathSearch.TICKET_EVERY == 0)
             for (long ch : r.chunks) r.level.getChunkSource().addTicketWithRadius(net.minecraft.server.level.TicketType.PORTAL, new ChunkPos(ChunkPos.getX(ch), ChunkPos.getZ(ch)), 0);
         if (!r.level.hasChunkAt(r.stake)) return false;
-        if (!(r.level.getBlockEntity(r.stake) instanceof StakeBlockEntity be)) return true;
+        PathData be = data(r.level, r.stake);
+        if (be == null) return true;
         int per = Math.max(1, r.cells.size() / 60);
         for (int k = 0; k < per && r.next[0] < r.cells.size(); k++) {
             Cell c = r.cells.get(r.next[0]);
@@ -503,7 +629,7 @@ public final class HousePaths {
         return out;
     }
 
-    private static void lay(ServerLevel level, StakeBlockEntity be, Cell c, boolean quiet, Rollout r) {
+    private static void lay(ServerLevel level, PathData be, Cell c, boolean quiet, Rollout r) {
         java.util.Set<Long> cols = r.cols, rocky = r.rocky;
         int y = c.y;
         long h = c.x * 0x2545F4914F6CDD1DL ^ c.z * 0x9E3779B97F4A7C15L;
@@ -579,7 +705,7 @@ public final class HousePaths {
      * A bank column: the ground cut down or filled up to y, topped with its own cover (grass for bare dirt), so the
      * slope beside the path steps one block per column. Plants on the old ground go; trees and built blocks stay.
      */
-    private static void bank(ServerLevel level, StakeBlockEntity be, Cell c) {
+    private static void bank(ServerLevel level, PathData be, Cell c) {
         int top = level.getHeight(Heightmap.Types.MOTION_BLOCKING_NO_LEAVES, c.x, c.z) - 1;
         if (top == c.y) return;
         BlockPos.MutableBlockPos p = new BlockPos.MutableBlockPos(c.x, top, c.z);
@@ -603,7 +729,7 @@ public final class HousePaths {
      * post from the water bed up to rail height. Fences take their connections from what stands around them, so the
      * quiet second pass joins them up.
      */
-    private static void rail(ServerLevel level, StakeBlockEntity be, Cell c) {
+    private static void rail(ServerLevel level, PathData be, Cell c) {
         BlockPos at = new BlockPos(c.x, c.y, c.z);
         var biome = level.getBiome(at);
         // posts in the deck's own log, beams stripped in the darker trim wood (user, 2026-10-13: no spruce posts on oak)
@@ -658,7 +784,7 @@ public final class HousePaths {
      * A deck cell of an arched bridge: a plank arch/2 blocks up, a bottom slab on it for an odd half, the water open
      * under it, an upside-down stair under the step of the underside so it curves, and room to walk above.
      */
-    private static void archDeck(ServerLevel level, StakeBlockEntity be, Cell c, net.minecraft.core.Holder<net.minecraft.world.level.biome.Biome> biome) {
+    private static void archDeck(ServerLevel level, PathData be, Cell c, net.minecraft.core.Holder<net.minecraft.world.level.biome.Biome> biome) {
         BlockPos at = new BlockPos(c.x, c.y + c.arch / 2, c.z);
         BlockState planks = Palette.deck(biome);
         change(level, be, at, planks);
@@ -677,7 +803,7 @@ public final class HousePaths {
     }
 
     /** Under a raised deck block: an upside-down stair toward a neighbour along the bridge whose deck sits a block lower. */
-    private static void archUnderside(ServerLevel level, StakeBlockEntity be, Cell c, BlockPos deck, Block wood) {
+    private static void archUnderside(ServerLevel level, PathData be, Cell c, BlockPos deck, Block wood) {
         if (c.arch < 2) return;
         Block stairs = Palette.stairsOf(wood);
         if (stairs == null) return;
@@ -699,7 +825,7 @@ public final class HousePaths {
      * bed, the kit's air clearing what grew or stood there (never logs or anything built), and path ground under the
      * two end cells where the walked line meets the kit.
      */
-    private static void stampBridge(ServerLevel level, StakeBlockEntity be, BridgeKit.Bridge br, boolean quiet) {
+    private static void stampBridge(ServerLevel level, PathData be, BridgeKit.Bridge br, boolean quiet) {
         net.minecraft.world.level.block.Rotation rot = BridgeKit.rotation(br.dir());
         int len = br.length();
         String[] woods = BridgeKit.woods(level.getBiome(BridgeKit.world(br, BridgeKit.MID, 2, len / 2)));
@@ -754,7 +880,7 @@ public final class HousePaths {
     static final int VERGE_PLANTS = 330, BANK_PLANTS = 260;
 
     /** A verge plant on the ground of (x, z) (journaled like every other change, so taking the path up removes it). */
-    private static void plant(ServerLevel level, StakeBlockEntity be, int x, int z, int chance) {
+    private static void plant(ServerLevel level, PathData be, int x, int z, int chance) {
         long h = x * 0x2545F4914F6CDD1DL ^ z * 0x9E3779B97F4A7C15L ^ 0x5DEECE66DL;
         h ^= h >>> 31;
         if ((int) (h & 1023) >= chance * io.github.profetgit.countryroads.paint.RoadPainter.clump(x, z) / 512) return;
@@ -772,7 +898,7 @@ public final class HousePaths {
     }
 
     /** A path column joins the road columns (other stakes can connect to it) and the index surveys read. */
-    private static void markPath(ServerLevel level, StakeBlockEntity be, int x, int z) {
+    private static void markPath(ServerLevel level, PathData be, int x, int z) {
         if (RoadColumns.isRoad(level, x, z)) return;
         RoadColumns.mark(level, x, z, true);
         HousePathIndex.of(level).set(x, z, true);
@@ -793,15 +919,15 @@ public final class HousePaths {
         return Tunnels.isFrame(c);
     }
 
-    static void change(ServerLevel level, StakeBlockEntity be, BlockPos pos, BlockState to) {
+    static void change(ServerLevel level, PathData be, BlockPos pos, BlockState to) {
         change(level, be, pos, to, false);
     }
 
     /** `free`: the block drops as usual when broken (verge plants); every other valuable block drops nothing, see PathBlocks. */
-    static void change(ServerLevel level, StakeBlockEntity be, BlockPos pos, BlockState to, boolean free) {
+    static void change(ServerLevel level, PathData be, BlockPos pos, BlockState to, boolean free) {
         BlockState from = level.getBlockState(pos);
         if (from == to) return;
-        be.journal.add(new StakeBlockEntity.Entry(pos.immutable(), from));
+        be.journal.add(new PathData.Entry(pos.immutable(), from, to));
         level.setBlock(pos, to, EXACT);
         PathBlocks.of(level).put(pos, to, free);
     }

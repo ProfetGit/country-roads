@@ -108,13 +108,13 @@ final class PathSearch implements RouteSolver.Host, Runnable {
 
     private record Waiter(long[] chunks, boolean load, LongOpenHashSet absent, CompletableFuture<long[]> done) {}
 
-    PathSearch(ServerLevel level, BlockPos stake, ServerPlayer player, List<BlockPos> waypointPos) {
+    PathSearch(ServerLevel level, BlockPos stake, BlockPos start, ServerPlayer player, List<BlockPos> waypointPos) {
         this.level = level;
         this.stake = stake;
         this.player = player;
-        this.sx = stake.getX();
-        this.sz = stake.getZ();
-        this.stakeY = stake.getY();
+        this.sx = start.getX();
+        this.sz = start.getZ();
+        this.stakeY = start.getY();
         this.doorKey = RouteSolver.key(sx, sz);
         this.minY = level.getMinY();
         List<long[]> overrides = new ArrayList<>();

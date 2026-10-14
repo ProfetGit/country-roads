@@ -183,6 +183,17 @@ public final class DevCommands {
                         .executes(c -> StakeTest.run(c.getSource(), IntegerArgumentType.getInteger(c, "x"), IntegerArgumentType.getInteger(c, "z"), true)))
                     .then(Commands.literal("warm")
                         .executes(c -> StakeTest.run(c.getSource(), IntegerArgumentType.getInteger(c, "x"), IntegerArgumentType.getInteger(c, "z"), false, Integer.MIN_VALUE, 0, StakeTest.WARM)))
+                    .then(Commands.literal("door")
+                        .executes(c -> {
+                            StakeTest.doorMode = true;
+                            return StakeTest.run(c.getSource(), IntegerArgumentType.getInteger(c, "x"), IntegerArgumentType.getInteger(c, "z"), false, Integer.MIN_VALUE, 0, StakeTest.WARM);
+                        }))
+                    .then(Commands.literal("doorkeep")
+                        .executes(c -> {
+                            StakeTest.doorMode = true;
+                            StakeTest.commitMode = true;
+                            return StakeTest.run(c.getSource(), IntegerArgumentType.getInteger(c, "x"), IntegerArgumentType.getInteger(c, "z"), false, Integer.MIN_VALUE, 0, StakeTest.WARM);
+                        }))
                     .then(Commands.literal("cancel")
                         .executes(c -> StakeTest.special(c.getSource(), IntegerArgumentType.getInteger(c, "x"), IntegerArgumentType.getInteger(c, "z"), "cancel")))
                     .then(Commands.literal("multi")

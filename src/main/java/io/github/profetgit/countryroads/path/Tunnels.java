@@ -49,7 +49,7 @@ final class Tunnels {
      * A frame or portal block goes in unless the column is itself part of the path (another stretch or a bend can pass
      * close by), or a tree stands there: logs are never cut (a portal post once replaced the trunk beside it).
      */
-    private static void put(ServerLevel level, StakeBlockEntity be, BlockPos pos, BlockState state, java.util.Set<Long> cols) {
+    private static void put(ServerLevel level, PathData be, BlockPos pos, BlockState state, java.util.Set<Long> cols) {
         if (cols.contains(net.minecraft.world.level.ChunkPos.pack(pos.getX(), pos.getZ()))) return;
         if (level.getBlockState(pos).is(BlockTags.LOGS)) return;
         HousePaths.change(level, be, pos, state);
@@ -60,7 +60,7 @@ final class Tunnels {
     }
 
     /** One tunnel cell: floor, the 3x3 inside, the roof, and on the centre cells the frames and portals. */
-    static void carve(ServerLevel level, StakeBlockEntity be, HousePaths.Cell c, java.util.Set<Long> cols) {
+    static void carve(ServerLevel level, PathData be, HousePaths.Cell c, java.util.Set<Long> cols) {
         int y = c.y();
         BlockPos at = new BlockPos(c.x(), y, c.z());
         long h = c.x() * 0x2545F4914F6CDD1DL ^ c.z() * 0x9E3779B97F4A7C15L;

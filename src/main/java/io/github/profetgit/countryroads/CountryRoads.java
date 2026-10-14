@@ -19,11 +19,15 @@ public final class CountryRoads implements ModInitializer {
 
     @Override
     public void onInitialize() {
-        CommandRegistrationCallback.EVENT.register((dispatcher, context, selection) -> DevCommands.register(dispatcher));
+        CommandRegistrationCallback.EVENT.register((dispatcher, context, selection) -> {
+            DevCommands.register(dispatcher);
+            io.github.profetgit.countryroads.path.DoorUse.register(dispatcher);
+        });
         RoadColumns.init();
         io.github.profetgit.countryroads.path.Stake.init();
         io.github.profetgit.countryroads.path.HousePaths.init();
         io.github.profetgit.countryroads.path.PathBlocks.init();
+        io.github.profetgit.countryroads.path.DoorUse.init();
         ServerTickEvents.END_SERVER_TICK.register(io.github.profetgit.countryroads.path.HousePaths::tick);
         ServerTickEvents.END_SERVER_TICK.register(server -> DevCommands.tick());
         ServerTickEvents.END_LEVEL_TICK.register(RoadSpeed::tick);
