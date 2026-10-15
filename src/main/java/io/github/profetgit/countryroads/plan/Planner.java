@@ -357,6 +357,7 @@ public final class Planner {
         // it, and ground samples moved out onto a lake kept their kind: the painter filled them up from the bed (a cobble
         // wall under the water beside a stone bridge). Once only: chording again what this profile finds bent ran away
         if (anyChord) y = profile(ground, water, river, kind, pin, kindPin, connA, connB);
+        foldBends(x, z, y, kind, pin, connA, connB);
         // inside a village the road is never a tunnel or a trestle: it climbs the slope on the ground like the street
         for (int i = 0; i < n; i++)
             if ((i < connA || i >= n - connB) && water[i] <= ground[i] && (kind[i] == EdgePlan.TUNNEL || kind[i] == EdgePlan.BRIDGE)) kind[i] = EdgePlan.GROUND;
@@ -1265,6 +1266,40 @@ public final class Planner {
      * a tunnel) would be a slot with sheer walls: lift it to MAX_CUT below the ground and ramp the road up to it on both
      * sides (raising only, never lowering, never moving pinned samples).
      */
+    /**
+     * Two stretches of one road a few samples apart that touch (the inside of a sharp bend) were painted side by side at
+     * the heights of different samples: a 1.5-block step between neighbouring columns. Their heights are brought within
+     * FOLD_STEP of each other (the lower one raised, then the grade passes again, raise only).
+     */
+    static void foldBends(float[] x, float[] z, float[] y, byte[] kind, float[] pin, int connA, int connB) {
+        int n = y.length;
+        for (int round = 0; round < 8; round++) {
+            boolean changed = false;
+            for (int i = 0; i < n; i++) {
+                for (int j = i + 3; j < Math.min(n, i + 16); j++) {
+                    if (kind[i] != EdgePlan.GROUND || kind[j] != EdgePlan.GROUND) continue;
+                    float d = (float) Math.hypot(x[j] - x[i], z[j] - z[i]);
+                    // touching only across a sharp turn: the road's direction at the two samples differs by over 60 deg
+                    if (d > FOLD_REACH || i + 1 >= n || j + 1 >= n) continue;
+                    float ax = x[i + 1] - x[i], az = z[i + 1] - z[i], bx = x[j + 1] - x[j], bz = z[j + 1] - z[j];
+                    float la = (float) Math.hypot(ax, az), lb = (float) Math.hypot(bx, bz);
+                    if (la < 1e-3f || lb < 1e-3f || (ax * bx + az * bz) / (la * lb) > FOLD_COS) continue;
+                    int lo = y[i] < y[j] ? i : j, hi = lo == i ? j : i;
+                    if (y[hi] - y[lo] <= FOLD_STEP || !Float.isNaN(pin[lo]) || lo < connA || lo >= n - connB) continue;
+                    y[lo] = y[hi] - FOLD_STEP;
+                    changed = true;
+                }
+            }
+            if (!changed) break;
+            for (int i = 1; i < n; i++)
+                if (kind[i] == EdgePlan.GROUND && Float.isNaN(pin[i]) && i >= connA && i < n - connB) y[i] = Math.max(y[i], y[i - 1] - MAX_GRADE);
+            for (int i = n - 2; i >= 0; i--)
+                if (kind[i] == EdgePlan.GROUND && Float.isNaN(pin[i]) && i >= connA && i < n - connB) y[i] = Math.max(y[i], y[i + 1] - MAX_GRADE);
+        }
+    }
+
+    static final float FOLD_REACH = 3.5f, FOLD_STEP = 0.6f, FOLD_COS = 0.5f;
+
     static void capCuts(float[] y, float[] ground, float[] water, byte[] kind, float[] pin, int connA, int connB) {
         int n = y.length;
         for (int i = connA; i < n - connB; ) {
@@ -1278,7 +1313,11 @@ public final class Planner {
             // its own ground than a fill can hold (the ramp ran out over a valley as a 125-block dry viaduct)
             float[] t = y.clone();
             for (int k = i; k <= j; k++) t[k] = ground[k] - MAX_CUT;
+            // the lifted stretch keeps the grade (raise only): ground - MAX_CUT copied a steep slope's 2-block steps
+            for (int k = i + 1; k <= j; k++) t[k] = Math.max(t[k], t[k - 1] - MAX_GRADE);
+            for (int k = j - 1; k >= i; k--) t[k] = Math.max(t[k], t[k + 1] - MAX_GRADE);
             boolean ok = true;
+            for (int k = i; k <= j && ok; k++) ok = t[k] <= ground[k] + CAP_FILL;
             for (int k = j + 1; k < n && ok; k++) {
                 if (t[k] >= t[k - 1] - CUT_RAMP) break;
                 // the ramp would have to lift a tunnel, bridge, pinned or connector sample: a step there, keep the cut

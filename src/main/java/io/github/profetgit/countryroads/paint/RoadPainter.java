@@ -237,7 +237,7 @@ public final class RoadPainter {
         if ((arm.isAir() || arm.canBeReplaced()) && (under.isAir() || under.canBeReplaced())) {
             exact(ax, g + 4, az, fence.setValue(net.minecraft.world.level.block.CrossCollisionBlock.PROPERTY_BY_DIRECTION.get(toRoad.getOpposite()), true));
             if (d.type() == EdgePlan.SIGN) hangingSign(wood, ax, g + 3, az, d);
-            else exact(ax, g + 3, az, Blocks.LANTERN.defaultBlockState().setValue(LanternBlock.HANGING, true));
+            else lantern(ax, g + 3, az, Blocks.LANTERN.defaultBlockState().setValue(LanternBlock.HANGING, true), true);
         }
     }
 
@@ -534,7 +534,7 @@ public final class RoadPainter {
                 boolean frame = Math.floorMod(s, 6) == 0;
                 clear(x, top + 1, frame ? top + 3 : top + 4, z);
                 if (frame) set(x, top + 4, z, wood.planks().defaultBlockState());
-                else if (Math.floorMod(s, 12) == 6 && in > 0.8f) set(x, top + 4, z, Blocks.LANTERN.defaultBlockState().setValue(LanternBlock.HANGING, true));
+                else if (Math.floorMod(s, 12) == 6 && in > 0.8f) lantern(x, top + 4, z, Blocks.LANTERN.defaultBlockState().setValue(LanternBlock.HANGING, true), false);
                 if (!PaintRules.solid(get(x, top + 5, z))) set(x, top + 5, z, Blocks.STONE.defaultBlockState());
                 if (m.runPos[i] <= 1 && ground > top + 7) set(x, top + 5, z, Palette.masonry(h));
             }
@@ -632,13 +632,22 @@ public final class RoadPainter {
      * two lanterns side by side are never wanted. Returns whether it was placed.
      */
     private boolean lantern(int x, int y, int z) {
+        return lantern(x, y, z, Blocks.LANTERN.defaultBlockState(), false);
+    }
+
+    /**
+     * A lantern unless another stands in its 26 neighbours (same chunk). Every lantern goes through here: tunnel rows
+     * (one per column across the bore) and lamp posts beside a bridge once put two side by side.
+     */
+    private boolean lantern(int x, int y, int z, BlockState state, boolean exactly) {
         for (int dx = -1; dx <= 1; dx++)
             for (int dz = -1; dz <= 1; dz++)
                 for (int dy = -1; dy <= 1; dy++) {
                     if ((dx | dy | dz) == 0 || (x + dx) >> 4 != x >> 4 || (z + dz) >> 4 != z >> 4) continue;
                     if (get(x + dx, y + dy, z + dz).is(Blocks.LANTERN)) return false;
                 }
-        set(x, y, z, Blocks.LANTERN.defaultBlockState());
+        if (exactly) exact(x, y, z, state);
+        else set(x, y, z, state);
         return true;
     }
 

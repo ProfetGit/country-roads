@@ -186,6 +186,10 @@ final class RoadChecks {
         return 1;
     }
 
+    private static String name(io.github.profetgit.countryroads.plan.EdgePlan p) {
+        return p == null ? "?" : p.edge.a().pos().toShortString() + "->" + p.edge.b().pos().toShortString() + "#" + System.identityHashCode(p);
+    }
+
     private static void breaks(ChunkMask m, int c, int c2, long[] breaks, long[] steps) {
         breaks(m, c, m, c2, breaks, steps);
     }
@@ -196,7 +200,16 @@ final class RoadChecks {
         if (d > 1) {
             breaks[0]++;
             CountryRoads.LOG.info("CR-BREAK chunk " + m.cx + "," + m.cz + " col " + (c & 15) + "," + (c >> 4) + " " + m.surface(c) + " vs " + m2.surface(c2)
-                + " kinds " + m.kind[c] + "/" + m2.kind[c2] + " s " + m.s[c] + "/" + m2.s[c2]);
+                + " kinds " + m.kind[c] + "/" + m2.kind[c2] + " s " + m.s[c] + "/" + m2.s[c2]
+                + " roads " + name(m.plan[c]) + " / " + name(m2.plan[c2]));
+            if (Boolean.getBoolean("countryroads.dumpBreaks") && m.plan[c] != null) {
+                var p = m.plan[c];
+                StringBuilder sb = new StringBuilder("CR-BREAKPLAN len=" + p.length() + " connA=" + p.connA + " connB=" + p.connB + " :");
+                for (int k = Math.max(0, (int) m.s[c] - 8); k <= Math.min(p.length() - 1, (int) m.s[c] + 8); k++)
+                    sb.append(' ').append(k).append('@').append((int) p.x[k]).append(',').append((int) p.z[k]).append('/').append(p.y[k]).append('k').append(p.kind[k])
+                        .append(p.shared != null && p.shared[k] ? "S" : "");
+                CountryRoads.LOG.info(sb.toString());
+            }
         } else if (d == 1) steps[0]++;
     }
 

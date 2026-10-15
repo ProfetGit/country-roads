@@ -16,6 +16,8 @@ public final class ChunkMask {
     public final float[] y = new float[256];
     public final byte[] kind = new byte[256];
     public final float[] s = new float[256];
+    /** The plan each column's road data came from (dev checks). */
+    public final EdgePlan[] plan = new EdgePlan[256];
     public final short[] runLen = new short[256], runPos = new short[256];
     public final byte[] wood = new byte[256];
     /** Bridge crossing data (EdgePlan.bridge*), the column's place in its run (0 at the first edge, runLen at the last) and the road's direction. */
@@ -197,6 +199,7 @@ public final class ChunkMask {
                             for (EdgePlan.Run run : p.runs)
                                 if (i >= run.s0() && i <= run.s1() && (run.side() == 0 || run.side() == m.side[c])) m.run[c] = run.type();
                             m.s[c] = i + t;
+                            m.plan[c] = p;
                             m.slant[c] = dist > 1e-4f ? (Math.abs(qx) + Math.abs(qz)) / dist : 1f;
                             m.ox[c] = dist > 1e-4f ? -qx / dist : 0;
                             m.oz[c] = dist > 1e-4f ? -qz / dist : 0;
