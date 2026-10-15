@@ -207,9 +207,20 @@ final class StreetChecks {
                         continue;
                     }
                     int dx = (int) Math.floor(p.x[i0]), dz = (int) Math.floor(p.z[i0]);
-                    boolean inBand = fp.bands().contains(dx, dz);
-                    int dockY = surfaceAt(level, dx, dz, Math.round(p.y[i0]));
-                    int dy = dockY == Integer.MIN_VALUE ? 99 : dockY - Math.round(p.y[i0]);
+                    boolean atDoor = fp.onDoorWalk(dx, dz), inBand = fp.bands().contains(dx, dz) || atDoor;
+                    // a door dock's first columns can lie under the porch roof (left unpainted): measure from the first open one
+                    int i1 = i0;
+                    for (int k = 0; k < conn; k++) {
+                        int j = side == 0 ? k : p.length() - 1 - k, jx = (int) Math.floor(p.x[j]), jz = (int) Math.floor(p.z[j]);
+                        int floor = fp.doorFloor(jx, jz);
+                        if (floor == Integer.MIN_VALUE || surfaceAt(level, jx, jz, floor) <= floor + 1) {
+                            i1 = j;
+                            break;
+                        }
+                    }
+                    int dockY = surfaceAt(level, (int) Math.floor(p.x[i1]), (int) Math.floor(p.z[i1]), Math.round(p.y[i1]));
+                    int f1 = fp.doorFloor((int) Math.floor(p.x[i1]), (int) Math.floor(p.z[i1]));
+                    int dy = dockY == Integer.MIN_VALUE ? 99 : dockY - (f1 != Integer.MIN_VALUE ? f1 : Math.round(p.y[i1]));
                     int maxStep = 0, nonRoad = 0, prev = Integer.MIN_VALUE, samples = 0;
                     StringBuilder trail = new StringBuilder();
                     int from = side == 0 ? 0 : p.length() - 1, dir = side == 0 ? 1 : -1;
@@ -218,6 +229,10 @@ final class StreetChecks {
                         if (i < 0 || i >= p.length()) break;
                         int x = (int) Math.floor(p.x[i]), z = (int) Math.floor(p.z[i]);
                         int y = surfaceAt(level, x, z, Math.round(p.y[i]));
+                        if (fp.doorFloor(x, z) != Integer.MIN_VALUE && y > fp.doorFloor(x, z) + 1) {
+                            trail.append(' ').append(x).append(',').append(z).append(":roofed");
+                            continue;
+                        }
                         if (y == Integer.MIN_VALUE) {
                             nonRoad++;
                             trail.append(' ').append(x).append(',').append(z).append(":none");
@@ -227,7 +242,8 @@ final class StreetChecks {
                         BlockState top = chunk.getBlockState(new BlockPos(x, y, z));
                         trail.append(' ').append(x).append(',').append(z).append(':').append(y).append('/').append(top.getBlock().getDescriptionId().replace("block.minecraft.", ""))
                             .append(k < conn ? "*" : "");
-                        if (!roadBlock(top)) nonRoad++;
+                        // a door walk crosses the site's own yard or porch (template blocks are its surface there)
+                        if (!roadBlock(top) && !fp.onDoorWalk(x, z)) nonRoad++;
                         if (prev != Integer.MIN_VALUE) maxStep = Math.max(maxStep, Math.abs(y - prev));
                         prev = y;
                         samples++;
@@ -235,7 +251,7 @@ final class StreetChecks {
                     boolean pass = inBand && Math.abs(dy) <= 1 && maxStep <= 1 && nonRoad == 0;
                     if (pass) ok++;
                     report(src, "CR-DOCK " + (pass ? "PASS " : "FAIL ") + village.pos().toShortString() + " end=" + (side == 0 ? "A" : "B") + " conn=" + conn
-                        + " dockInBand=" + inBand + " dockDy=" + dy + " maxStep=" + maxStep + " nonRoad=" + nonRoad + " samples=" + samples + " planY0=" + Math.round(p.y[i0]) + " trail:" + trail);
+                        + " dockInBand=" + inBand + (atDoor ? " door" : "") + " dockDy=" + dy + " maxStep=" + maxStep + " nonRoad=" + nonRoad + " samples=" + samples + " planY0=" + Math.round(p.y[i0]) + " trail:" + trail);
                 }
             }
             report(src, "CR-DOCKS " + (ok == ends - noConn && noConn == 0 ? "PASS" : "FAIL") + " ends=" + ends + " ok=" + ok + " noConnector=" + noConn);

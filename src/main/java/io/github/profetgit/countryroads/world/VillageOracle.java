@@ -39,7 +39,18 @@ public final class VillageOracle {
     }
 
     /** Piece boxes of a generated village; streets are the jigsaw pieces whose template path has "/streets/". */
-    public record Footprint(List<BoundingBox> pieces, List<BoundingBox> streets, StreetBands bands, List<BoundingBox> others) {
+    public record Footprint(List<BoundingBox> pieces, List<BoundingBox> streets, StreetBands bands, List<BoundingBox> others,
+                            List<List<int[]>> doorWalks, it.unimi.dsi.fastutil.longs.Long2IntOpenHashMap doorCols) {
+        /** A column straight out in front of a door of a village without streets (where its road docks). */
+        public boolean onDoorWalk(int x, int z) {
+            return doorCols.containsKey(StreetBands.pack(x, z));
+        }
+
+        /** The floor (block under the door) of the door walk through this column; Integer.MIN_VALUE off the walks. */
+        public int doorFloor(int x, int z) {
+            return doorCols.getOrDefault(StreetBands.pack(x, z), Integer.MIN_VALUE);
+        }
+
         public boolean contains(int x, int z, int inflate) {
             for (BoundingBox b : pieces)
                 if (x >= b.minX() - inflate && x <= b.maxX() + inflate && z >= b.minZ() - inflate && z <= b.maxZ() + inflate) return true;
@@ -153,6 +164,7 @@ public final class VillageOracle {
             List<BoundingBox> streets = new ArrayList<>();
             List<PoolElementStructurePiece> bandPieces = new ArrayList<>();
             List<BoundingBox> others = new ArrayList<>();
+            List<PoolElementStructurePiece> allPieces = new ArrayList<>();
             var holder = level.registryAccess().lookupOrThrow(net.minecraft.core.registries.Registries.STRUCTURE).get(v.structure());
             if (holder.isPresent()) {
                 Structure structure = holder.get().value();
@@ -162,6 +174,7 @@ public final class VillageOracle {
                 for (StructurePiece p : built) {
                     pieces.add(p.getBoundingBox());
                     if (p instanceof PoolElementStructurePiece pe) {
+                        allPieces.add(pe);
                         String el = pe.getElement().toString();
                         boolean street = isStreet(pe, el);
                         if (street) streets.add(p.getBoundingBox());
@@ -171,7 +184,11 @@ public final class VillageOracle {
                 }
             }
             if (pieces.isEmpty()) pieces.add(new BoundingBox(v.pos().getX() - 8, 0, v.pos().getZ() - 8, v.pos().getX() + 8, 0, v.pos().getZ() + 8));
-            return new Footprint(List.copyOf(pieces), List.copyOf(streets), jigsaw(() -> StreetBands.of(level.getStructureTemplateManager(), bandPieces)), List.copyOf(others));
+            StreetBands bands = jigsaw(() -> StreetBands.of(level.getStructureTemplateManager(), bandPieces));
+            List<List<int[]>> walks = bands.isEmpty() ? jigsaw(() -> DoorWalks.of(level.getStructureTemplateManager(), allPieces, pieces)) : List.of();
+            var doorCols = new it.unimi.dsi.fastutil.longs.Long2IntOpenHashMap();
+            for (List<int[]> w : walks) for (int[] c : w) doorCols.put(StreetBands.pack(c[0], c[1]), c[2]);
+            return new Footprint(List.copyOf(pieces), List.copyOf(streets), bands, List.copyOf(others), walks, doorCols);
         });
     }
 

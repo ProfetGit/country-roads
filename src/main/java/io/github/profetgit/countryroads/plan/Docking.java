@@ -40,7 +40,7 @@ final class Docking {
      */
     static Connector connect(VillageOracle.Footprint f, int partnerX, int partnerZ, io.github.profetgit.countryroads.world.TerrainSampler terrain) {
         StreetBands bands = f.bands();
-        if (bands.isEmpty()) return null;
+        if (bands.isEmpty()) return toDoor(f, partnerX, partnerZ, terrain);
         List<int[]> cols = bands.columns();
         cols.sort(Comparator.comparingDouble((int[] c) -> Math.hypot(c[0] - partnerX, c[1] - partnerZ)).thenComparingInt(c -> c[0]).thenComparingInt(c -> c[1]));
         int tried = 0;
@@ -68,6 +68,29 @@ final class Docking {
         }
         io.github.profetgit.countryroads.CountryRoads.LOG.info("CR-DOCK-TRIED " + tried + " docks, nearest to partner at " + cols.getFirst()[0] + "," + cols.getFirst()[1] + " partner " + partnerX + "," + partnerZ);
         return null;
+    }
+
+    /**
+     * A village without streets: the road comes up to a door. The door walk whose end is nearest the partner, then the
+     * usual search on to open ground; a dry one first, as for streets. Null when there is no door (trader camp).
+     */
+    private static Connector toDoor(VillageOracle.Footprint f, int partnerX, int partnerZ, io.github.profetgit.countryroads.world.TerrainSampler terrain) {
+        List<List<int[]>> walks = new ArrayList<>(f.doorWalks());
+        if (walks.isEmpty()) return null;
+        walks.sort(Comparator.comparingDouble((List<int[]> w) -> Math.hypot(w.getLast()[0] - partnerX, w.getLast()[1] - partnerZ))
+            .thenComparingInt(w -> w.getFirst()[0]).thenComparingInt(w -> w.getFirst()[1]));
+        Connector first = null;
+        for (List<int[]> w : walks) {
+            int[] end = w.getLast();
+            Connector k = search(f, end[0], end[1], partnerX, partnerZ);
+            if (k == null) continue;
+            List<int[]> cells = new ArrayList<>(w.subList(0, w.size() - 1));
+            cells.addAll(k.cells());
+            Connector door = new Connector(cells, w.getFirst()[0], w.getFirst()[1], k.exitX(), k.exitZ(), false);
+            if (terrain == null || dry(door, terrain, partnerX, partnerZ)) return first == null ? door : door.picked();
+            if (first == null) first = door;
+        }
+        return first;
     }
 
     /** The connector's cells (every other one) and the APRON ahead of its exit toward the partner are all dry. */

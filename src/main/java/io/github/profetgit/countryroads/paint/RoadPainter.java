@@ -123,6 +123,12 @@ public final class RoadPainter {
                                 top = (int) Math.round(g + (Math.round(m.y[i]) - g) * w);
                                 q = top;
                             }
+                            // in front of a door: the door's floor; under a porch roof or eave the column is left alone
+                            if (m.doorY[i] != Integer.MIN_VALUE) {
+                                if (p.groundAt(x, z, top) > m.doorY[i] + 1) continue;
+                                top = m.doorY[i];
+                                q = top;
+                            }
                         }
                         if (pass == 0 && in >= 0) {
                             if (m.conn[i] && m.kind[i] == EdgePlan.GROUND) ctop[i] = top;

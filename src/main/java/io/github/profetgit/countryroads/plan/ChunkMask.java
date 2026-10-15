@@ -16,6 +16,8 @@ public final class ChunkMask {
     public final float[] y = new float[256];
     public final byte[] kind = new byte[256];
     public final float[] s = new float[256];
+    /** Floor height of a door walk (a road docking at a door of a village without streets); Integer.MIN_VALUE elsewhere. */
+    public final int[] doorY = new int[256];
     /** The plan each column's road data came from (dev checks). */
     public final EdgePlan[] plan = new EdgePlan[256];
     public final short[] runLen = new short[256], runPos = new short[256];
@@ -47,6 +49,7 @@ public final class ChunkMask {
         Arrays.fill(in, Float.NEGATIVE_INFINITY);
         Arrays.fill(run, (byte) -1);
         Arrays.fill(connD, 99f);
+        Arrays.fill(doorY, Integer.MIN_VALUE);
     }
 
     public boolean any() {
@@ -238,8 +241,9 @@ public final class ChunkMask {
                         if (f.contains(x, z, 3)) m.nofield[c] = true;
                         if (!f.contains(x, z, 1)) continue;
                         // a connector keeps its road through the village's ring, but never over a house or the street itself
-                        boolean keep = m.conn[c] && !f.inOther(x, z, 0) && !f.bands().contains(x, z);
+                        boolean keep = m.conn[c] && (!f.inOther(x, z, 0) || f.onDoorWalk(x, z)) && !f.bands().contains(x, z);
                         if (!keep) m.in[c] = Float.NEGATIVE_INFINITY;
+                        else if (f.onDoorWalk(x, z)) m.doorY[c] = f.doorFloor(x, z);
                     }
         }
         return m;
