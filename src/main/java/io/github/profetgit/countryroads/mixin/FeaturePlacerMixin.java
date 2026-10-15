@@ -59,6 +59,19 @@ abstract class FeaturePlacerMixin {
             || f instanceof HugeFungusFeature || f instanceof RootSystemFeature) return 0;
         if (f instanceof BlockBlobFeature || f instanceof SpikeFeature || f instanceof IcebergFeature) return 3;
         if (f instanceof LakeFeature) return 8;
-        return -1;
+        return MODDED_WOODY.get(f.getClass()) ? 0 : -1;
     }
+
+    /** Modded trees often implement Feature directly (Biomes O' Plenty's BOPTreeFeature): judged by class name. */
+    private static final ClassValue<Boolean> MODDED_WOODY = new ClassValue<>() {
+        @Override
+        protected Boolean computeValue(Class<?> c) {
+            if (c.getName().startsWith("net.minecraft.")) return false;
+            for (Class<?> k = c; k != null && k != Object.class; k = k.getSuperclass()) {
+                String n = k.getSimpleName();
+                if (n.contains("Tree") || n.contains("Log") || n.contains("Mushroom") || n.contains("Fungus")) return true;
+            }
+            return false;
+        }
+    };
 }

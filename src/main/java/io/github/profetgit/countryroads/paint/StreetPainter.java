@@ -35,7 +35,7 @@ public final class StreetPainter {
                     int x = (cx << 4) + lx, z = (cz << 4) + lz;
                     StreetBands band = null;
                     for (StreetBands b : streets)
-                        if (b.contains(x, z)) {
+                        if (b.paints(x, z)) {
                             band = b;
                             break;
                         }

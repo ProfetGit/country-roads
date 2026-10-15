@@ -163,8 +163,9 @@ public final class VillageOracle {
                     pieces.add(p.getBoundingBox());
                     if (p instanceof PoolElementStructurePiece pe) {
                         String el = pe.getElement().toString();
-                        if (el.contains("/streets/")) streets.add(p.getBoundingBox());
-                        if (el.contains("/streets/") || el.contains("/terminators/")) bandPieces.add(pe);
+                        boolean street = isStreet(pe, el);
+                        if (street) streets.add(p.getBoundingBox());
+                        if (street || el.contains("/terminators/")) bandPieces.add(pe);
                         else others.add(p.getBoundingBox());
                     } else others.add(p.getBoundingBox());
                 }
@@ -172,6 +173,19 @@ public final class VillageOracle {
             if (pieces.isEmpty()) pieces.add(new BoundingBox(v.pos().getX() - 8, 0, v.pos().getZ() - 8, v.pos().getX() + 8, 0, v.pos().getZ() + 8));
             return new Footprint(List.copyOf(pieces), List.copyOf(streets), jigsaw(() -> StreetBands.of(level.getStructureTemplateManager(), bandPieces)), List.copyOf(others));
         });
+    }
+
+    /**
+     * Vanilla, Towns and Towers and Repurposed Structures keep street templates under "/streets/"; Dungeons and Taverns
+     * names them "birch_curve", "dappled_village_path3". All of them run streets through a processor list named for
+     * streets (minecraft:street_plains, kaisyn:village/street_romanian, nova_structures:street_birch).
+     */
+    static boolean isStreet(PoolElementStructurePiece pe, String element) {
+        if (element.contains("/streets/")) return true;
+        if (element.contains("/terminators/")) return false;
+        if (!(pe.getElement() instanceof net.minecraft.world.level.levelgen.structure.pools.SinglePoolElement single)) return false;
+        return ((io.github.profetgit.countryroads.mixin.SinglePoolElementAccessor) single).countryroads$processors().unwrapKey()
+            .map(k -> k.identifier().getPath().contains("street")).orElse(false);
     }
 
     private Optional<Village> at(int setIndex, ChunkPos c) {
