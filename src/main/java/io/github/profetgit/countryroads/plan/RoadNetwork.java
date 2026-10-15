@@ -23,7 +23,7 @@ import net.minecraft.world.level.Level;
  * same answer no matter which order chunks generate in. Plans are computed on a planner pool and memoised.
  */
 public final class RoadNetwork {
-    public static final int MAX_EDGE = 1200;
+    public static final int MAX_EDGE = Integer.getInteger("countryroads.maxEdge", 2000);
     private static final int REGION_SHIFT = 9;
     private static final Map<ServerLevel, RoadNetwork> NETWORKS = new ConcurrentHashMap<>();
     private static final AtomicInteger THREADS = new AtomicInteger();

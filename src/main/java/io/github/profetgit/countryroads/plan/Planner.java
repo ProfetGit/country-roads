@@ -11,7 +11,7 @@ import net.minecraft.world.level.levelgen.structure.BoundingBox;
 
 /** Turns a village pair into an EdgePlan: join points, coarse route, smoothed centreline, graded surface profile. */
 public final class Planner {
-    public static final double ELLIPSE = 1.6;
+    public static final double ELLIPSE = Double.parseDouble(System.getProperty("countryroads.ellipse", "1.6"));
     /** Max planned rise per block of road (a half-step at most every 1.5 blocks). */
     static final float MAX_GRADE = 0.34f;
 
@@ -402,11 +402,20 @@ public final class Planner {
             int jn = jt[0] - start, dir = jt[1];
             // never beside a bridge (the shared stretch can start on a deck): step back onto plain road
             for (int back = 0; back < 24 && jn > 4 && jn < n - 5 && nearBridge(kind, jn, 4); back++) jn += dir;
-            if (jn <= 4 || jn >= n - 5 || nearBridge(kind, jn, 4)) continue;
             boolean towardB = dir > 0;
             String to = towardB ? plan.nameB : plan.nameA, back = towardB ? plan.nameA : plan.nameB;
-            int toDist = Math.round((towardB ? n - jn : jn) / 10f) * 10, backDist = Math.round((towardB ? jn : n - jn) / 10f) * 10;
-            post(plan, jn, dir, jt[2], EdgePlan.SIGN, to, toDist + " blocks", back + "\n" + backDist + " blocks");
+            // the away side first, then the other side, then further along: a post standing on the shared road (it
+            // leaves the stretch at a slant) was never painted
+            for (int k = 0; k < 8; k++) {
+                int j = jn + dir * 3 * (k / 2);
+                if (j <= 4 || j >= n - 5 || nearBridge(kind, j, 4)) continue;
+                int toDist = Math.round((towardB ? n - j : j) / 10f) * 10, backDist = Math.round((towardB ? j : n - j) / 10f) * 10;
+                int before = plan.decor.size();
+                post(plan, j, dir, k % 2 == 0 ? jt[2] : -jt[2], EdgePlan.SIGN, to, toDist + " blocks", back + "\n" + backDist + " blocks");
+                if (plan.decor.size() == before) continue;
+                if (!onTrunk(trunks, plan.decor.getLast())) break;
+                plan.decor.removeLast();
+            }
         }
         if (camps != null) camps.choose(plan);
         PropPlanner.dropNearCamps(plan);
@@ -1253,6 +1262,14 @@ public final class Planner {
         for (int k = from, c = 0; k >= 0 && k < ground.length && c < BANK_PEEK; k += dir, c++)
             if (water[k] <= ground[k]) h = Float.isNaN(h) ? ground[k] : Math.max(h, ground[k]);
         return h;
+    }
+
+    /** The post stands on, or right beside, a road this one shares a stretch with. */
+    private static boolean onTrunk(List<Trunk> trunks, EdgePlan.Decor d) {
+        for (Trunk t : trunks)
+            for (int k = 0; k < t.p.length(); k++)
+                if (Math.hypot(d.x() + 0.5 - t.p.x[k], d.z() + 0.5 - t.p.z[k]) < t.p.hw[k] + 1.0) return true;
+        return false;
     }
 
     static boolean nearBridge(byte[] kind, int i, int r) {

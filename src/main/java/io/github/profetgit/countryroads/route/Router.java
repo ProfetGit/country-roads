@@ -17,7 +17,8 @@ public final class Router {
     public static final int CELL = 16;
     private static final int[] DX = {1, 1, 0, -1, -1, -1, 0, 1};
     private static final int[] DZ = {0, 1, 1, 1, 0, -1, -1, -1};
-    private static final int MAX_EXPANSIONS = 80_000;
+    private static final int MAX_EXPANSIONS = Integer.getInteger("countryroads.maxExpansions", 80_000);
+    public static final int DEEP = Integer.getInteger("countryroads.deep", 10);
 
     public record Result(List<int[]> points, long cost, int expansions) {}
 
@@ -77,7 +78,10 @@ public final class Router {
             if (n.g != best.get(n.state)) continue;
             int i = si(n.state), j = sj(n.state), h = sh(n.state);
             if (i == bi && j == bj) return new Result(rebuild(n.state, parent, ai, aj), n.g, expansions);
-            if (++expansions > MAX_EXPANSIONS) return null;
+            if (++expansions > MAX_EXPANSIONS) {
+                io.github.profetgit.countryroads.CountryRoads.LOG.info("CR-ROUTE-NONE cap expansions=" + expansions + " cells=" + samples.size() + " " + ax + "," + az + " -> " + bx + "," + bz);
+                return null;
+            }
             TerrainSampler.Sample here = sample(samples, i, j);
             for (int t = -2; t <= 2; t++) {
                 int nh = (h + t) & 7;
@@ -109,6 +113,9 @@ public final class Router {
                 open.add(new Node(ns, g, g + heuristic(ni, nj, bi, bj)));
             }
         }
+        TerrainSampler.Sample gs = sample(samples, bi, bj), ss = sample(samples, ai, aj);
+        io.github.profetgit.countryroads.CountryRoads.LOG.info("CR-ROUTE-NONE blocked expansions=" + expansions + " cells=" + samples.size() + " " + ax + "," + az + " -> " + bx + "," + bz
+            + " start=" + ss + " goal=" + gs + " top=" + (terrain.maxY() - 12));
         return null;
     }
 
@@ -160,7 +167,7 @@ public final class Router {
                           TerrainSampler.Sample left, TerrainSampler.Sample right, boolean perpDiagonal) {
         double len = diagonal ? CELL * Math.sqrt(2) : CELL;
         if (b.ocean() && b.wet()) return -1;
-        if (b.wet() && b.depth() > 10) return -1;
+        if (b.wet() && b.depth() > DEEP) return -1;
         int ya = a.wet() ? a.water() + 1 : a.ground();
         int yb = b.wet() ? b.water() + 1 : b.ground();
         double grade = Math.abs(yb - ya) / len;

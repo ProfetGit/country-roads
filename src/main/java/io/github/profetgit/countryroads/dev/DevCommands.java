@@ -90,6 +90,8 @@ public final class DevCommands {
                 .then(Commands.argument("radius", IntegerArgumentType.integer(16, 4000)).executes(c -> RoadChecks.check(c.getSource(), IntegerArgumentType.getInteger(c, "radius")))))
             .then(Commands.literal("roads")
                 .then(Commands.argument("radius", IntegerArgumentType.integer(16, 8000)).executes(c -> RoadChecks.roads(c.getSource(), IntegerArgumentType.getInteger(c, "radius")))))
+            .then(Commands.literal("network")
+                .then(Commands.argument("radius", IntegerArgumentType.integer(16, 8000)).executes(c -> NetworkCheck.network(c.getSource(), IntegerArgumentType.getInteger(c, "radius")))))
             .then(Commands.literal("roadbiomes")
                 .then(Commands.argument("radius", IntegerArgumentType.integer(16, 8000)).executes(c -> RoadChecks.roadBiomes(c.getSource(), IntegerArgumentType.getInteger(c, "radius")))))
             .then(Commands.literal("shots")
