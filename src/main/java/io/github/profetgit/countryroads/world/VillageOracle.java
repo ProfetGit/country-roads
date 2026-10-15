@@ -181,7 +181,10 @@ public final class VillageOracle {
     private Optional<Village> compute(StructureSet set, ChunkPos c) {
         if (!set.placement().isStructureChunk(state, c.x(), c.z())) return Optional.empty();
         List<StructureSet.StructureSelectionEntry> options = new ArrayList<>(set.structures());
-        if (options.size() == 1) return tryGenerate(options.getFirst(), c);
+        if (options.size() == 1) {
+            Optional<Village> v = tryGenerate(options.getFirst(), c);
+            return v == null ? Optional.empty() : v;
+        }
         WorldgenRandom random = new WorldgenRandom(new LegacyRandomSource(0L));
         random.setLargeFeatureSeed(state.getLevelSeed(), c.x(), c.z());
         int total = 0;
