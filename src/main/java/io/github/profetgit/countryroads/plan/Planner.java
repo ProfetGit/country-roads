@@ -357,6 +357,13 @@ public final class Planner {
         // it, and ground samples moved out onto a lake kept their kind: the painter filled them up from the bed (a cobble
         // wall under the water beside a stone bridge). Once only: chording again what this profile finds bent ran away
         if (anyChord) y = profile(ground, water, river, kind, pin, kindPin, connA, connB);
+        if (!OLD_DECK) {
+            boolean[] laid = straightDecks(x, z, kind, pin, (px, pz) -> {
+                int bx = (int) Math.floor(px), bz = (int) Math.floor(pz);
+                return fa.inOther(bx, bz, 2) || fb.inOther(bx, bz, 2) || nearTrunk(trunks, px, pz);
+            });
+            for (int i = 0; i < n; i++) if (laid[i]) sampleAt(i, x, z, ground, water, river);
+        }
         foldBends(x, z, y, kind, pin, connA, connB);
         // inside a village the road is never a tunnel or a trestle: it climbs the slope on the ground like the street
         for (int i = 0; i < n; i++)
@@ -372,6 +379,7 @@ public final class Planner {
         }
         EdgePlan plan = new EdgePlan(e, x, z, y, hw, kind, wood, System.nanoTime() - t0);
         plan.shared = shared;
+        plan.ground = ground.clone();
         plan.wet = new boolean[n];
         for (int i = 0; i < n; i++) plan.wet[i] = water[i] > ground[i];
         plan.wetFill = new byte[n];
@@ -392,7 +400,9 @@ public final class Planner {
         for (int[] jt : joins) {
             // junction signpost where this road leaves a shared stretch: its destination that way, the other village back
             int jn = jt[0] - start, dir = jt[1];
-            if (jn <= 4 || jn >= n - 5) continue;
+            // never beside a bridge (the shared stretch can start on a deck): step back onto plain road
+            for (int back = 0; back < 24 && jn > 4 && jn < n - 5 && nearBridge(kind, jn, 4); back++) jn += dir;
+            if (jn <= 4 || jn >= n - 5 || nearBridge(kind, jn, 4)) continue;
             boolean towardB = dir > 0;
             String to = towardB ? plan.nameB : plan.nameA, back = towardB ? plan.nameA : plan.nameB;
             int toDist = Math.round((towardB ? n - jn : jn) / 10f) * 10, backDist = Math.round((towardB ? jn : n - jn) / 10f) * 10;
@@ -592,6 +602,15 @@ public final class Planner {
         boolean fixA = a - ease < 1, fixB = b + ease > n - 2;
         float step = len / (b - a);
         boolean alongX = Math.abs(cx) >= Math.abs(cz);
+        // the axis that crosses less water: laid along the nearer axis, a diagonal crossing of a river running the
+        // other way ran along it (28 wet samples became an 85-block viaduct)
+        if (!(fixA && fixB) && !OLD_DECK) {
+            float mx = (x[a] + x[b]) / 2, mz = (z[a] + z[b]) / 2;
+            int near = alongX ? wetSpan(mx, mz, 1, 0, wetAt) : wetSpan(mx, mz, 0, 1, wetAt);
+            int far = alongX ? wetSpan(mx, mz, 0, 1, wetAt) : wetSpan(mx, mz, 1, 0, wetAt);
+            if (TRACE_BRIDGES) io.github.profetgit.countryroads.CountryRoads.LOG.info("CR-AXIS " + a + ".." + b + " at " + mx + "," + mz + " near=" + near + " far=" + far + (far < near * AXIS_SWAP ? " swap" : ""));
+            if (far < near * AXIS_SWAP) alongX = !alongX;
+        }
         float ax = alongX ? Math.signum(cx) : 0, az = alongX ? 0 : Math.signum(cz);
         // through the middle (free), from the anchored end (one end fixed), or the chord (both fixed)
         float ox, oz, dx, dz;
@@ -625,6 +644,63 @@ public final class Planner {
         int lo = fixA ? a : Math.max(1, a0 - Math.max(Math.max(ease, bendA), Math.round(2 * offA))),
             hi = fixB ? b : Math.min(n - 2, b0 + Math.max(Math.max(ease, bendB), Math.round(2 * offB)));
         return new Line(a, b, a0, b0, lo, hi, ox, oz, dx, dz);
+    }
+
+    /** The farther axis is taken when it crosses less than this share of the nearer axis's water. */
+    static final float AXIS_SWAP = 0.7f;
+    static final int SPAN_MAX = 160;
+
+    /** Blocks of water on the axis line through (x, z) both ways, to the first dry block each way. */
+    static int wetSpan(float x, float z, int ux, int uz, java.util.function.BiPredicate<Float, Float> wetAt) {
+        int span = 0;
+        for (int dir = -1; dir <= 1; dir += 2)
+            for (int k = dir < 0 ? 1 : 0; k < SPAN_MAX && wetAt.test(x + ux * k * dir, z + uz * k * dir); k++) span++;
+        return span;
+    }
+
+    /** A deck turning more than this (degrees over 3 samples either side) is bent. */
+    static final double BEND_MAX = 8;
+
+    /** Sharpest turn on samples a..b (degrees between the headings over 3 samples before and after). */
+    static double bend(float[] x, float[] z, int a, int b) {
+        double most = 0;
+        for (int k = a + 3; k + 3 <= b; k++) {
+            double h1 = Math.atan2(z[k] - z[k - 3], x[k] - x[k - 3]), h2 = Math.atan2(z[k + 3] - z[k], x[k + 3] - x[k]);
+            most = Math.max(most, Math.abs(Math.toDegrees(Math.atan2(Math.sin(h2 - h1), Math.cos(h2 - h1)))));
+        }
+        return most;
+    }
+
+    /**
+     * Last word on straight decks, after the final profile: a bridge run that still turns (its crossing grew past the
+     * straightened part, or the chord pass was refused) is laid on the chord between its own ends. The ends stay, so the
+     * road either side and every height are unchanged. Returns the moved samples.
+     */
+    static boolean[] straightDecks(float[] x, float[] z, byte[] kind, float[] pin, java.util.function.BiPredicate<Float, Float> blocked) {
+        int n = x.length;
+        boolean[] moved = new boolean[n];
+        for (int i = 0; i < n; ) {
+            int j = i;
+            while (j + 1 < n && kind[j + 1] == kind[i]) j++;
+            int a = i, b = j;
+            i = j + 1;
+            if (kind[a] != EdgePlan.BRIDGE || b - a < 6 || bend(x, z, a, b) <= BEND_MAX) continue;
+            float cx = x[b] - x[a], cz = z[b] - z[a];
+            boolean ok = true;
+            for (int k = a + 1; k < b && ok; k++) {
+                float t = (k - a) / (float) (b - a);
+                ok = Float.isNaN(pin[k]) && !blocked.test(x[a] + cx * t, z[a] + cz * t);
+            }
+            if (TRACE_BRIDGES) io.github.profetgit.countryroads.CountryRoads.LOG.info("CR-DECK bent " + a + ".." + b + " at " + x[a] + "," + z[a] + " bend=" + Math.round(bend(x, z, a, b)) + (ok ? " chorded" : " blocked"));
+            if (!ok) continue;
+            for (int k = a + 1; k < b; k++) {
+                float t = (k - a) / (float) (b - a);
+                x[k] = x[a] + cx * t;
+                z[k] = z[a] + cz * t;
+                moved[k] = true;
+            }
+        }
+        return moved;
     }
 
     /** Water at least this deep under an ease sample that stood on dry ground stops the chord pass's ease (see apply). */
@@ -973,7 +1049,10 @@ public final class Planner {
             }
             y[i] = sum / w;
         }
-        // decks are level across each crossing
+        // decks are level across each crossing, at the water's height: held fixed while the road is graded, so the banks
+        // ramp down to it (a cut into a high bank) instead of the deck being dragged up to the hilltop (a 90-block viaduct
+        // at hill height and a 15-block masonry wall down the low bank)
+        boolean[] fixed = new boolean[n];
         for (int i = 0; i < n; ) {
             int j = i;
             while (j + 1 < n && kind[j + 1] == kind[i]) j++;
@@ -989,9 +1068,22 @@ public final class Planner {
                 // a connector needs twice the room: the deck's dry end stays level up to it and the connector eases from
                 // the street ground (a bridge 17 samples before a connector still left it a 2-block step)
                 pinned |= i < connA + 2 * RAISE_CLEAR || j >= n - connB - 2 * RAISE_CLEAR;
-                if (kind[i] == EdgePlan.BRIDGE && j - i + 1 > STONE_BRIDGE && !pinned) {
-                    deck += 3;
-                    for (int k = i; k <= j; k++) base[k] = deck;
+                if (OLD_DECK) {
+                    if (kind[i] == EdgePlan.BRIDGE && j - i + 1 > STONE_BRIDGE && !pinned) {
+                        deck += 3;
+                        for (int k = i; k <= j; k++) base[k] = deck;
+                    }
+                } else if (kind[i] == EdgePlan.BRIDGE && !pinned) {
+                    float hA = bank(ground, water, i - 1, -1), hB = bank(ground, water, j + 1, 1);
+                    float low = Float.isNaN(hA) ? hB : Float.isNaN(hB) ? hA : Math.min(hA, hB);
+                    // the stone raise only where both banks stand that high (else the low bank gets a raised approach)
+                    if (j - i + 1 > STONE_BRIDGE && !Float.isNaN(low) && low >= deck + 1) deck += 3;
+                    // a gorge (both banks high): the deck spans it near bank height rather than the road diving in
+                    if (!Float.isNaN(low) && low - BANK_CUT > deck) deck = low - BANK_CUT;
+                    for (int k = i; k <= j; k++) {
+                        base[k] = deck;
+                        fixed[k] = true;
+                    }
                 }
                 for (int k = i; k <= j; k++) y[k] = deck;
             }
@@ -1003,11 +1095,11 @@ public final class Planner {
             // a steeper grade is allowed on the last stretch into a village, so the road climbs into the street
             for (int i = 1; i < n; i++) {
                 float g = i < connA || i >= n - connB || pinNear[i] ? CONN_GRADE : i < 24 || i > n - 25 ? 0.5f : MAX_GRADE;
-                if (Float.isNaN(pin[i])) y[i] = Math.clamp(y[i], y[i - 1] - g, y[i - 1] + g);
+                if (Float.isNaN(pin[i]) && !fixed[i]) y[i] = Math.clamp(y[i], y[i - 1] - g, y[i - 1] + g);
             }
             for (int i = n - 2; i >= 0; i--) {
                 float g = i < connA || i >= n - connB || pinNear[i] ? CONN_GRADE : i < 24 || i > n - 25 ? 0.5f : MAX_GRADE;
-                if (Float.isNaN(pin[i])) y[i] = Math.clamp(y[i], y[i + 1] - g, y[i + 1] + g);
+                if (Float.isNaN(pin[i]) && !fixed[i]) y[i] = Math.clamp(y[i], y[i + 1] - g, y[i + 1] + g);
             }
         }
         // dry stretches far below the ground are tunnels, far above it trestle bridges
@@ -1036,13 +1128,19 @@ public final class Planner {
                 int j = i;
                 while (j + 1 < n && kind[j + 1] == kind[i]) j++;
                 if (kind[i] == EdgePlan.BRIDGE) {
-                    boolean wet = false;
+                    // level the wet span only, to its own deck: dry trestle under a ramp is levelled to nothing (levelled
+                    // to the run's highest sample, a hilltop approach became the deck of the whole crossing)
+                    int w0 = -1, w1 = -1;
+                    for (int k = i; k <= j; k++)
+                        if (water[k] > ground[k]) {
+                            if (w0 < 0) w0 = k;
+                            w1 = k;
+                        }
+                    boolean wet = w0 >= 0, held = false;
                     float deck = Float.NEGATIVE_INFINITY;
-                    for (int k = i; k <= j; k++) {
-                        wet |= water[k] > ground[k];
-                        deck = Math.max(deck, y[k]);
-                    }
-                    for (int k = i; k <= j && wet; k++)
+                    for (int k = Math.max(i, w0); k <= w1; k++) if (fixed[k]) held = true;
+                    for (int k = held ? w0 : i; k <= (held ? w1 : j); k++) deck = Math.max(deck, y[k]);
+                    for (int k = held ? w0 : i; k <= (held ? w1 : j) && wet; k++)
                         if (Float.isNaN(pin[k]) && y[k] != deck) {
                             y[k] = deck;
                             changed = true;
@@ -1140,6 +1238,26 @@ public final class Planner {
                     if (kind[i] == EdgePlan.GROUND && Float.isNaN(pin[i])) y[i] = Math.max(y[i], y[i + 1] - (pinNear[i] || i < connA || i >= n - connB ? CONN_GRADE : MAX_GRADE));
             }
         return y;
+    }
+
+    /** A crossing's deck may sit this far below the lower of its two banks (a gorge); deeper and it rises toward them. */
+    static final float BANK_CUT = 4;
+    /** Dev: the 0.1.48 deck (levelled to the run's highest sample, dragged by the approaches). */
+    static final boolean OLD_DECK = Boolean.getBoolean("countryroads.oldDeck");
+    /** Samples past a crossing's end read for its bank height. */
+    static final int BANK_PEEK = 6;
+
+    /** Highest dry ground within BANK_PEEK samples from `from` walking `dir`; NaN past the road's end or when all wet. */
+    static float bank(float[] ground, float[] water, int from, int dir) {
+        float h = Float.NaN;
+        for (int k = from, c = 0; k >= 0 && k < ground.length && c < BANK_PEEK; k += dir, c++)
+            if (water[k] <= ground[k]) h = Float.isNaN(h) ? ground[k] : Math.max(h, ground[k]);
+        return h;
+    }
+
+    static boolean nearBridge(byte[] kind, int i, int r) {
+        for (int k = Math.max(0, i - r); k <= Math.min(kind.length - 1, i + r); k++) if (kind[k] == EdgePlan.BRIDGE) return true;
+        return false;
     }
 
     /** Cross-section stations every NUDGE_STEP samples; shifts tried up to NUDGE_MAX blocks either way. */

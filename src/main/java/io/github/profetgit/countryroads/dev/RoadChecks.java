@@ -597,6 +597,73 @@ final class RoadChecks {
                             + " ys=" + profileText(p, Math.max(0, i - 6), Math.min(p.length() - 1, j + 6)));
                         i = j + 1;
                     }
+                if (p != null && p.ground != null) {
+                    // embankments: GROUND runs standing 4+ above the natural ground; bridges: longest, sharpest turn on a deck
+                    int fillLen = 0, fillMax = 0, fillAt = -1, topAt = -1, maxBridge = 0, bridgeAt = -1;
+                    double bend = 0;
+                    int bendAt = -1;
+                    for (int i = 0; i < p.length(); ) {
+                        int j = i;
+                        while (j + 1 < p.length() && p.kind[j + 1] == p.kind[i]) j++;
+                        if (p.kind[i] == EdgePlan.BRIDGE) {
+                            if (j - i + 1 > maxBridge) {
+                                maxBridge = j - i + 1;
+                                bridgeAt = i;
+                            }
+                            for (int k = i + 3; k + 3 <= j; k++) {
+                                double h1 = Math.atan2(p.z[k] - p.z[k - 3], p.x[k] - p.x[k - 3]), h2 = Math.atan2(p.z[k + 3] - p.z[k], p.x[k + 3] - p.x[k]);
+                                double d = Math.abs(Math.toDegrees(Math.atan2(Math.sin(h2 - h1), Math.cos(h2 - h1))));
+                                if (d > bend) {
+                                    bend = d;
+                                    bendAt = k;
+                                }
+                            }
+                        }
+                        i = j + 1;
+                    }
+                    for (int i = 0; i < p.length(); ) {
+                        if (p.kind[i] != EdgePlan.GROUND || p.y[i] - p.ground[i] < 4) {
+                            i++;
+                            continue;
+                        }
+                        int j = i, top = 0;
+                        while (j + 1 < p.length() && p.kind[j + 1] == EdgePlan.GROUND && p.y[j + 1] - p.ground[j + 1] >= 4) j++;
+                        int tk = i;
+                        for (int k = i; k <= j; k++) if (Math.round(p.y[k] - p.ground[k]) > top) {
+                            top = Math.round(p.y[k] - p.ground[k]);
+                            tk = k;
+                        }
+                        if (j - i + 1 > fillLen) {
+                            fillLen = j - i + 1;
+                            fillAt = i;
+                        }
+                        if (top > fillMax) {
+                            fillMax = top;
+                            topAt = tk;
+                        }
+                        i = j + 1;
+                    }
+                    report(src, "CR-ROADSTAT " + e.a().pos().toShortString() + " -> " + e.b().pos().toShortString() + " bridgeMax=" + maxBridge
+                        + (bridgeAt >= 0 ? "@" + (int) p.x[bridgeAt] + "," + (int) p.z[bridgeAt] : "") + " deckBend=" + Math.round(bend)
+                        + (bendAt >= 0 ? "@" + (int) p.x[bendAt] + "," + (int) p.z[bendAt] : "") + " fillRun=" + fillLen
+                        + (fillAt >= 0 ? "@" + (int) p.x[fillAt] + "," + (int) p.z[fillAt] : "") + " fillMax=" + fillMax + (topAt >= 0 ? "@" + (int) p.x[topAt] + "," + (int) p.z[topAt] + (p.wet != null && p.wet[topAt] ? "w" : "") : ""));
+                    String dump = System.getProperty("countryroads.dumpRoad");
+                    if (dump != null) {
+                        boolean near = false;
+                        for (String pt : dump.split(";")) {
+                            String[] d = pt.split(",");
+                            float dx0 = Float.parseFloat(d[0]), dz0 = Float.parseFloat(d[1]);
+                            for (int k = 0; k < p.length() && !near; k++) near = Math.abs(p.x[k] - dx0) < 6 && Math.abs(p.z[k] - dz0) < 6;
+                        }
+                        if (near) {
+                            StringBuilder sb = new StringBuilder("CR-DUMP " + e.a().pos().toShortString() + " n=" + p.length() + " ");
+                            for (int k = 0; k < p.length(); k++)
+                                sb.append(k).append(':').append("GCBWT".charAt(p.kind[k])).append(p.wet != null && p.wet[k] ? "w" : "").append(Math.round(p.y[k])).append('/').append(Math.round(p.ground[k]))
+                                    .append('@').append((int) p.x[k]).append(',').append((int) p.z[k]).append(' ');
+                            CountryRoads.LOG.info(sb.toString());
+                        }
+                    }
+                }
                 if (p != null && p.bridge != null)
                     for (int i = 0; i < p.length(); i += Math.max(1, p.runLen[i])) {
                         if (p.kind[i] == EdgePlan.BOARDWALK) {

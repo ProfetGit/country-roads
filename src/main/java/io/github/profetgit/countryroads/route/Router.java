@@ -92,6 +92,13 @@ public final class Router {
                     int ph = (nh + 2) & 7;
                     TerrainSampler.Sample left = sample(samples, ni + DX[ph], nj + DZ[ph]), right = sample(samples, ni - DX[ph], nj - DZ[ph]);
                     step = stepCost(here, next, (nh & 1) == 1, Math.abs(t), left, right, (ph & 1) == 1);
+                    // wide water costs more per cell than a river's width: roads cross where the water is narrow (a
+                    // crossing of a wide river bend made a 90-block viaduct)
+                    if (step > 0 && next.wet() && WIDE_WATER > 0) {
+                        int wet = 0;
+                        for (int q = 0; q < 8; q++) if (sample(samples, ni + DX[q], nj + DZ[q]).wet()) wet++;
+                        step += Math.round(((nh & 1) == 1 ? CELL * Math.sqrt(2) : CELL) * 10 * WIDE_WATER * Math.max(0, wet - WIDE_FREE));
+                    }
                 }
                 if (step < 0) continue;
                 long g = n.g + step;
@@ -139,6 +146,14 @@ public final class Router {
         // capped well below a lake's cost: avoiding a hillside must never send the road the long way over water
         return Math.min(FLANK_MAX, FLANK_W * over * over + WALL_W * Math.max(0, wall - WALL_FREE));
     }
+
+    /**
+     * Extra cost factor per wet neighbour cell beyond WIDE_FREE (a river's own course) of a wet cell. Off by default:
+     * at 1.5 the user's seed's longest crossing went 56 -> 40, but the rerouted regression roads exposed a junction
+     * height break, frost under a bridge and a lost signpost (0.1.49).
+     */
+    static final int WIDE_FREE = Integer.getInteger("countryroads.wideFree", 2);
+    static final double WIDE_WATER = Double.parseDouble(System.getProperty("countryroads.wideWater", "0"));
 
     /** Integer cost of one move, -1 when impassable. Base 10 per block. */
     private long stepCost(TerrainSampler.Sample a, TerrainSampler.Sample b, boolean diagonal, int turn,
