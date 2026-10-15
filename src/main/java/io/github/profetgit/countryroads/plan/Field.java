@@ -17,9 +17,15 @@ public final class Field {
     public static final double RX = 30, RZ = 21;
     /** Chunks whose box is within this of the centre may hold part of the field (the blob reaches 1.5 * RX along the road). */
     public static final double REACH = 58;
-    public static final double DENSITY = Double.parseDouble(System.getProperty("countryroads.fieldDensity", "1"));
+    private static final double FLAG = Double.parseDouble(System.getProperty("countryroads.fieldDensity", "1"));
+
+    public static double density() {
+        return FLAG * io.github.profetgit.countryroads.Config.world().wheatFields / 100.0;
+    }
     /** Fields keep this far apart (centre to centre). */
-    public static final double APART = Math.max(70, 90 / DENSITY);
+    public static double apart() {
+        return Math.max(70, 90 / density());
+    }
     private static final double RAG = 1.6 / RZ;
 
     public final double fx, fz, tx, tz;

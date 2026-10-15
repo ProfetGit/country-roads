@@ -9,7 +9,8 @@
   "license": "LicenseRef-All-Rights-Reserved",
   "environment": "*",
   "entrypoints": {
-    "main": ["io.github.profetgit.countryroads.CountryRoads"]
+    "main": ["io.github.profetgit.countryroads.CountryRoads"],
+    "modmenu": ["io.github.profetgit.countryroads.client.ModMenuEntry"]
   },
   "mixins": ["countryroads.mixins.json"],
   "depends": {

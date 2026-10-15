@@ -15,7 +15,11 @@ import net.minecraft.world.level.block.state.BlockState;
  * still vanilla street blocks change (a column someone built over, or planks over water, stays).
  */
 public final class StreetPainter {
-    public static final boolean ENABLED = !"false".equals(System.getProperty("countryroads.villageStreets"));
+    private static final boolean FLAG = !"false".equals(System.getProperty("countryroads.villageStreets"));
+
+    public static boolean enabled() {
+        return FLAG && io.github.profetgit.countryroads.Config.world().villageStreets;
+    }
 
     private StreetPainter() {}
 

@@ -50,6 +50,7 @@ def main() -> int:
     ap.add_argument("--no-mod", action="store_true", help="vanilla + Fabric API only (old-world tests); waits --wait s after commands")
     ap.add_argument("--wait", type=float, default=60)
     ap.add_argument("--jvm", action="append", default=[], help="extra JVM arg, repeatable: --jvm=-Dcountryroads.retrofit.paused=true")
+    ap.add_argument("--config", help="copy this file to config/countryroads.json before boot")
     ap.add_argument("cmds", nargs="*")
     a = ap.parse_args()
 
@@ -60,6 +61,9 @@ def main() -> int:
     (work / "mods").mkdir(parents=True)
     (work / "tmp").mkdir(exist_ok=True)
     (work / "eula.txt").write_text("eula=true\n")
+    if a.config:
+        (work / "config").mkdir(exist_ok=True)
+        shutil.copy(a.config, work / "config" / "countryroads.json")
     (work / "server.properties").write_text(
         f"online-mode=false\nserver-ip=127.0.0.1\nserver-port={a.port}\nlevel-seed={a.seed}\n"
         "generate-structures=true\nview-distance=4\nsimulation-distance=4\nspawn-protection=0\ndifficulty=peaceful\n"

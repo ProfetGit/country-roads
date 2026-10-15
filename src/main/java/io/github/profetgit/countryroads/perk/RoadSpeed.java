@@ -13,22 +13,23 @@ import net.minecraft.world.entity.ai.attributes.AttributeModifier;
 import net.minecraft.world.entity.ai.attributes.Attributes;
 import net.minecraft.world.entity.animal.equine.AbstractHorse;
 
-/** Players get Speed I (+20%) and mounts (horses, donkeys, mules, camels...) +30% while on a road. */
+/** On a road players walk faster (+20% by default, like Speed I) and mounts (horses, donkeys, mules, camels...) +30%. */
 public final class RoadSpeed {
     public static final Identifier ID = Identifier.fromNamespaceAndPath(CountryRoads.ID, "road_speed");
-    public static final double PLAYER = 0.20, MOUNT = 0.30;
 
     private RoadSpeed() {}
 
     public static void tick(ServerLevel level) {
         if ((level.getGameTime() & 3) != 0) return;
+        var c = io.github.profetgit.countryroads.Config.get();
+        double player = c.playerSpeed / 100.0, mount = c.mountSpeed / 100.0;
         for (ServerPlayer p : level.players()) {
             Entity v = p.getVehicle();
             if (v instanceof AbstractHorse horse) {
-                apply(level, horse, MOUNT);
+                apply(level, horse, mount);
                 apply(level, p, 0);
             } else {
-                apply(level, p, p.isSpectator() || p.getAbilities().flying ? 0 : PLAYER);
+                apply(level, p, p.isSpectator() || p.getAbilities().flying ? 0 : player);
             }
         }
     }
@@ -37,7 +38,12 @@ public final class RoadSpeed {
         AttributeInstance speed = e.getAttribute(Attributes.MOVEMENT_SPEED);
         if (speed == null) return;
         boolean want = amount > 0 && onRoad(level, e);
-        boolean has = speed.hasModifier(ID);
+        AttributeModifier old = speed.getModifier(ID);
+        if (old != null && want && old.amount() != amount) {
+            speed.removeModifier(ID);
+            old = null;
+        }
+        boolean has = old != null;
         if (want && !has) speed.addTransientModifier(new AttributeModifier(ID, amount, AttributeModifier.Operation.ADD_MULTIPLIED_BASE));
         else if (!want && has) speed.removeModifier(ID);
     }

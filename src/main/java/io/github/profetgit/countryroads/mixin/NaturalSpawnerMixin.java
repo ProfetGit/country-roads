@@ -21,7 +21,7 @@ abstract class NaturalSpawnerMixin {
     private static void countryroads$noMonstersOnRoads(ServerLevel level, MobCategory category, StructureManager structures, ChunkGenerator generator,
                                                        MobSpawnSettings.SpawnerData data, BlockPos.MutableBlockPos pos, double playerDistSqr,
                                                        CallbackInfoReturnable<Boolean> cir) {
-        if (category != MobCategory.MONSTER) return;
+        if (category != MobCategory.MONSTER || !io.github.profetgit.countryroads.Config.get().noMonstersOnRoads) return;
         if (!RoadColumns.isRoad(level, pos.getX(), pos.getZ())) return;
         int surface = level.getHeight(Heightmap.Types.MOTION_BLOCKING_NO_LEAVES, pos.getX(), pos.getZ());
         if (pos.getY() >= surface - 6) cir.setReturnValue(false);

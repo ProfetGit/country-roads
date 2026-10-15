@@ -60,7 +60,7 @@ public final class Camps {
 
     /** Picks at most one camp for the plan: a dry, gentle stretch, 14+ blocks beside the road. */
     void choose(EdgePlan p) {
-        if (!available() || p.length() < MIN_ROAD) return;
+        if (!available() || p.length() < MIN_ROAD || !io.github.profetgit.countryroads.Config.world().waysideCamps) return;
         long h = p.edge.seed() * 0x2545F4914F6CDD1DL;
         h ^= h >>> 31;
         if (Math.floorMod(h, PER_BLOCKS) >= p.length()) return;

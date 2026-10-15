@@ -96,7 +96,7 @@ public final class ChunkMask {
     }
 
     /**
-     * A field survives when no other field centre within Field.APART sorts before it (a plain rule on the candidates,
+     * A field survives when no other field centre within Field.apart() sorts before it (a plain rule on the candidates,
      * not a greedy chain, so a chunk that sees only the fields near it reaches the same answer as any other).
      */
     public static java.util.List<Field> resolveFields(List<EdgePlan> plans) {
@@ -107,9 +107,10 @@ public final class ChunkMask {
 
     public static java.util.List<Field> survivors(java.util.List<Field> candidates, java.util.List<Field> all) {
         java.util.List<Field> out = new java.util.ArrayList<>();
+        double apart = Field.apart();
         for (Field f : candidates) {
             boolean lost = false;
-            for (Field o : all) lost |= o != f && o.before(f) && Math.hypot(o.fx - f.fx, o.fz - f.fz) < Field.APART;
+            for (Field o : all) lost |= o != f && o.before(f) && Math.hypot(o.fx - f.fx, o.fz - f.fz) < apart;
             if (!lost) out.add(f);
         }
         return out;
@@ -212,7 +213,9 @@ public final class ChunkMask {
                 }
             }
         }
+        boolean signposts = io.github.profetgit.countryroads.Config.world().signposts;
         for (EdgePlan.Decor d : resolveDecor(near, fields)) {
+            if (!signposts && (d.type() == EdgePlan.SIGN || d.type() == EdgePlan.LAMP)) continue;
             if (d.type() != EdgePlan.PROP && !fields.isEmpty())
                 for (int lx = 0; lx < 16; lx++)
                     for (int lz = 0; lz < 16; lz++)

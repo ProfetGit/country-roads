@@ -265,7 +265,7 @@ public final class RoadNetwork {
 
     /** Street bands of the villages whose streets can reach this chunk (empty when there are none or the feature is off). */
     public List<io.github.profetgit.countryroads.world.StreetBands> streets(int cx, int cz) {
-        if (!io.github.profetgit.countryroads.paint.StreetPainter.ENABLED) return List.of();
+        if (!io.github.profetgit.countryroads.paint.StreetPainter.enabled()) return List.of();
         List<io.github.profetgit.countryroads.world.StreetBands> out = new ArrayList<>();
         int x0 = cx << 4, z0 = cz << 4;
         for (var v : oracle.find(cx - 12, cz - 12, cx + 12, cz + 12)) {

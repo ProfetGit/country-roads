@@ -400,6 +400,10 @@ public final class HousePaths {
     }
 
     public static void survey(ServerLevel level, BlockPos stake, ServerPlayer player) {
+        if (!io.github.profetgit.countryroads.Config.get().housePaths) {
+            tell(player, Component.translatable("countryroads.stake.disabled").withStyle(ChatFormatting.RED), true);
+            return;
+        }
         cancelSurveys(stake);
         PREVIEWS.remove(stake);
         List<BlockPos> waypoints = new ArrayList<>();

@@ -15,7 +15,8 @@ import net.minecraft.world.level.block.Rotation;
  * cart, shrine, bench and farm chances and divides the milestone spacing and the bench spacing (testing).
  */
 final class PropPlanner {
-    static final double DENSITY = Double.parseDouble(System.getProperty("countryroads.propDensity", "1"));
+    private static final double FLAG = Double.parseDouble(System.getProperty("countryroads.propDensity", "1"));
+    private final double density = FLAG * io.github.profetgit.countryroads.Config.world().roadsideProps / 100.0;
     private static final float[] EXTRA = {0f, 1f, 2f};
 
     private final EdgePlan p;
@@ -36,7 +37,7 @@ final class PropPlanner {
     }
 
     static void plan(EdgePlan p, TerrainSampler terrain) {
-        if (!Props.OK || p.length() < 120) return;
+        if (!Props.OK || p.length() < 120 || io.github.profetgit.countryroads.Config.world().roadsideProps <= 0) return;
         new PropPlanner(p, terrain).run();
     }
 
@@ -75,7 +76,7 @@ final class PropPlanner {
         double aStart = arc[Math.min(p.connA, n - 1)], aEnd = arc[Math.max(0, n - 1 - p.connB)];
         // farm props near each village
         for (int end = 0; end < 2; end++) {
-            if (unit(31 + end) >= Math.min(1.0, 0.3 * DENSITY)) continue;
+            if (unit(31 + end) >= Math.min(1.0, 0.3 * density)) continue;
             int prop = unit(41 + end) < 0.4 ? Props.HAY_CART : Props.HAY_BALES;
             int side = unit(51 + end) < 0.5 ? 1 : -1, start = (int) (unit(61 + end) * 34);
             boolean done = false;
@@ -87,7 +88,7 @@ final class PropPlanner {
         }
         benches();
         if (len >= 400) {
-            double e = len / 3500 * DENSITY;
+            double e = len / 3500 * density;
             int count = (int) e + (unit(21) < e - (int) e ? 1 : 0);
             for (int k = 0; k < count; k++)
                 for (int attempt = 0; attempt < 10; attempt++) {
@@ -96,7 +97,7 @@ final class PropPlanner {
                 }
         }
         if (len >= 150) {
-            double e = len / 3000 * DENSITY;
+            double e = len / 3000 * density;
             int count = (int) e + (unit(22) < e - (int) e ? 1 : 0);
             for (int k = 0; k < count; k++)
                 for (int attempt = 0; attempt < 10; attempt++) {
@@ -105,7 +106,7 @@ final class PropPlanner {
                 }
         }
         // a milestone every 250 blocks from the villages' connectors, all on one side; one in three hides a stash
-        double a0 = aStart + 30, a1 = aEnd - 30, step = Math.max(12, 250 / DENSITY);
+        double a0 = aStart + 30, a1 = aEnd - 30, step = Math.max(12, 250 / density);
         int side = unit(23) < 0.5 ? 1 : -1;
         for (int k = 0; a0 + k * step <= a1; k++) {
             int prop = unit(900 + k) < 1.0 / 3 ? Props.STASH : Props.MILESTONE;
@@ -118,7 +119,7 @@ final class PropPlanner {
     private static final int[] VIEW = {19, 13, 25, 16, 22, 10, 28};
 
     private void benches() {
-        double e = len / 1200 * DENSITY;
+        double e = len / 1200 * density;
         int max = (int) e + (unit(24) < e - (int) e ? 1 : 0);
         if (max <= 0) return;
         Props.Prop pr = Props.get(Props.BENCH);
@@ -141,7 +142,7 @@ final class PropPlanner {
             }
         cands.sort(Comparator.comparingDouble(Cand::drop).reversed());
         List<Double> chosen = new ArrayList<>();
-        double apart = Math.max(24, 700 / DENSITY);
+        double apart = Math.max(24, 700 / density);
         for (Cand c : cands) {
             if (chosen.size() >= max) break;
             boolean far = true;

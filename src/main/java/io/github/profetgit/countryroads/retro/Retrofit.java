@@ -47,7 +47,7 @@ public final class Retrofit {
     private Retrofit() {}
 
     public static void onLoad(ServerLevel level, LevelChunk chunk, boolean generated) {
-        if (generated || RoadColumns.handled(chunk)) return;
+        if (generated || RoadColumns.handled(chunk) || !io.github.profetgit.countryroads.Config.get().roadsInOldChunks) return;
         RoadNetwork n = RoadNetwork.get(level);
         if (n == null) return;
         ChunkPos pos = chunk.getPos();

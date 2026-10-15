@@ -19,6 +19,8 @@ public final class CountryRoads implements ModInitializer {
 
     @Override
     public void onInitialize() {
+        Config.load();
+        ServerLifecycleEvents.SERVER_STARTING.register(Config::worldStarting);
         CommandRegistrationCallback.EVENT.register((dispatcher, context, selection) -> DevCommands.register(dispatcher));
         RoadColumns.init();
         io.github.profetgit.countryroads.path.Stake.init();
@@ -31,7 +33,10 @@ public final class CountryRoads implements ModInitializer {
         ServerTickEvents.END_SERVER_TICK.register(server -> Retrofit.tick());
         ServerChunkEvents.CHUNK_LOAD.register(Retrofit::onLoad);
         ServerLifecycleEvents.SERVER_STOPPING.register(server -> io.github.profetgit.countryroads.path.HousePaths.stop());
-        ServerLifecycleEvents.SERVER_STOPPED.register(server -> RoadNetwork.clear());
+        ServerLifecycleEvents.SERVER_STOPPED.register(server -> {
+            RoadNetwork.clear();
+            Config.worldStopped();
+        });
         ServerLifecycleEvents.END_DATA_PACK_RELOAD.register((server, resources, ok) -> io.github.profetgit.countryroads.path.HousePaths.reloaded());
         LOG.info("Country Roads loaded");
     }

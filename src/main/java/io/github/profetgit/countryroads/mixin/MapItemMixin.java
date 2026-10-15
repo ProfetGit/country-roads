@@ -20,7 +20,7 @@ abstract class MapItemMixin {
         ordinal = 3))
     private MapColor countryroads$roadColour(BlockState state, BlockGetter getter, BlockPos pos, Operation<MapColor> original) {
         MapColor c = original.call(state, getter, pos);
-        if (getter instanceof Level level && state.getFluidState().isEmpty() && RoadColumns.isOpenRoad(level, pos.getX(), pos.getZ())) return MapColor.SAND;
+        if (getter instanceof Level level && io.github.profetgit.countryroads.Config.get().roadsOnMaps && state.getFluidState().isEmpty() && RoadColumns.isOpenRoad(level, pos.getX(), pos.getZ())) return MapColor.SAND;
         return c;
     }
 }

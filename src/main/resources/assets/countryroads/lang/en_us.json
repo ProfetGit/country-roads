@@ -16,5 +16,6 @@
   "countryroads.stake.building": "Laying %s blocks of path...",
   "countryroads.stake.built": "This path is built. Break the stake to take it up again.",
   "countryroads.stake.no_road": "No road within %s blocks. Place the stake closer to a road (it must be loaded).",
-  "countryroads.stake.on_road": "The stake is already on the road."
+  "countryroads.stake.on_road": "The stake is already on the road.",
+  "countryroads.stake.disabled": "House paths are turned off in the Country Roads settings."
 }

@@ -9,7 +9,6 @@ import net.minecraft.world.level.biome.Biomes;
  * -Dcountryroads.fieldDensity=F multiplies the chance and divides the spacings (testing).
  */
 final class FieldPlanner {
-    private static final double SPACING = 500 / Field.DENSITY;
     private static final int STEP = 60;
 
     private FieldPlanner() {}
@@ -17,21 +16,22 @@ final class FieldPlanner {
     static void plan(EdgePlan p, TerrainSampler terrain) {
         int n = p.length();
         int lo = p.connA + 60, hi = n - 1 - p.connB - 60;
-        if (hi - lo < 10) return;
+        double density = Field.density(), spacing = 500 / density, apart = Field.apart();
+        if (hi - lo < 10 || density <= 0) return;
         long seed = Field.mix(p.edge.seed() ^ 0x77686561_74L);
         double[] arc = new double[n];
         for (int i = 1; i < n; i++) arc[i] = arc[i - 1] + Math.hypot(p.x[i] - p.x[i - 1], p.z[i] - p.z[i - 1]);
         double last = -1e9;
         for (int k = 0, i = lo; i <= hi; k++, i += STEP) {
-            if (arc[i] - last < SPACING) continue;
+            if (arc[i] - last < spacing) continue;
             double[] pt = {p.x[i], p.z[i]};
             if (i < 4 || i >= n - 4) continue;
             boolean far = true;
-            for (Field f : p.fields) far &= Math.hypot(f.fx - pt[0], f.fz - pt[1]) >= Field.APART;
+            for (Field f : p.fields) far &= Math.hypot(f.fx - pt[0], f.fz - pt[1]) >= apart;
             if (!far) continue;
             Field f = candidate(p, terrain, i, seed, k);
             if (f == null) continue;
-            if (Field.u(seed, 1, k, 0) >= Math.min(1.0, 0.6 * Field.DENSITY)) continue;
+            if (Field.u(seed, 1, k, 0) >= Math.min(1.0, 0.6 * density)) continue;
             p.fields.add(f);
             last = arc[i];
         }
