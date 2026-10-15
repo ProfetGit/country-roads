@@ -1,0 +1,13 @@
+https://cdn.modrinth.com/data/8oi3bsk5/versions/aGE3hYAA/Terralith_26.3_v2.6.5%2B26.3.jar
+https://cdn.modrinth.com/data/lWDHr9jE/versions/j2jmkU85/tectonic-3.0.31-fabric-26.3.jar
+https://cdn.modrinth.com/data/HXF82T3G/versions/MAQI6dsY/BiomesOPlenty-fabric-26.3-26.3.0.0.15.jar
+https://cdn.modrinth.com/data/hl5OLM95/versions/5kFV8CEz/Geophilic%20v3.7.mod.jar
+https://cdn.modrinth.com/data/tpehi7ww/versions/WilF7nqU/dungeons-and-taverns-6.0.2.jar
+https://cdn.modrinth.com/data/DjLobEOy/versions/yajFnGZS/t_and_t-fabric-neoforge-1.13.12.jar
+https://cdn.modrinth.com/data/muf0XoRe/versions/9jHXeIeI/repurposed_structures-7.8.4%2B26.3-fabric.jar
+https://cdn.modrinth.com/data/XaDC71GB/versions/pZgI6b2t/lithostitched-2.0.6-fabric-26.3.jar
+https://cdn.modrinth.com/data/kkmrDlKT/versions/xirJYe1V/TerraBlender-fabric-26.3-26.3.0.0.9.jar
+https://cdn.modrinth.com/data/s3dmwKy5/versions/kfFeDnrp/GlitchCore-fabric-26.3-26.3.0.0.5.jar
+https://cdn.modrinth.com/data/codAaoxh/versions/G9RaNHAC/midnightlib-fabric-1.10.0%2B26.3.jar
+https://cdn.modrinth.com/data/cl223EMc/versions/rWxmPrGC/cristellib-fabric-26.3-3.1.13.jar
+https://cdn.modrinth.com/data/9s6osm5g/versions/fg2uyxOW/cloth-config-fabric-26.3.159.jar
