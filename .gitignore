@@ -14,3 +14,4 @@ dev/capture/.work/
 dev/server/bench/*.jar
 dev/feedback/
 dev/compat/jars/
+dev/compat/out/

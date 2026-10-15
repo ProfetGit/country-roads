@@ -41,7 +41,7 @@ def main() -> int:
     p = f"execute positioned {x} 80 {z} run countryroads"
     run = subprocess.run([sys.executable, str(ROOT / "dev/server/wg.py"), "--seed", a.seed, "--name", f"cap-{a.name}", "--port", str(a.port),
                           *(["--mods", *a.mods] if a.mods else []), *[f"--jvm={j}" for j in a.jvm], *(["--jar", a.jar] if a.jar else []),
-                          f"{p} pregen {a.radius + 128}", *a.after, *([] if a.only_after else [f"{p} shots {a.radius}"])], capture_output=True, text=True)
+                          "--", f"{p} pregen {a.radius + 128}", *a.after, *([] if a.only_after else [f"{p} shots {a.radius}"])], capture_output=True, text=True)
     print(run.stdout)
     shots = [] if a.only else [l.split()[1:] for l in run.stdout.splitlines() if l.startswith("CR-SHOT ") and "none" not in l]
     shots += [s.split() for s in a.shot]
