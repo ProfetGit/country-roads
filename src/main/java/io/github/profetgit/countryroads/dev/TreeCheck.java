@@ -164,6 +164,12 @@ final class TreeCheck {
             int x = BlockPos.getX(p), y = BlockPos.getY(p), z = BlockPos.getZ(p);
             BlockState below = get(x, y - 1, z);
             if (!(tree ? wood(below) : shroom(below)) && PaintRules.solid(below) && !below.is(BlockTags.LEAVES)) supported = true;
+            // a trunk set on a flower bed (pink petals, wildflowers) that the biome's flower feature laid before the tree: the
+            // generator's own feature order, ground one block under the petals, nothing the painter cut
+            else if (tree && !wood(below) && below.getBlock() instanceof net.minecraft.world.level.block.FlowerBedBlock && PaintRules.solid(get(x, y - 2, z))) {
+                supported = true;
+                io.github.profetgit.countryroads.CountryRoads.LOG.info("CR-ITEM treeOnPetals " + x + "," + y + "," + z);
+            }
             if (size > MAX_GROUP) {
                 supported = true;
                 break;

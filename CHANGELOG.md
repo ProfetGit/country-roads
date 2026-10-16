@@ -1,0 +1,87 @@
+# Changelog
+
+## 0.1.61 (unreleased)
+
+- Roads stay as fast to generate as before. The network is the same short-range one as in 0.1.54 (nearby villages joined as before), and only clusters of villages that would otherwise be cut off from each other get a long link (up to 2000 blocks). A long link is the one road whose plan a chunk waits for the longest, so these are kept to the few that are needed.
+- Planning runs ahead of you: the roads of the ground around a player, and around where they are heading, are planned in the background, so exploring on foot, by boat or by elytra never waits for a road.
+- Very long roads keep to a narrower corridor (no more than a 1200-block road gets), so a failed search costs less.
+
+## 0.1.59 (unreleased)
+
+- 75% fewer flowers and bushes beside roads (flower drifts, verge flowers and bushes, leaf bushes). Grass is unchanged.
+
+## 0.1.58 (unreleased)
+
+- Fixed grass blocks floating on top of bamboo (and cactus) beside roads: bamboo and cactus are not ground any more.
+
+## 0.1.57 (unreleased)
+
+- Fixed frozen bare grass where roadside props stood in snow, and trees being undone whole for a branch high over a bank.
+
+## 0.1.56 (unreleased)
+
+- When a road between two nearby villages cannot be built (water in the way), the villages are joined by another road if one is possible.
+
+## 0.1.55 (unreleased)
+
+- Roads up to 2000 blocks between far village groups; junction signposts no longer stand on the road they leave.
+
+## 0.1.54 (unreleased)
+
+- Settings file `config/countryroads.json` and a Mod Menu screen: walking and riding speed on roads, no monsters on roads, roads on maps, house paths, roads in old chunks, and for new worlds village streets, signposts and lamps, wayside camps, roadside finds and wheat fields (each world keeps the settings it was created with).
+
+## 0.1.53 (unreleased)
+
+- Roads reach villages with no streets (Towns and Towers inns and lighthouses) at a door.
+
+## 0.1.51 (unreleased)
+
+- Bridges: the deck stays at the water, never a viaduct from a hilltop; no bend in a bridge.
+
+## 0.1.48 (unreleased)
+
+- Works with Terralith, Tectonic, Biomes O' Plenty, Geophilic, Dungeons and Taverns, Towns and Towers and Repurposed Structures; modded village streets are left as they are and roads join them.
+
+## 0.1.46 (unreleased)
+
+- Roadside finds are rarer: a milestone every 250 blocks, lost carts, shrines and benches once in a few kilometres.
+
+## 0.1.45 (unreleased)
+
+- Wheat fields beside roads in plains: a big irregular field with water pockets and a scarecrow.
+
+## 0.1.44 (unreleased)
+
+- Roadside finds: cairn milestones (sometimes with a hidden stash), lost carts, wayside shrines, benches where the land drops away, hay carts near villages; wildflower verges by biome.
+
+## 0.1.43 (unreleased)
+
+- Roads leave a village over dry land, so a bridge no longer starts at the street.
+
+## 0.1.40 (unreleased)
+
+- Roads stay off mountain flanks and cut natural slopes instead of leaving a sheer wall.
+
+## 0.1.37 (unreleased)
+
+- Boardwalks over shallow water: a ragged ribbon of spruce slabs, flat trapdoors and campfire posts.
+
+## 0.1.28 (unreleased)
+
+- New road bridges: straight stone arch bridges and timber bridges, weathering and moss that grow from the water up.
+
+## 0.1.27 (unreleased)
+
+- On a road you walk 20% faster (Speed I) and mounts run 30% faster.
+
+## 0.1.24 (unreleased)
+
+- Village streets get the same look as the roads, and roads join them.
+
+## 0.1.14 (unreleased)
+
+- House paths use the medieval bridge for every crossing; the wood follows the biome.
+
+## 0.1.0 (unreleased)
+
+- First playable version: roads between villages generated with the world, signposts, lamp posts, wayside camps, fences and walls, no monsters on roads, roads on maps, roads added to chunks generated before the mod; the Surveyor's Stake builds a path from a house door to the nearest road.

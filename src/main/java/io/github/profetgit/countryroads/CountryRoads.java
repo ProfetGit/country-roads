@@ -31,6 +31,7 @@ public final class CountryRoads implements ModInitializer {
         ServerTickEvents.END_SERVER_TICK.register(server -> DevCommands.tick());
         ServerTickEvents.END_LEVEL_TICK.register(RoadSpeed::tick);
         ServerTickEvents.END_SERVER_TICK.register(server -> Retrofit.tick());
+        ServerTickEvents.END_SERVER_TICK.register(io.github.profetgit.countryroads.plan.Prefetch::tick);
         ServerChunkEvents.CHUNK_LOAD.register(Retrofit::onLoad);
         ServerLifecycleEvents.SERVER_STOPPING.register(server -> io.github.profetgit.countryroads.path.HousePaths.stop());
         ServerLifecycleEvents.SERVER_STOPPED.register(server -> {

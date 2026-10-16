@@ -12,6 +12,16 @@ import net.minecraft.world.level.levelgen.structure.BoundingBox;
 /** Turns a village pair into an EdgePlan: join points, coarse route, smoothed centreline, graded surface profile. */
 public final class Planner {
     public static final double ELLIPSE = Double.parseDouble(System.getProperty("countryroads.ellipse", "1.6"));
+
+    /** Edges up to this length may detour as far as ELLIPSE says; longer ones keep the corridor width that edge gets (the cost of a failing search and the plans a chunk waits for grow with the corridor). */
+    public static final int LONG_EDGE = Integer.getInteger("countryroads.longEdge", 1200);
+
+    /** Detour factor allowed for a road between two villages d apart. */
+    public static double ellipse(double d) {
+        if (d <= LONG_EDGE) return ELLIPSE;
+        double minor = LONG_EDGE * Math.sqrt(ELLIPSE * ELLIPSE - 1);
+        return Math.min(ELLIPSE, Math.sqrt(1 + (minor / d) * (minor / d)));
+    }
     /** Max planned rise per block of road (a half-step at most every 1.5 blocks). */
     static final float MAX_GRADE = 0.34f;
 
@@ -117,7 +127,7 @@ public final class Planner {
         for (Trunk t : trunks)
             for (int i = 0; i < t.p.length(); i += 4)
                 trunkCells.add(Router.cellKey(Math.floorDiv((int) t.p.x[i], Router.CELL), Math.floorDiv((int) t.p.z[i], Router.CELL)));
-        Router.Result r = router.route(ja[0], ja[1], jb[0], jb[1], ELLIPSE, trunkCells::contains);
+        Router.Result r = router.route(ja[0], ja[1], jb[0], jb[1], ellipse(e.length()), trunkCells::contains);
         if (r == null) return noPlan(e, "no route " + ja[0] + "," + ja[1] + " -> " + jb[0] + "," + jb[1]);
         double straight = Math.hypot(jb[0] - ja[0], jb[1] - ja[1]);
         if (r.cost() > straight * 10 * 14) return noPlan(e, "route cost " + r.cost() + " over " + Math.round(straight * 140));

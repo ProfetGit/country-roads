@@ -28,19 +28,26 @@ import net.minecraft.world.level.Level;
  * composed from the RNG plans, so chunks still agree. Fallbacks are never trunks of anything.
  */
 public final class RoadNetwork {
+    /** Longest link between two village clusters (see isLink). */
     public static final int MAX_EDGE = Integer.getInteger("countryroads.maxEdge", 2000);
+    /** Longest RNG edge and longest fallback: the network inside a cluster of villages that are this close, as before the links. */
+    public static final int RNG_MAX = Integer.getInteger("countryroads.rngMax", 1200);
     private static final int FALLBACK_TRIES = Integer.getInteger("countryroads.fallbackTries", 4);
     private static final boolean FALLBACKS = !Boolean.getBoolean("countryroads.noFallback");
     private static final boolean TRACE = Boolean.getBoolean("countryroads.traceFallback");
+    private static final boolean TRACE_PLANS = Boolean.getBoolean("countryroads.tracePlans");
+    private static final long TRACE_T0 = System.nanoTime();
     private static final int REGION_SHIFT = 9;
     private static final Map<ServerLevel, RoadNetwork> NETWORKS = new ConcurrentHashMap<>();
     private static final AtomicInteger THREADS = new AtomicInteger();
-    private static final ExecutorService POOL = Executors.newFixedThreadPool(Math.max(2, Runtime.getRuntime().availableProcessors() / 4), r -> {
-        Thread t = new Thread(r, "CountryRoads-planner-" + THREADS.incrementAndGet());
-        t.setDaemon(true);
-        t.setPriority(Thread.NORM_PRIORITY - 1);
-        return t;
-    });
+    private static final java.util.concurrent.ThreadPoolExecutor POOL = (java.util.concurrent.ThreadPoolExecutor) Executors.newFixedThreadPool(
+        Integer.getInteger("countryroads.planThreads", Math.max(2, Runtime.getRuntime().availableProcessors() / 2)), r -> {
+            Thread t = new Thread(r, "CountryRoads-planner-" + THREADS.incrementAndGet());
+            t.setDaemon(true);
+            t.setPriority(Thread.NORM_PRIORITY - 1);
+            return t;
+        });
+    private final java.util.Set<Long> warmed = ConcurrentHashMap.newKeySet();
 
     public final ServerLevel level;
     public final VillageOracle oracle;
@@ -100,6 +107,10 @@ public final class RoadNetwork {
         int reach = (int) (MAX_EDGE * Planner.ELLIPSE) + 64;
         int far = reach + MAX_EDGE;
         List<VillageOracle.Village> all = oracle.find((x0 - far) >> 4, (z0 - far) >> 4, (x1 + far) >> 4, (z1 + far) >> 4);
+        // RNG edges are decided among the villages their own reach could see (the window of a network without links)
+        int rngReach = (int) (RNG_MAX * Planner.ELLIPSE) + 64, rngFar = rngReach + RNG_MAX;
+        List<VillageOracle.Village> rngAll = rngFar >= far ? all : all.stream().filter(v -> v.pos().getX() >= x0 - rngFar && v.pos().getX() <= x1 + rngFar
+            && v.pos().getZ() >= z0 - rngFar && v.pos().getZ() <= z1 + rngFar).toList();
         List<VillageOracle.Village> near = all.stream().filter(v -> v.pos().getX() >= x0 - reach && v.pos().getX() <= x1 + reach
             && v.pos().getZ() >= z0 - reach && v.pos().getZ() <= z1 + reach).toList();
         List<Edge> out = new ArrayList<>();
@@ -109,42 +120,70 @@ public final class RoadNetwork {
                 long d2 = d2(e.a(), e.b());
                 if (d2 > (long) MAX_EDGE * MAX_EDGE) continue;
                 double d = Math.sqrt(d2);
-                double minor = d / 2 * Math.sqrt(Planner.ELLIPSE * Planner.ELLIPSE - 1) + 32;
+                double f = Planner.ellipse(d), minor = d / 2 * Math.sqrt(f * f - 1) + 32;
                 if (boxSegmentDistance(x0, z0, x1, z1, e) > minor) continue;
-                if (!relativeNeighbours(e, d2, all)) continue;
+                if (d2 > (long) RNG_MAX * RNG_MAX ? !isLink(e) : !relativeNeighbours(e, d2, rngAll)) continue;
                 out.add(e);
             }
         }
         return List.copyOf(out);
     }
 
-    /** An RNG edge: within MAX_EDGE and no village closer to both ends than they are to each other. */
+    /**
+     * A planned edge (not a fallback): an RNG edge within RNG_MAX (no village closer to both ends than they are to each
+     * other), or a link between clusters of villages: within MAX_EDGE, and the two ends not joined by pairs that are all
+     * shorter (the edge is in the minimum spanning tree). Links keep far groups connected without every long RNG edge
+     * between them, each of which a chunk would have to wait for.
+     */
     public boolean isPrimary(Edge e) {
         Boolean b = primary.get(e);
         if (b != null) return b;
         long d2 = d2(e.a(), e.b());
         boolean r = false;
-        if (d2 <= (long) MAX_EDGE * MAX_EDGE) {
+        if (d2 <= (long) RNG_MAX * RNG_MAX) {
             int d = (int) Math.ceil(Math.sqrt(d2)) + 16;
             int mx = (e.a().pos().getX() + e.b().pos().getX()) >> 1, mz = (e.a().pos().getZ() + e.b().pos().getZ()) >> 1;
             r = relativeNeighbours(e, d2, oracle.find((mx - d) >> 4, (mz - d) >> 4, (mx + d) >> 4, (mz + d) >> 4));
+        } else if (d2 <= (long) MAX_EDGE * MAX_EDGE) {
+            r = isLink(e);
         }
         primary.put(e, r);
         return r;
     }
 
+    /** No chain of shorter pairs (within twice the edge's length of its middle) joins the ends: the edge is in the spanning tree. */
+    private boolean isLink(Edge e) {
+        int d = 2 * (int) Math.ceil(Math.sqrt(d2(e.a(), e.b()))) + 16;
+        int mx = (e.a().pos().getX() + e.b().pos().getX()) >> 1, mz = (e.a().pos().getZ() + e.b().pos().getZ()) >> 1;
+        List<VillageOracle.Village> all = oracle.find((mx - d) >> 4, (mz - d) >> 4, (mx + d) >> 4, (mz + d) >> 4);
+        java.util.ArrayDeque<VillageOracle.Village> queue = new java.util.ArrayDeque<>();
+        java.util.Set<VillageOracle.Village> seen = new java.util.HashSet<>();
+        queue.add(e.a());
+        seen.add(e.a());
+        while (!queue.isEmpty()) {
+            VillageOracle.Village u = queue.poll();
+            for (VillageOracle.Village v : all) {
+                if (seen.contains(v) || !shorter(Edge.of(u, v), e)) continue;
+                if (v.equals(e.b())) return false;
+                seen.add(v);
+                queue.add(v);
+            }
+        }
+        return true;
+    }
+
     /** Pairs that are not RNG edges, within MAX_EDGE, whose road can come near the region and that some RNG edge could fall back to. */
     private List<Edge> fallbackCandidates(int rx, int rz) {
         int x0 = rx << REGION_SHIFT, z0 = rz << REGION_SHIFT, x1 = x0 + (1 << REGION_SHIFT) - 1, z1 = z0 + (1 << REGION_SHIFT) - 1;
-        int reach = (int) (MAX_EDGE * Planner.ELLIPSE) + 64;
+        int reach = (int) (RNG_MAX * Planner.ELLIPSE) + 64;
         List<VillageOracle.Village> near = oracle.find((x0 - reach) >> 4, (z0 - reach) >> 4, (x1 + reach) >> 4, (z1 + reach) >> 4);
         List<Edge> out = new ArrayList<>();
         for (int i = 0; i < near.size(); i++) {
             for (int j = i + 1; j < near.size(); j++) {
                 Edge e = Edge.of(near.get(i), near.get(j));
                 long d2 = d2(e.a(), e.b());
-                if (d2 > (long) MAX_EDGE * MAX_EDGE) continue;
-                double minor = Math.sqrt(d2) / 2 * Math.sqrt(Planner.ELLIPSE * Planner.ELLIPSE - 1) + 32;
+                if (d2 > (long) RNG_MAX * RNG_MAX) continue;
+                double dd = Math.sqrt(d2), f = Planner.ellipse(dd), minor = dd / 2 * Math.sqrt(f * f - 1) + 32;
                 if (boxSegmentDistance(x0, z0, x1, z1, e) > minor || isPrimary(e) || owners(e).isEmpty()) continue;
                 out.add(e);
             }
@@ -156,7 +195,7 @@ public final class RoadNetwork {
     private List<Edge> owners(Edge f) {
         List<Edge> out = new ArrayList<>();
         for (VillageOracle.Village end : new VillageOracle.Village[]{f.a(), f.b()})
-            for (VillageOracle.Village o : within(end, MAX_EDGE)) {
+            for (VillageOracle.Village o : within(end, RNG_MAX)) {
                 if (o.equals(end)) continue;
                 Edge e = Edge.of(end, o);
                 if (!e.equals(f) && !out.contains(e) && isPrimary(e)) out.add(e);
@@ -204,8 +243,8 @@ public final class RoadNetwork {
     }
 
     private CompletableFuture<Edge> pickFallback(Edge e) {
-        List<VillageOracle.Village> group = new ArrayList<>(within(e.a(), MAX_EDGE));
-        for (var v : within(e.b(), MAX_EDGE)) if (!group.contains(v)) group.add(v);
+        List<VillageOracle.Village> group = new ArrayList<>(within(e.a(), RNG_MAX));
+        for (var v : within(e.b(), RNG_MAX)) if (!group.contains(v)) group.add(v);
         List<Edge> local = new ArrayList<>();
         for (int i = 0; i < group.size(); i++)
             for (int j = i + 1; j < group.size(); j++) {
@@ -229,7 +268,7 @@ public final class RoadNetwork {
                     VillageOracle.Village other = end.equals(e.a()) ? rb : ra;
                     if (w.equals(end) || !root(parent, w).equals(other)) continue;
                     Edge c = Edge.of(end, w);
-                    if (c.equals(e) || cand.contains(c) || d2(end, w) > (long) MAX_EDGE * MAX_EDGE || isPrimary(c)) continue;
+                    if (c.equals(e) || cand.contains(c) || d2(end, w) > (long) RNG_MAX * RNG_MAX || isPrimary(c)) continue;
                     cand.add(c);
                 }
             }
@@ -303,13 +342,20 @@ public final class RoadNetwork {
         CompletableFuture<EdgePlan> mine = new CompletableFuture<>();
         CompletableFuture<EdgePlan> prev = plans.putIfAbsent(e, mine);
         if (prev != null) return prev;
+        long asked = System.nanoTime();
+        long[] depsDone = new long[1];
+        if (TRACE_PLANS) CompletableFuture.allOf(deps.toArray(CompletableFuture[]::new)).whenComplete((v, err) -> depsDone[0] = System.nanoTime());
         CompletableFuture.allOf(deps.toArray(CompletableFuture[]::new)).whenCompleteAsync((v, err) -> {
             List<EdgePlan> trunks = new ArrayList<>();
             for (var d : deps) {
                 EdgePlan p = d.getNow(null);
                 if (p != null) trunks.add(p);
             }
+            long began = TRACE_PLANS ? System.nanoTime() : 0;
             mine.complete(planWithRetries(e, trunks));
+            if (TRACE_PLANS) CountryRoads.LOG.info("CR-PLANTIME {} -> {} len={} deps={} queuedMs={} depWaitMs={} runMs={} at={}", e.a().pos().toShortString(), e.b().pos().toShortString(),
+                (int) e.length(), deps.size(), (began - Math.max(asked, depsDone[0])) / 1_000_000, (Math.max(asked, depsDone[0]) - asked) / 1_000_000,
+                (System.nanoTime() - began) / 1_000_000, (System.nanoTime() - TRACE_T0) / 1_000_000);
         }, POOL);
         return mine;
     }
@@ -378,13 +424,54 @@ public final class RoadNetwork {
         return c != 0 ? c < 0 : p.b().key() < q.b().key();
     }
 
+    /**
+     * Plans ahead of the players, off the server thread's critical path: the roads of the nearest region within PREFETCH
+     * regions of a viewer (or of where it will be in LOOKAHEAD seconds) that no one has asked for yet. One region per
+     * call, and only while the planner queue is short, so chunks asking for plans are never stuck behind speculation.
+     * viewers: {x, z, vx, vz} in blocks and blocks per second.
+     */
+    public void prefetch(List<double[]> viewers) {
+        if (POOL.getQueue().size() > 1 || viewers.isEmpty()) return;
+        long best = 0;
+        double bestD = Double.MAX_VALUE;
+        for (double[] v : viewers) {
+            double ax = v[0] + Math.clamp(v[2] * LOOKAHEAD, -1500, 1500), az = v[1] + Math.clamp(v[3] * LOOKAHEAD, -1500, 1500);
+            for (int c = 0; c < 2; c++) {
+                int rx0 = (int) Math.floor((c == 0 ? v[0] : ax)) >> REGION_SHIFT, rz0 = (int) Math.floor((c == 0 ? v[1] : az)) >> REGION_SHIFT;
+                for (int dx = -PREFETCH; dx <= PREFETCH; dx++)
+                    for (int dz = -PREFETCH; dz <= PREFETCH; dz++) {
+                        long key = ChunkPos.pack(rx0 + dx, rz0 + dz);
+                        if (warmed.contains(key)) continue;
+                        double d = Math.hypot(((rx0 + dx) + 0.5) * 512 - v[0], ((rz0 + dz) + 0.5) * 512 - v[1]);
+                        if (d < bestD) {
+                            bestD = d;
+                            best = key;
+                        }
+                    }
+            }
+        }
+        if (bestD == Double.MAX_VALUE || !warmed.add(best)) return;
+        int rx = ChunkPos.getX(best), rz = ChunkPos.getZ(best);
+        POOL.execute(() -> {
+            try {
+                for (Edge e : edgesInRegion(rx, rz)) plan(e);
+            } catch (Throwable t) {
+                CountryRoads.LOG.warn("Prefetch of region {},{} failed: {}", rx, rz, t.toString());
+            }
+        });
+    }
+
+    private static final int PREFETCH = Integer.getInteger("countryroads.prefetchRegions", 2);
+    private static final double LOOKAHEAD = 15;
+    public static final boolean PREFETCH_ON = !Boolean.getBoolean("countryroads.noPrefetch");
+
     /** Plans whose road can come near this chunk (blocks until they are ready). */
     public List<EdgePlan> plansNear(int cx, int cz, int margin) {
         int bx = cx << 4, bz = cz << 4;
         List<CompletableFuture<EdgePlan>> pending = new ArrayList<>();
         for (Edge e : edgesInRegion(bx >> REGION_SHIFT, bz >> REGION_SHIFT)) {
             double d = e.length();
-            double minor = d / 2 * Math.sqrt(Planner.ELLIPSE * Planner.ELLIPSE - 1) + margin;
+            double f = Planner.ellipse(d), minor = d / 2 * Math.sqrt(f * f - 1) + margin;
             if (boxSegmentDistance(bx, bz, bx + 15, bz + 15, e) <= minor) pending.add(plan(e));
         }
         List<EdgePlan> out = new ArrayList<>();
@@ -403,7 +490,7 @@ public final class RoadNetwork {
         for (int rx = x0 >> REGION_SHIFT; rx <= x1 >> REGION_SHIFT; rx++)
             for (int rz = z0 >> REGION_SHIFT; rz <= z1 >> REGION_SHIFT; rz++)
                 for (Edge e : edgesInRegion(rx, rz)) {
-                    double minor = e.length() / 2 * Math.sqrt(Planner.ELLIPSE * Planner.ELLIPSE - 1) + margin;
+                    double f = Planner.ellipse(e.length()), minor = e.length() / 2 * Math.sqrt(f * f - 1) + margin;
                     if (boxSegmentDistance(x0, z0, x1, z1, e) <= minor) out.add(e);
                 }
         return new ArrayList<>(out);
