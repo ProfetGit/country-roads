@@ -82,8 +82,18 @@ final class NetworkCheck {
             parent.putIfAbsent(e.b(), e.b());
         }
         Map<Village, Integer> degree = new HashMap<>(), tried = new HashMap<>();
-        int routed = 0, failed = 0, longEdges = 0, longRouted = 0;
+        int routed = 0, failed = 0, longEdges = 0, longRouted = 0, fallbackCand = 0, fallbackBuilt = 0;
         for (Edge e : edges) {
+            if (!n.isPrimary(e)) {
+                fallbackCand++;
+                if (plans.get(e) == null) continue;
+                fallbackBuilt++;
+                out.add("CR-NET-FALLBACK " + xz(e.a()) + " -> " + xz(e.b()) + " straight=" + (int) e.length() + " length=" + plans.get(e).length());
+                degree.merge(e.a(), 1, Integer::sum);
+                degree.merge(e.b(), 1, Integer::sum);
+                union(parent, e.a(), e.b());
+                continue;
+            }
             if (e.length() > 1200) {
                 longEdges++;
                 if (plans.get(e) != null) longRouted++;
@@ -154,7 +164,7 @@ final class NetworkCheck {
         for (Village v : inside) byLand.computeIfAbsent(landOf.get(v), k -> new HashMap<>()).computeIfAbsent(find(parent, v), k -> new ArrayList<>()).add(v);
         Set<Village> roots = new java.util.HashSet<>();
         for (Village v : inside) roots.add(find(parent, v));
-        int missed = 0, water = 0;
+        int missed = 0, water = 0, outside = 0;
         for (var en : byLand.entrySet()) {
             if (en.getKey() == 0 || en.getValue().size() < 2) continue;
             // the closest pair between this piece's road components, per component
@@ -185,10 +195,33 @@ final class NetworkCheck {
                             if (!reachable && Math.hypot(v.pos().getX() - u.pos().getX(), v.pos().getZ() - u.pos().getZ()) <= RoadNetwork.MAX_EDGE)
                                 reachable = joined(v, u, Planner.ELLIPSE, land, w, h, gx0, gz0);
                     }
-                if (reachable) missed++;
-                else water++;
-                out.add("CR-NET-" + (reachable ? "SPLIT" : "WATER") + " land=" + en.getKey() + " villages=" + c.size() + " at=" + xz(bv) + " nearestOther=" + xz(bo) + " d=" + (int) best
-                    + " triedEdges=" + c.stream().mapToInt(v -> tried.getOrDefault(v, 0)).sum());
+                Set<Village> others = new java.util.HashSet<>();
+                for (List<Village> o : comps) if (o != c) others.addAll(o);
+                String via = reachable ? joinedOutside(n, c, others, x0 - OUTSIDE, z0 - OUTSIDE, x1 + OUTSIDE, z1 + OUTSIDE) : null;
+                if (via != null) outside++;
+                else if (reachable) {
+                    missed++;
+                    int shown = 0;
+                    List<Village[]> pairs = new ArrayList<>();
+                    for (Village v : c)
+                        for (List<Village> o : comps)
+                            if (o != c) for (Village u : o) if (Math.hypot(v.pos().getX() - u.pos().getX(), v.pos().getZ() - u.pos().getZ()) <= RoadNetwork.MAX_EDGE) pairs.add(new Village[]{v, u});
+                    pairs.sort(java.util.Comparator.comparingDouble(q -> Edge.of(q[0], q[1]).length()));
+                    for (Village[] q : pairs) {
+                        if (shown >= 4 || !joined(q[0], q[1], Planner.ELLIPSE, land, w, h, gx0, gz0)) continue;
+                        shown++;
+                        Edge e = Edge.of(q[0], q[1]);
+                        out.add("CR-NET-SPLITPAIR " + xz(q[0]) + " -> " + xz(q[1]) + " straight=" + (int) e.length() + (n.isPrimary(e) ? " rng" : " other")
+                            + " routerMoves=" + (turnJoined(q[0], q[1], Planner.ELLIPSE, land, w, h, gx0, gz0) ? "join" : "blocked")
+                            + (edges.contains(e) ? (plans.get(e) == null ? " none" : " built") : " unlisted"));
+                    }
+                } else water++;
+                out.add("CR-NET-" + (via != null ? "OUTSIDE" : reachable ? "SPLIT" : "WATER") + " land=" + en.getKey() + " villages=" + c.size() + " at=" + xz(bv) + " nearestOther=" + xz(bo) + " d=" + (int) best
+                    + " triedEdges=" + c.stream().mapToInt(v -> tried.getOrDefault(v, 0)).sum() + (via != null ? " via=" + via : ""));
+                if (c.size() <= 3)
+                    for (Edge e : edges)
+                        if ((c.contains(e.a()) || c.contains(e.b())) && (n.isPrimary(e) || plans.get(e) != null))
+                            out.add("CR-NET-SPLITEDGE " + xz(e.a()) + " -> " + xz(e.b()) + " straight=" + (int) e.length() + (n.isPrimary(e) ? " rng" : " fallback") + (plans.get(e) == null ? " none" : " routed"));
             }
         }
         int isolated = 0;
@@ -200,7 +233,7 @@ final class NetworkCheck {
             out.add("CR-NET-ISOLATED " + xz(v) + " land=" + landOf.get(v) + " edgesTried=" + tried.getOrDefault(v, 0) + " nearestVillage=" + (int) best);
         }
         for (Edge e : edges)
-            if (plans.get(e) == null) out.add("CR-NET-FAILED " + xz(e.a()) + " -> " + xz(e.b()) + " straight=" + (int) e.length()
+            if (plans.get(e) == null && n.isPrimary(e)) out.add("CR-NET-FAILED " + xz(e.a()) + " -> " + xz(e.b()) + " straight=" + (int) e.length()
                 + " landEllipse=" + landEllipse(e, land, w, h, gx0, gz0));
 
         // ocean water under a road, planning time per region (by edge midpoint)
@@ -228,8 +261,8 @@ final class NetworkCheck {
         Set<Integer> landPieces = new java.util.HashSet<>(landOf.values());
         boolean ok = missed == 0 && ocean == 0;
         out.add(0, String.format("CR-NET %s villages=%d edges=%d routed=%d failed=%d roadComponents=%d landPieces=%d missed=%d isolated=%d oceanSamples=%d"
-                + " long=%d/%d waterSplits=%d routeMs=%d regionMsMax=%d regions=%d planWallS=%.1f landCells=%d landSampleS=%.1f",
-            ok ? "PASS" : "FAIL", inside.size(), edges.size(), routed, failed, nComp, landPieces.size(), missed, isolated, ocean, longRouted, longEdges, water,
+                + " long=%d/%d fallbacks=%d/%d waterSplits=%d joinedOutside=%d routeMs=%d regionMsMax=%d regions=%d planWallS=%.1f landCells=%d landSampleS=%.1f",
+            ok ? "PASS" : "FAIL", inside.size(), edges.size() - fallbackCand, routed, failed, nComp, landPieces.size(), missed, isolated, ocean, longRouted, longEdges, fallbackBuilt, fallbackCand, water, outside,
             routeNanos / 1_000_000, maxRegion / 1_000_000, regionNanos.size(), planWall / 1e9, w * h, sampleNanos / 1e9));
         return out;
     }
@@ -239,6 +272,58 @@ final class NetworkCheck {
         for (double f : new double[]{1.6, 2.0, 2.4, 3.0, 4.0, 6.0, 8.0})
             if (joined(e.a(), e.b(), f, land, w, h, gx0, gz0)) return String.valueOf(f);
         return "none";
+    }
+
+    private static final int[] DX = {1, 1, 0, -1, -1, -1, 0, 1}, DZ = {0, 1, 1, 1, 0, -1, -1, -1};
+    private static final int OUTSIDE = 3000;
+
+    /**
+     * Follows built roads from a split component, also through villages outside the square (up to the given box): the
+     * first village of another component reached, as "x,z after N villages", or null.
+     */
+    private static String joinedOutside(RoadNetwork n, List<Village> from, Set<Village> others, int bx0, int bz0, int bx1, int bz1) {
+        java.util.ArrayDeque<Village> queue = new java.util.ArrayDeque<>(from);
+        Set<Village> seen = new java.util.HashSet<>(from);
+        while (!queue.isEmpty()) {
+            Village v = queue.poll();
+            for (Edge e : n.edgesInRegion(v.pos().getX() >> 9, v.pos().getZ() >> 9)) {
+                if (!e.a().equals(v) && !e.b().equals(v)) continue;
+                Village o = e.a().equals(v) ? e.b() : e.a();
+                if (seen.contains(o) || o.pos().getX() < bx0 || o.pos().getX() > bx1 || o.pos().getZ() < bz0 || o.pos().getZ() > bz1) continue;
+                if (n.plan(e).join() == null) continue;
+                if (others.contains(o)) return xz(o) + " after " + seen.size() + " villages";
+                seen.add(o);
+                queue.add(o);
+            }
+        }
+        return null;
+    }
+
+    /** Like joined, but with the router's moves: from the exact village cells, heading changes of at most 90 degrees per cell. */
+    private static boolean turnJoined(Village a, Village b, double f, boolean[] land, int w, int h, int gx0, int gz0) {
+        int ai = Math.floorDiv(a.pos().getX(), GRID) - gx0, aj = Math.floorDiv(a.pos().getZ(), GRID) - gz0;
+        int bi = Math.floorDiv(b.pos().getX(), GRID) - gx0, bj = Math.floorDiv(b.pos().getZ(), GRID) - gz0;
+        double limit = Math.hypot(bi - ai, bj - aj) * f + 4;
+        boolean[] seen = new boolean[w * h * 8];
+        int[] queue = new int[w * h * 8];
+        int qh = 0, qt = 0;
+        for (int d = 0; d < 8; d++) {
+            seen[(aj * w + ai) * 8 + d] = true;
+            queue[qt++] = (aj * w + ai) * 8 + d;
+        }
+        while (qh < qt) {
+            int st = queue[qh++], c = st / 8, hd = st % 8, ci = c % w, cj = c / w;
+            if (ci == bi && cj == bj) return true;
+            for (int t = -2; t <= 2; t++) {
+                int nh = (hd + t) & 7, ni = ci + DX[nh], nj = cj + DZ[nh];
+                if (ni < 0 || nj < 0 || ni >= w || nj >= h) continue;
+                int q = nj * w + ni;
+                if (!land[q] && !(ni == bi && nj == bj) || seen[q * 8 + nh] || Math.hypot(ni - ai, nj - aj) + Math.hypot(ni - bi, nj - bj) > limit) continue;
+                seen[q * 8 + nh] = true;
+                queue[qt++] = q * 8 + nh;
+            }
+        }
+        return false;
     }
 
     /** The two villages are joined by land cells (8-connected, no turn rule) inside the ellipse of factor f. */

@@ -21,9 +21,17 @@ import net.minecraft.world.level.Level;
  * The road network of one level. Edges are a relative-neighbourhood graph of villages (contains the minimum spanning
  * tree plus a few natural loops), decided from villages near each 512-block region only, so every chunk sees the
  * same answer no matter which order chunks generate in. Plans are computed on a planner pool and memoised.
+ *
+ * <p>Fallback edges: when an RNG edge cannot be routed and its villages are left in different local road groups, the
+ * shortest other pair that keeps one of its villages and takes any village of the other group within MAX_EDGE, and that
+ * does route, is built instead. Candidates are listed per region from geometry alone; whether one is built is a future
+ * composed from the RNG plans, so chunks still agree. Fallbacks are never trunks of anything.
  */
 public final class RoadNetwork {
     public static final int MAX_EDGE = Integer.getInteger("countryroads.maxEdge", 2000);
+    private static final int FALLBACK_TRIES = Integer.getInteger("countryroads.fallbackTries", 4);
+    private static final boolean FALLBACKS = !Boolean.getBoolean("countryroads.noFallback");
+    private static final boolean TRACE = Boolean.getBoolean("countryroads.traceFallback");
     private static final int REGION_SHIFT = 9;
     private static final Map<ServerLevel, RoadNetwork> NETWORKS = new ConcurrentHashMap<>();
     private static final AtomicInteger THREADS = new AtomicInteger();
@@ -41,6 +49,10 @@ public final class RoadNetwork {
     public final Camps camps;
     private final ConcurrentHashMap<Edge, CompletableFuture<EdgePlan>> plans = new ConcurrentHashMap<>();
     private final ConcurrentHashMap<Long, List<Edge>> regionEdges = new ConcurrentHashMap<>();
+    private final ConcurrentHashMap<Long, List<Edge>> regionPrimary = new ConcurrentHashMap<>();
+    private final ConcurrentHashMap<Edge, Boolean> primary = new ConcurrentHashMap<>();
+    private final ConcurrentHashMap<Edge, CompletableFuture<EdgePlan>> gated = new ConcurrentHashMap<>();
+    private final ConcurrentHashMap<Edge, CompletableFuture<Edge>> fallbackOf = new ConcurrentHashMap<>();
     private final ConcurrentHashMap<Long, ChunkMask> masks = new ConcurrentHashMap<>();
     public final AtomicLong waitNanos = new AtomicLong(), routeNanos = new AtomicLong();
     public final AtomicInteger routed = new AtomicInteger(), failed = new AtomicInteger();
@@ -68,8 +80,19 @@ public final class RoadNetwork {
         NETWORKS.clear();
     }
 
+    /** RNG edges, then the fallback candidates, whose road can come near the region. */
     public List<Edge> edgesInRegion(int rx, int rz) {
-        return regionEdges.computeIfAbsent(ChunkPos.pack(rx, rz), k -> computeRegion(rx, rz));
+        List<Edge> e = regionEdges.get(ChunkPos.pack(rx, rz));
+        if (e != null) return e;
+        List<Edge> out = new ArrayList<>(primaryInRegion(rx, rz));
+        if (FALLBACKS) out.addAll(fallbackCandidates(rx, rz));
+        e = List.copyOf(out);
+        List<Edge> prev = regionEdges.putIfAbsent(ChunkPos.pack(rx, rz), e);
+        return prev != null ? prev : e;
+    }
+
+    private List<Edge> primaryInRegion(int rx, int rz) {
+        return regionPrimary.computeIfAbsent(ChunkPos.pack(rx, rz), k -> computeRegion(rx, rz));
     }
 
     private List<Edge> computeRegion(int rx, int rz) {
@@ -93,6 +116,151 @@ public final class RoadNetwork {
             }
         }
         return List.copyOf(out);
+    }
+
+    /** An RNG edge: within MAX_EDGE and no village closer to both ends than they are to each other. */
+    public boolean isPrimary(Edge e) {
+        Boolean b = primary.get(e);
+        if (b != null) return b;
+        long d2 = d2(e.a(), e.b());
+        boolean r = false;
+        if (d2 <= (long) MAX_EDGE * MAX_EDGE) {
+            int d = (int) Math.ceil(Math.sqrt(d2)) + 16;
+            int mx = (e.a().pos().getX() + e.b().pos().getX()) >> 1, mz = (e.a().pos().getZ() + e.b().pos().getZ()) >> 1;
+            r = relativeNeighbours(e, d2, oracle.find((mx - d) >> 4, (mz - d) >> 4, (mx + d) >> 4, (mz + d) >> 4));
+        }
+        primary.put(e, r);
+        return r;
+    }
+
+    /** Pairs that are not RNG edges, within MAX_EDGE, whose road can come near the region and that some RNG edge could fall back to. */
+    private List<Edge> fallbackCandidates(int rx, int rz) {
+        int x0 = rx << REGION_SHIFT, z0 = rz << REGION_SHIFT, x1 = x0 + (1 << REGION_SHIFT) - 1, z1 = z0 + (1 << REGION_SHIFT) - 1;
+        int reach = (int) (MAX_EDGE * Planner.ELLIPSE) + 64;
+        List<VillageOracle.Village> near = oracle.find((x0 - reach) >> 4, (z0 - reach) >> 4, (x1 + reach) >> 4, (z1 + reach) >> 4);
+        List<Edge> out = new ArrayList<>();
+        for (int i = 0; i < near.size(); i++) {
+            for (int j = i + 1; j < near.size(); j++) {
+                Edge e = Edge.of(near.get(i), near.get(j));
+                long d2 = d2(e.a(), e.b());
+                if (d2 > (long) MAX_EDGE * MAX_EDGE) continue;
+                double minor = Math.sqrt(d2) / 2 * Math.sqrt(Planner.ELLIPSE * Planner.ELLIPSE - 1) + 32;
+                if (boxSegmentDistance(x0, z0, x1, z1, e) > minor || isPrimary(e) || owners(e).isEmpty()) continue;
+                out.add(e);
+            }
+        }
+        return out;
+    }
+
+    /** RNG edges this pair could stand in for: those at either of its villages. */
+    private List<Edge> owners(Edge f) {
+        List<Edge> out = new ArrayList<>();
+        for (VillageOracle.Village end : new VillageOracle.Village[]{f.a(), f.b()})
+            for (VillageOracle.Village o : within(end, MAX_EDGE)) {
+                if (o.equals(end)) continue;
+                Edge e = Edge.of(end, o);
+                if (!e.equals(f) && !out.contains(e) && isPrimary(e)) out.add(e);
+            }
+        return out;
+    }
+
+    private List<VillageOracle.Village> within(VillageOracle.Village c, int r) {
+        int x = c.pos().getX(), z = c.pos().getZ();
+        List<VillageOracle.Village> out = new ArrayList<>();
+        for (var v : oracle.find((x - r) >> 4, (z - r) >> 4, (x + r) >> 4, (z + r) >> 4))
+            if (d2(c, v) <= (long) r * r) out.add(v);
+        return out;
+    }
+
+    /** Built (non-null plan) only when one of its owners failed and picked it. */
+    private CompletableFuture<EdgePlan> gatedPlan(Edge f) {
+        CompletableFuture<EdgePlan> g = gated.get(f);
+        if (g != null) return g;
+        List<CompletableFuture<Edge>> picks = new ArrayList<>();
+        for (Edge o : owners(f)) picks.add(fallbackFor(o));
+        g = CompletableFuture.allOf(picks.toArray(CompletableFuture[]::new)).thenCompose(v -> {
+            for (var p : picks) if (f.equals(p.join())) return planRaw(f);
+            return CompletableFuture.completedFuture(null);
+        });
+        CompletableFuture<EdgePlan> prev = gated.putIfAbsent(f, g);
+        return prev != null ? prev : g;
+    }
+
+    /**
+     * The edge built instead of a failed RNG edge, or null (it routed, or its villages are joined by other routed RNG
+     * roads among the villages within MAX_EDGE of its ends, or nothing routes).
+     */
+    private CompletableFuture<Edge> fallbackFor(Edge e) {
+        CompletableFuture<Edge> f = fallbackOf.get(e);
+        if (f != null) return f;
+        CompletableFuture<Edge> mine = new CompletableFuture<>();
+        CompletableFuture<Edge> prev = fallbackOf.putIfAbsent(e, mine);
+        if (prev != null) return prev;
+        planRaw(e).thenComposeAsync(p -> p != null ? CompletableFuture.completedFuture((Edge) null) : pickFallback(e), POOL).whenComplete((r, err) -> {
+            if (err != null) CountryRoads.LOG.error("Fallback for road {} failed", e, err);
+            mine.complete(err != null ? null : r);
+        });
+        return mine;
+    }
+
+    private CompletableFuture<Edge> pickFallback(Edge e) {
+        List<VillageOracle.Village> group = new ArrayList<>(within(e.a(), MAX_EDGE));
+        for (var v : within(e.b(), MAX_EDGE)) if (!group.contains(v)) group.add(v);
+        List<Edge> local = new ArrayList<>();
+        for (int i = 0; i < group.size(); i++)
+            for (int j = i + 1; j < group.size(); j++) {
+                Edge d = Edge.of(group.get(i), group.get(j));
+                if (!d.equals(e) && isPrimary(d)) local.add(d);
+            }
+        List<CompletableFuture<EdgePlan>> fs = new ArrayList<>();
+        for (Edge d : local) fs.add(planRaw(d));
+        return CompletableFuture.allOf(fs.toArray(CompletableFuture[]::new)).thenCompose(v -> {
+            Map<VillageOracle.Village, VillageOracle.Village> parent = new java.util.HashMap<>();
+            for (var g : group) parent.put(g, g);
+            for (int i = 0; i < local.size(); i++) if (fs.get(i).join() != null) union(parent, local.get(i).a(), local.get(i).b());
+            VillageOracle.Village ra = root(parent, e.a()), rb = root(parent, e.b());
+            if (ra.equals(rb)) {
+                if (TRACE) CountryRoads.LOG.info("CR-FALLBACK joined {} -> {} by {} local roads", e.a().pos().toShortString(), e.b().pos().toShortString(), local.size());
+                return CompletableFuture.completedFuture(null);
+            }
+            List<Edge> cand = new ArrayList<>();
+            for (var w : group) {
+                for (VillageOracle.Village end : new VillageOracle.Village[]{e.a(), e.b()}) {
+                    VillageOracle.Village other = end.equals(e.a()) ? rb : ra;
+                    if (w.equals(end) || !root(parent, w).equals(other)) continue;
+                    Edge c = Edge.of(end, w);
+                    if (c.equals(e) || cand.contains(c) || d2(end, w) > (long) MAX_EDGE * MAX_EDGE || isPrimary(c)) continue;
+                    cand.add(c);
+                }
+            }
+            cand.sort((p, q) -> shorter(p, q) ? -1 : shorter(q, p) ? 1 : 0);
+            return tryFallbacks(e, cand, 0);
+        });
+    }
+
+    private CompletableFuture<Edge> tryFallbacks(Edge e, List<Edge> cand, int i) {
+        if (i >= Math.min(cand.size(), FALLBACK_TRIES)) {
+            if (!cand.isEmpty() || TRACE) CountryRoads.LOG.info("CR-FALLBACK none for {} after {} of {} candidates", e, i, cand.size());
+            return CompletableFuture.completedFuture(null);
+        }
+        Edge c = cand.get(i);
+        return planRaw(c).thenCompose(p -> {
+            if (p == null) return tryFallbacks(e, cand, i + 1);
+            CountryRoads.LOG.info("CR-FALLBACK {} -> {} for {} (try {})", c.a().pos().toShortString(), c.b().pos().toShortString(), e, i + 1);
+            return CompletableFuture.completedFuture(c);
+        });
+    }
+
+    private static VillageOracle.Village root(Map<VillageOracle.Village, VillageOracle.Village> parent, VillageOracle.Village v) {
+        while (!parent.get(v).equals(v)) v = parent.get(v);
+        return v;
+    }
+
+    private static void union(Map<VillageOracle.Village, VillageOracle.Village> parent, VillageOracle.Village a, VillageOracle.Village b) {
+        VillageOracle.Village ra = root(parent, a), rb = root(parent, b);
+        if (ra.equals(rb)) return;
+        if (ra.key() < rb.key()) parent.put(rb, ra);
+        else parent.put(ra, rb);
     }
 
     private static boolean relativeNeighbours(Edge e, long d2, List<VillageOracle.Village> all) {
@@ -124,10 +292,14 @@ public final class RoadNetwork {
      * and the longer road follows them. The order comes from the village layout alone, so it is the same in every run.
      */
     public CompletableFuture<EdgePlan> plan(Edge e) {
+        return isPrimary(e) ? planRaw(e) : gatedPlan(e);
+    }
+
+    private CompletableFuture<EdgePlan> planRaw(Edge e) {
         CompletableFuture<EdgePlan> f = plans.get(e);
         if (f != null) return f;
         List<CompletableFuture<EdgePlan>> deps = new ArrayList<>();
-        for (Edge d : trunkDeps(e)) deps.add(plan(d));
+        for (Edge d : trunkDeps(e)) deps.add(planRaw(d));
         CompletableFuture<EdgePlan> mine = new CompletableFuture<>();
         CompletableFuture<EdgePlan> prev = plans.putIfAbsent(e, mine);
         if (prev != null) return prev;
@@ -166,15 +338,18 @@ public final class RoadNetwork {
 
 
     /**
-     * The roads this one may share the way with: shorter roads that start at one of its villages, or whose straight
+     * The roads this one may share the way with: shorter RNG roads that start at one of its villages, or whose straight
      * line passes within 48 blocks of its own. They are planned first; this road snaps onto them where it runs alongside.
+     * A fallback road takes such RNG roads of any length.
      */
     public List<Edge> trunkDeps(Edge e) {
         List<Edge> out = new ArrayList<>();
         java.util.Set<Edge> seen = new java.util.HashSet<>();
+        // a fallback may follow RNG roads of any length: those never wait on a fallback, so no cycle
+        boolean anyLength = !isPrimary(e);
         for (VillageOracle.Village v : new VillageOracle.Village[]{e.a(), e.b()}) {
-            for (Edge d : edgesInRegion(v.pos().getX() >> REGION_SHIFT, v.pos().getZ() >> REGION_SHIFT)) {
-                if (d.equals(e) || !seen.add(d) || !shorter(d, e)) continue;
+            for (Edge d : primaryInRegion(v.pos().getX() >> REGION_SHIFT, v.pos().getZ() >> REGION_SHIFT)) {
+                if (d.equals(e) || !seen.add(d) || !anyLength && !shorter(d, e)) continue;
                 boolean shares = d.a().equals(v) || d.b().equals(v) || d.a().equals(e.a()) || d.a().equals(e.b()) || d.b().equals(e.a()) || d.b().equals(e.b());
                 if (shares || segmentDistance(d, e) < 48) out.add(d);
             }
@@ -306,7 +481,10 @@ public final class RoadNetwork {
 
     public List<EdgePlan> readyPlans() {
         List<EdgePlan> out = new ArrayList<>();
-        for (var f : plans.values()) if (f.isDone() && f.join() != null) out.add(f.join());
+        for (var en : plans.entrySet()) {
+            var f = isPrimary(en.getKey()) ? en.getValue() : gated.get(en.getKey());
+            if (f != null && f.isDone() && f.join() != null) out.add(f.join());
+        }
         return out;
     }
 }
