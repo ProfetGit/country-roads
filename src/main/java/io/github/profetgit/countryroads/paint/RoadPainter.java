@@ -349,6 +349,8 @@ public final class RoadPainter {
 
     /** Chances (of 1024, before the patch noise) of a roadside bush and of a field stone on a verge column. */
     static final int BUSH = 70, STONE = 9;
+    /** Share of the wildflower verge's density that is planted (user 2026-10-16: 75% fewer flowers). */
+    static final float WILD_SHARE = 0.25f;
 
     /**
      * Roadside bushes and field stones, 2.2-4.6 blocks out from the road edge on level soil: a bush is one to four leaf
@@ -360,7 +362,8 @@ public final class RoadPainter {
         if (d < 2.2f || d > 4.6f || m.kind[i] != EdgePlan.GROUND || m.conn[i] || propCols != null && propCols[i] || fieldCol(x, z)) return;
         long h = hash(x * 13 + 5, z * 7 - 11);
         int r = (int) (h & 1023), patch = clump(x + 31, z - 17);
-        boolean stone = r < STONE, bush = !stone && r < STONE + BUSH * patch * patch / (1024 * 1024 / 2);
+        // bushes at a quarter of the old rate (user 2026-10-16: 75% fewer flowers and bushes beside roads)
+        boolean stone = r < STONE, bush = !stone && r < STONE + BUSH * patch * patch / (1024 * 1024 * 2);
         if (!stone && !bush) return;
         int g = groundAt(x, z, top);
         if (Math.abs(g - top) > 2 || !verge(x, g, z)) return;
@@ -990,6 +993,8 @@ public final class RoadPainter {
         if (Palette.dryVerge(chunk.biome(x, g + 1, z)) && ((h >>> 52) & 3) != 0) return;
         BlockState plant = Palette.vergePlant(chunk.biome(x, g + 1, z), (int) ((h >>> 20) & 1023));
         if (plant == null || !Palette.plantable(plant, get(x, g, z))) return;
+        // flowers and bushes 1 in 4 (user 2026-10-16), grass as before
+        if (!plant.is(Blocks.SHORT_GRASS) && !plant.is(Blocks.TALL_GRASS) && !plant.is(Blocks.SHORT_DRY_GRASS) && ((h >>> 44) & 3) != 0) return;
         BlockState upper = Palette.upperHalf(plant);
         if (upper != null && !get(x, g + 2, z).isAir()) {
             plant = Blocks.SHORT_GRASS.defaultBlockState();
@@ -1004,7 +1009,7 @@ public final class RoadPainter {
      * cell has a lead plant, used 60% of the time). Taller plants only on the back two rows, sweet berries only on the last.
      */
     private void wildVerge(int x, int z, int top, float d, Palette.Wild wild, long h) {
-        if ((int) (h & 1023) >= (int) (1024 * wild.density() * Palette.wildRow(d))) return;
+        if ((int) (h & 1023) >= (int) (1024 * WILD_SHARE * wild.density() * Palette.wildRow(d))) return;
         int g = groundAt(x, z, top + 6);
         // the verge is usually under vanilla grass already (plains, swamp): the flowers take its place
         if (!replaceablePlant(get(x, g + 1, z))) return;
