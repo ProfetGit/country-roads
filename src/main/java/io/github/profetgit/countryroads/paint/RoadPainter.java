@@ -496,6 +496,8 @@ public final class RoadPainter {
                 io.github.profetgit.countryroads.CountryRoads.LOG.info("CR-TRACE paintclear " + x + "," + y + "," + z + " " + here.getBlock().getDescriptionId(), new Throwable("where"));
             if (!get(x, y, z).isAir()) set(x, y, z, AIR);
         }
+        // a bamboo or cactus stalk cut from below goes whole (the rest would float)
+        for (int y = y1 + 1; y < chunk.maxY() && PaintRules.stalk(get(x, y, z)); y++) set(x, y, z, AIR);
     }
 
     /** Blocks over which a connector eases from the ground at its street end to the road's planned height. */

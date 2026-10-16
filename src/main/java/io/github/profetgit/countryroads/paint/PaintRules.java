@@ -9,7 +9,15 @@ public final class PaintRules {
     private PaintRules() {}
 
     public static boolean solid(BlockState s) {
-        return !s.isAir() && s.isSolid();
+        return !s.isAir() && s.isSolid() && !stalk(s);
+    }
+
+    /**
+     * Plants that grow as a stack of solid blocks (bamboo, cactus). They are not ground: read as ground, the top of a
+     * stalk got a bank's grass top, which floated on the bamboo once seen from the road (user, Tectonic bamboo jungle).
+     */
+    public static boolean stalk(BlockState s) {
+        return s.is(Blocks.BAMBOO) || s.is(Blocks.BAMBOO_SAPLING) || s.is(Blocks.CACTUS) || s.is(Blocks.CACTUS_FLOWER);
     }
 
     public static boolean connects(BlockState s) {
@@ -18,7 +26,7 @@ public final class PaintRules {
 
     /** Ground itself: solid, not a fluid, not a tree or huge mushroom. */
     public static boolean terrain(BlockState s) {
-        return !s.isAir() && s.getFluidState().isEmpty() && s.isSolid() && !s.is(BlockTags.LEAVES) && !s.is(BlockTags.LOGS)
+        return !s.isAir() && s.getFluidState().isEmpty() && s.isSolid() && !stalk(s) && !s.is(BlockTags.LEAVES) && !s.is(BlockTags.LOGS)
             && !s.is(Blocks.MUSHROOM_STEM) && !s.is(Blocks.BROWN_MUSHROOM_BLOCK) && !s.is(Blocks.RED_MUSHROOM_BLOCK);
     }
 
