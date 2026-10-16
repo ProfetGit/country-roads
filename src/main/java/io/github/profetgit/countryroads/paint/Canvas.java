@@ -52,12 +52,16 @@ public interface Canvas {
             }
 
             public void set(BlockPos pos, BlockState state) {
+                if (io.github.profetgit.countryroads.gen.GenContext.debug(pos.getX(), pos.getZ()))
+                    io.github.profetgit.countryroads.gen.GenContext.trace("paint " + pos.toShortString() + " " + chunk.getBlockState(pos) + " -> " + state);
                 chunk.setBlockState(pos, state, 0);
                 // fences, walls, stairs and the like get their connections when the chunk is finished
                 if (PaintRules.connects(state)) chunk.markPosForPostProcessing(pos);
             }
 
             public void setExact(BlockPos pos, BlockState state) {
+                if (io.github.profetgit.countryroads.gen.GenContext.debug(pos.getX(), pos.getZ()))
+                    io.github.profetgit.countryroads.gen.GenContext.trace("paint " + pos.toShortString() + " " + chunk.getBlockState(pos) + " -> " + state);
                 chunk.setBlockState(pos, state, 0);
             }
 

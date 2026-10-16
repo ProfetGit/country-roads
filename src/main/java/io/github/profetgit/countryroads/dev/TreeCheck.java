@@ -24,7 +24,7 @@ final class TreeCheck {
     private final Set<String> examples;
     private final LongOpenHashSet seen = new LongOpenHashSet();
     private final BlockPos.MutableBlockPos pos = new BlockPos.MutableBlockPos();
-    long floatingTrees, floatingMushrooms, floatingLeaves, overhangs, vanillaLeaves;
+    long floatingTrees, floatingMushrooms, floatingLeaves, overhangs, vanillaLeaves, vanillaLips;
 
     TreeCheck(ServerLevel level, Set<String> examples) {
         this.level = level;
@@ -55,6 +55,15 @@ final class TreeCheck {
         var col = base.computeIfAbsent(net.minecraft.world.level.ChunkPos.pack(x, z), k -> level.getChunkSource().getGenerator()
             .getBaseColumn(x, z, level, level.getChunkSource().randomState()));
         return col.getBlock(y).isAir();
+    }
+
+    private final it.unimi.dsi.fastutil.longs.Long2ObjectOpenHashMap<net.minecraft.world.level.levelgen.Beardifier> beards = new it.unimi.dsi.fastutil.longs.Long2ObjectOpenHashMap<>();
+
+    /** Density the structures' terrain adaptation (village beards, buried ruins) adds here; the base column has none of it. */
+    private float beard(int x, int y, int z) {
+        var b = beards.computeIfAbsent(net.minecraft.world.level.ChunkPos.pack(x >> 4, z >> 4),
+            k -> net.minecraft.world.level.levelgen.Beardifier.forStructuresInChunk(level.structureManager(), new net.minecraft.world.level.ChunkPos(x >> 4, z >> 4)));
+        return b.sampleValue(null, x, y, z);
     }
 
     /** Where the painter puts a cut bank's top (RoadPainter.shoulder): the hillside face it leaves, not natural caves under it. */
@@ -104,6 +113,7 @@ final class TreeCheck {
     }
 
     private void example(String s) {
+        io.github.profetgit.countryroads.CountryRoads.LOG.info("CR-ITEM " + s);
         if (examples.size() < 12) examples.add(s);
     }
 
@@ -125,6 +135,13 @@ final class TreeCheck {
                 if (s.isAir()) continue;
                 if ((wood(s) || shroom(s)) && !seen.contains(BlockPos.asLong(x, y, z))) group(x, y, z, wood(s));
                 if (m.in[c] < 0 && m.in[c] >= -bankReach && (y == t || y == bankTop(m, c, t)) && soil(s) && get(x, y - 1, z).isAir() && placed(x, y, z)) {
+                    float beard = beard(x, y, z);
+                    if (beard > 0) {
+                        // a village's (or other structure's) terrain adaptation raised this lip: the base column leaves it out
+                        vanillaLips++;
+                        io.github.profetgit.countryroads.CountryRoads.LOG.info("CR-ITEM structureLip " + x + "," + y + "," + z + " beard=" + beard);
+                        continue;
+                    }
                     overhangs++;
                     example("overhang " + x + "," + y + "," + z + "=" + s.getBlock().getDescriptionId().replace("block.minecraft.", ""));
                 }
@@ -217,6 +234,7 @@ final class TreeCheck {
                 // that grew through the canopy
                 if (get(wx, wy, wz).getValue(LeavesBlock.DISTANCE) == 7 || cutByShroom(d, k, w, h, x0, y0, z0)) {
                     vanillaLeaves++;
+                    io.github.profetgit.countryroads.CountryRoads.LOG.info("CR-ITEM looseLeaves " + wx + "," + wy + "," + wz + " d" + get(wx, wy, wz).getValue(LeavesBlock.DISTANCE));
                     continue;
                 }
                 floatingLeaves++;

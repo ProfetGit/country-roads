@@ -34,6 +34,7 @@ public final class GenContext {
     private boolean bypass;
     private int track, tn, undone;
     private boolean cut;
+    private String cutAt;
     private long[] tpos = new long[256];
     private BlockState[] tprev = new BlockState[256];
     private final it.unimi.dsi.fastutil.longs.Long2IntOpenHashMap grounds = new it.unimi.dsi.fastutil.longs.Long2IntOpenHashMap();
@@ -99,17 +100,41 @@ public final class GenContext {
      * A feature write the painter would undo is dropped: on road columns everything from the old ground (or the road
      * surface) up to the road's head room or the old ground + 2, whichever is higher; a canopy may arch over the road
      * above that. While a tree or huge mushroom is being placed (tracking), a dropped log, stem or cap means the
-     * painter would cut it: the whole feature is undone afterwards. Its logs may not reach into the bank reach of a
-     * chunk that is already painted either (the ground there may have been cut away from under them).
+     * painter would cut it: the whole feature is undone afterwards. Its logs may not reach low into the bank reach of a
+     * chunk that is already painted either (the ground there may have been cut away from under them): up to BANK_LOG
+     * over the shaped ground. Branches higher up (a big oak's crown over the cut) are held by the trunk and stay.
      */
     static final String DEBUG = System.getProperty("countryroads.debugColumn", "");
+    private static final java.util.Set<String> DEBUG_COLS = java.util.Set.of(DEBUG.isEmpty() ? new String[0] : DEBUG.split(";"));
+
+    /** Dev: this column is traced (-Dcountryroads.debugColumn=x,z or several joined by ';'). */
+    public static boolean debug(int x, int z) {
+        return !DEBUG_COLS.isEmpty() && DEBUG_COLS.contains(x + "," + z);
+    }
+
+    /** Dev: one CR-TRACE line with the calls that led here (short stack). */
+    public static void trace(String what) {
+        StringBuilder sb = new StringBuilder("CR-TRACE ").append(what).append(" @");
+        StackTraceElement[] st = new Throwable().getStackTrace();
+        for (int k = 1, n = 0; k < st.length && n < 9; k++) {
+            String cl = st[k].getClassName();
+            if (cl.contains("GenContext") || cl.contains("Canvas")) continue;
+            sb.append(' ').append(cl.substring(cl.lastIndexOf('.') + 1)).append('.').append(st[k].getMethodName()).append(':').append(st[k].getLineNumber());
+            n++;
+        }
+        io.github.profetgit.countryroads.CountryRoads.LOG.info(sb.toString());
+    }
     /** Trees keep this far (blocks, square) from signposts and lamp posts: a crown low over a post would be cut by it. */
     static final int POST_CLEAR = 6;
+    /** A log this far (or less) over a painted chunk's shaped ground in its bank reach undoes the tree. */
+    static final int BANK_LOG = 2;
     /** Trees keep this far from a roadside prop's anchor (the widest prop reaches 5 blocks along the road, and a crown reaches further). */
     static final int PROP_CLEAR = 10;
 
     public static boolean guardWrite(WorldGenRegion region, BlockPos pos, BlockState state) {
         GenContext c = CURRENT.get();
+        if (!DEBUG_COLS.isEmpty() && debug(pos.getX(), pos.getZ()) && (c == null || !c.bypass))
+            trace("region " + pos.toShortString() + " " + region.getBlockState(pos) + " -> " + state + (c == null ? " noctx" : " depth=" + c.featureDepth + " track=" + c.track));
         if (c == null || c.bypass || c.featureDepth == 0) return false;
         boolean drop = false;
         int x = pos.getX(), z = pos.getZ();
@@ -121,12 +146,15 @@ public final class GenContext {
                 int top = (int) Math.floor(m.surface(i)), g = c.ground(region, x, z, top);
                 drop = pos.getY() >= Math.min(top, g + 1) && pos.getY() <= Math.max(top + 3, g + 2);
             }
-            if (!drop && c.track > 0 && in >= -RoadPainter.CUT_REACH && woody(state) && painted(region, x >> 4, z >> 4)) drop = true;
+            if (!drop && c.track > 0 && in >= -RoadPainter.CUT_REACH && woody(state) && painted(region, x >> 4, z >> 4)
+                && pos.getY() <= c.ground(region, x, z, (int) Math.floor(m.surface(i))) + BANK_LOG) {
+                drop = true;
+                if (!c.cut) c.cutAt = "bank ";
+            } else if (drop && !c.cut) c.cutAt = "clear ";
         }
-        if (DEBUG.equals(x + "," + z))
-            io.github.profetgit.countryroads.CountryRoads.LOG.info("CR-TRACE write " + pos.toShortString() + " " + state + " drop=" + drop + " track=" + c.track,
-                new Throwable("trace"));
+        if (debug(x, z)) io.github.profetgit.countryroads.CountryRoads.LOG.info("CR-TRACE write " + pos.toShortString() + " " + state + " drop=" + drop + " track=" + c.track);
         if (c.track > 0) {
+            if (drop && woody(state) && !c.cut) c.cutAt = (c.cutAt == null ? "" : c.cutAt) + pos.toShortString() + " " + state.getBlock().getDescriptionId().replace("block.minecraft.", "") + " in=" + (m == null ? "?" : m.in[ChunkMask.idx(x & 15, z & 15)]);
             if (drop) c.cut |= woody(state);
             else c.record(pos, region.getBlockState(pos));
         }
@@ -176,6 +204,7 @@ public final class GenContext {
         if (c == null) return false;
         if (c.track++ > 0) return false;
         c.cut = false;
+        c.cutAt = null;
         c.tn = 0;
         return true;
     }
@@ -195,9 +224,11 @@ public final class GenContext {
             c.bypass = was;
             c.undone++;
             UNDONE.incrementAndGet();
+            io.github.profetgit.countryroads.CountryRoads.LOG.info("CR-ITEM undone first=" + (c.tn > 0 ? BlockPos.of(c.tpos[0]).toShortString() : "-") + " n=" + c.tn + " cut=" + c.cutAt);
         }
         c.tn = 0;
         c.cut = false;
+        c.cutAt = null;
         java.util.Arrays.fill(c.tprev, null);
         return undo;
     }

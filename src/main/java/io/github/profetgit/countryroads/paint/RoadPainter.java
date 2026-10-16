@@ -514,7 +514,7 @@ public final class RoadPainter {
     }
 
     private void road(int x, int z, int top, boolean half, float in, ChunkMask m, int i) {
-        boolean dbg = DEBUG.equals(x + "," + z);
+        boolean dbg = io.github.profetgit.countryroads.gen.GenContext.debug(x, z);
         if (dbg) io.github.profetgit.countryroads.CountryRoads.LOG.info("CR-TRACE before " + x + "," + z + " top=" + top + " ground=" + groundAt(x, z, top) + dump(x, z, top));
         road0(x, z, top, half, in, m, i);
         if (dbg) io.github.profetgit.countryroads.CountryRoads.LOG.info("CR-TRACE after" + dump(x, z, top));

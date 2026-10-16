@@ -132,6 +132,7 @@ final class RoadChecks {
                             BlockState up = chunk.getBlockState(pos.set(fx, y + 1, fz));
                             if (up.isAir()) {
                                 snowyBare[0]++;
+                                io.github.profetgit.countryroads.CountryRoads.LOG.info("CR-ITEM frosty " + fx + "," + y + "," + fz + " in=" + m.in[c] + " top=" + ft + " " + st);
                                 if (examples.size() < 6) examples.add("frosty " + fx + "," + y + "," + fz);
                             }
                         }
@@ -178,7 +179,7 @@ final class RoadChecks {
             String verdict = cols[0] > 0 && bad[0] == 0 && breaks[0] == 0 && floating[0] == 0 && snowyBare[0] == 0 && lanternPairs[0] == 0
                 && trees.floatingTrees == 0 && trees.floatingMushrooms == 0 && trees.floatingLeaves == 0 && trees.overhangs == 0 ? "PASS" : "FAIL";
             report(src, "CR-CHECK " + verdict + " roadColumns=" + cols[0] + " bad=" + bad[0] + " breaks=" + breaks[0] + " oneBlockSteps=" + steps[0] + " skippedChunks=" + skipped[0] + " floatingPlants=" + floating[0] + " frostyBareGrass=" + snowyBare[0] + " lanternPairs=" + lanternPairs[0]
-                + " treesUndone=" + io.github.profetgit.countryroads.gen.GenContext.UNDONE.get() + " floatingTrees=" + trees.floatingTrees + " floatingMushrooms=" + trees.floatingMushrooms + " floatingLeaves=" + trees.floatingLeaves + " (vanilla loose leaves " + trees.vanillaLeaves + ") overhangs=" + trees.overhangs
+                + " treesUndone=" + io.github.profetgit.countryroads.gen.GenContext.UNDONE.get() + " floatingTrees=" + trees.floatingTrees + " floatingMushrooms=" + trees.floatingMushrooms + " floatingLeaves=" + trees.floatingLeaves + " (vanilla loose leaves " + trees.vanillaLeaves + ") overhangs=" + trees.overhangs + " (structure lips " + trees.vanillaLips + ")"
                 + " examples=" + examples);
             report(src, "CR-HASH " + HexFormat.of().formatHex(sha.digest()).substring(0, 16) + " columns=" + cols[0]);
             return true;

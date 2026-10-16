@@ -21,6 +21,7 @@ import net.minecraft.world.level.block.EntityBlock;
 import net.minecraft.world.level.block.Rotation;
 import net.minecraft.world.level.block.entity.BlockEntity;
 import net.minecraft.world.level.block.state.BlockState;
+import net.minecraft.world.level.block.state.properties.BlockStateProperties;
 import net.minecraft.world.level.storage.loot.LootTable;
 
 /**
@@ -206,6 +207,24 @@ public final class PropPainter {
                 if (Props.isPlant(s) && !Palette.plantable(rotated, cv.get(pos.set(wx, wy - 1, wz)))) continue;
             }
             cv.set(pos.set(wx, wy, wz), rotated);
+        }
+
+        // grass, podzol and mycelium whose snow layer was cleared: snow comes back on open ground in cold country (not on
+        // the trodden trail), else the frost goes (frosty grass with nothing on it)
+        for (int i = 0; i < 256; i++) {
+            if (kind[i] == 0 || skip[i]) continue;
+            int wx = (m.cx << 4) + (i & 15), wz = (m.cz << 4) + (i >> 4);
+            for (int y = top2[i] - 2; y <= floor + height; y++) {
+                BlockState here = cv.get(pos.set(wx, y, wz));
+                if (!here.hasProperty(BlockStateProperties.SNOWY)) continue;
+                BlockState above = cv.get(pos.set(wx, y + 1, wz));
+                boolean snow = above.is(Blocks.SNOW) || above.is(Blocks.SNOW_BLOCK);
+                if (!snow && kind[i] != 1 && above.isAir() && cv.biome(wx, y + 1, wz).value().coldEnoughToSnow(pos.set(wx, y + 1, wz), 63)) {
+                    cv.set(pos.set(wx, y + 1, wz), Blocks.SNOW.defaultBlockState());
+                    snow = true;
+                }
+                if (here.getValue(BlockStateProperties.SNOWY) != snow) cv.set(pos.set(wx, y, wz), here.setValue(BlockStateProperties.SNOWY, snow));
+            }
         }
 
         for (Props.Loot l : pr.loot) {
