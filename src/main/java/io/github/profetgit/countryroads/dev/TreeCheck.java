@@ -24,7 +24,7 @@ final class TreeCheck {
     private final Set<String> examples;
     private final LongOpenHashSet seen = new LongOpenHashSet();
     private final BlockPos.MutableBlockPos pos = new BlockPos.MutableBlockPos();
-    long floatingTrees, floatingMushrooms, floatingLeaves, overhangs, vanillaLeaves, vanillaLips;
+    long floatingTrees, floatingMushrooms, floatingLeaves, overhangs, vanillaLeaves, vanillaLips, floatingBamboo;
 
     TreeCheck(ServerLevel level, Set<String> examples) {
         this.level = level;
@@ -133,6 +133,14 @@ final class TreeCheck {
             for (int y = lo; y <= hi; y++) {
                 BlockState s = get(x, y, z);
                 if (s.isAir()) continue;
+                if (s.is(net.minecraft.world.level.block.Blocks.BAMBOO)) {
+                    // a stalk's base must stand on something bamboo can grow on
+                    BlockState under = get(x, y - 1, z);
+                    if (!under.is(net.minecraft.world.level.block.Blocks.BAMBOO) && !under.is(BlockTags.SUPPORTS_BAMBOO)) {
+                        floatingBamboo++;
+                        example("floatingBamboo " + x + "," + y + "," + z + " over " + under.getBlock().getDescriptionId().replace("block.minecraft.", ""));
+                    }
+                }
                 if ((wood(s) || shroom(s)) && !seen.contains(BlockPos.asLong(x, y, z))) group(x, y, z, wood(s));
                 if (m.in[c] < 0 && m.in[c] >= -bankReach && (y == t || y == bankTop(m, c, t)) && soil(s) && get(x, y - 1, z).isAir() && placed(x, y, z)) {
                     float beard = beard(x, y, z);

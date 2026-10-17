@@ -1,5 +1,9 @@
 # Changelog
 
+## 0.1.62 (unreleased)
+
+- Fixed bamboo floating in the air beside roads in bamboo jungles: the road's clear space took the lower blocks of a stalk and left the upper ones hanging. Bamboo, cactus and sugar cane now grow whole or not at all near a road.
+
 ## 0.1.61 (unreleased)
 
 - Roads stay as fast to generate as before. The network is the same short-range one as in 0.1.54 (nearby villages joined as before), and only clusters of villages that would otherwise be cut off from each other get a long link (up to 2000 blocks). A long link is the one road whose plan a chunk waits for the longest, so these are kept to the few that are needed.

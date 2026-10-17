@@ -15,11 +15,13 @@ public final class Planner {
 
     /** Edges up to this length may detour as far as ELLIPSE says; longer ones keep the corridor width that edge gets (the cost of a failing search and the plans a chunk waits for grow with the corridor). */
     public static final int LONG_EDGE = Integer.getInteger("countryroads.longEdge", 1200);
+    /** How much wider than a LONG_EDGE road's corridor the corridor of a longer one may be. */
+    public static final double LONG_WIDTH = Double.parseDouble(System.getProperty("countryroads.longWidth", "1"));
 
     /** Detour factor allowed for a road between two villages d apart. */
     public static double ellipse(double d) {
         if (d <= LONG_EDGE) return ELLIPSE;
-        double minor = LONG_EDGE * Math.sqrt(ELLIPSE * ELLIPSE - 1);
+        double minor = LONG_EDGE * LONG_WIDTH * Math.sqrt(ELLIPSE * ELLIPSE - 1);
         return Math.min(ELLIPSE, Math.sqrt(1 + (minor / d) * (minor / d)));
     }
     /** Max planned rise per block of road (a half-step at most every 1.5 blocks). */

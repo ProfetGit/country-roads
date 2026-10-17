@@ -13,11 +13,11 @@ public final class PaintRules {
     }
 
     /**
-     * Plants that grow as a stack of solid blocks (bamboo, cactus). They are not ground: read as ground, the top of a
+     * Plants that grow as a stack of blocks (bamboo, cactus, sugar cane). They are not ground: read as ground, the top of a
      * stalk got a bank's grass top, which floated on the bamboo once seen from the road (user, Tectonic bamboo jungle).
      */
     public static boolean stalk(BlockState s) {
-        return s.is(Blocks.BAMBOO) || s.is(Blocks.BAMBOO_SAPLING) || s.is(Blocks.CACTUS) || s.is(Blocks.CACTUS_FLOWER);
+        return s.is(Blocks.BAMBOO) || s.is(Blocks.BAMBOO_SAPLING) || s.is(Blocks.CACTUS) || s.is(Blocks.CACTUS_FLOWER) || s.is(Blocks.SUGAR_CANE);
     }
 
     public static boolean connects(BlockState s) {

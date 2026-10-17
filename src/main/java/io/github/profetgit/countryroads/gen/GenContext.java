@@ -146,7 +146,7 @@ public final class GenContext {
                 int top = (int) Math.floor(m.surface(i)), g = c.ground(region, x, z, top);
                 drop = pos.getY() >= Math.min(top, g + 1) && pos.getY() <= Math.max(top + 3, g + 2);
             }
-            if (!drop && c.track > 0 && in >= -RoadPainter.CUT_REACH && woody(state) && painted(region, x >> 4, z >> 4)
+            if (!drop && c.track > 0 && in >= -RoadPainter.CUT_REACH && tracked(state) && painted(region, x >> 4, z >> 4)
                 && pos.getY() <= c.ground(region, x, z, (int) Math.floor(m.surface(i))) + BANK_LOG) {
                 drop = true;
                 if (!c.cut) c.cutAt = "bank ";
@@ -154,14 +154,22 @@ public final class GenContext {
         }
         if (debug(x, z)) io.github.profetgit.countryroads.CountryRoads.LOG.info("CR-TRACE write " + pos.toShortString() + " " + state + " drop=" + drop + " track=" + c.track);
         if (c.track > 0) {
-            if (drop && woody(state) && !c.cut) c.cutAt = (c.cutAt == null ? "" : c.cutAt) + pos.toShortString() + " " + state.getBlock().getDescriptionId().replace("block.minecraft.", "") + " in=" + (m == null ? "?" : m.in[ChunkMask.idx(x & 15, z & 15)]);
-            if (drop) c.cut |= woody(state);
+            if (drop && tracked(state) && !c.cut) c.cutAt = (c.cutAt == null ? "" : c.cutAt) + pos.toShortString() + " " + state.getBlock().getDescriptionId().replace("block.minecraft.", "") + " in=" + (m == null ? "?" : m.in[ChunkMask.idx(x & 15, z & 15)]);
+            if (drop) c.cut |= tracked(state);
             else c.record(pos, region.getBlockState(pos));
         }
         return drop;
     }
 
     /** Logs, roots and huge mushroom blocks: the parts of a tree that hold the rest up. */
+    /**
+     * What a dropped write takes the whole feature back for: logs and stems, and the stalks (bamboo, cactus, sugar cane)
+     * that grow as one stack of blocks: the road's clear space took the lower ones and the upper ones stood in the air.
+     */
+    static boolean tracked(BlockState s) {
+        return woody(s) || PaintRules.stalk(s);
+    }
+
     public static boolean woody(BlockState s) {
         return s.is(BlockTags.LOGS) || s.is(Blocks.MUSHROOM_STEM) || s.is(Blocks.BROWN_MUSHROOM_BLOCK) || s.is(Blocks.RED_MUSHROOM_BLOCK)
             || s.is(Blocks.MANGROVE_ROOTS) || s.is(Blocks.MUDDY_MANGROVE_ROOTS);

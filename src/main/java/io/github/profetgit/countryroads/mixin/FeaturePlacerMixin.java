@@ -8,6 +8,8 @@ import net.minecraft.util.RandomSource;
 import net.minecraft.world.level.WorldGenLevel;
 import net.minecraft.world.level.chunk.ChunkGenerator;
 import net.minecraft.world.level.levelgen.feature.AbstractHugeMushroomFeature;
+import net.minecraft.world.level.levelgen.feature.BambooFeature;
+import net.minecraft.world.level.levelgen.feature.BlockColumnFeature;
 import net.minecraft.world.level.levelgen.feature.BlockBlobFeature;
 import net.minecraft.world.level.levelgen.feature.FallenTreeFeature;
 import net.minecraft.world.level.levelgen.feature.Feature;
@@ -43,7 +45,7 @@ abstract class FeaturePlacerMixin {
         int radius = bigRadius(feature);
         if (radius >= 0 && GenContext.blocksBigFeature(pos, radius, feature instanceof AbstractHugeMushroomFeature)) return false;
         if (radius != 0) return original.call(feature, level, generator, random, pos);
-        // trees and mushrooms are placed whole or not at all: one the road would cut is taken back
+        // trees, mushrooms and stalks (bamboo, cactus, sugar cane) are placed whole or not at all: one the road would cut is taken back
         boolean owner = GenContext.beginTree();
         boolean placed = false;
         try {
@@ -56,7 +58,7 @@ abstract class FeaturePlacerMixin {
 
     private static int bigRadius(Feature f) {
         if (f instanceof TreeFeature || f instanceof FallenTreeFeature || f instanceof AbstractHugeMushroomFeature
-            || f instanceof HugeFungusFeature || f instanceof RootSystemFeature) return 0;
+            || f instanceof HugeFungusFeature || f instanceof RootSystemFeature || f instanceof BambooFeature || f instanceof BlockColumnFeature) return 0;
         if (f instanceof BlockBlobFeature || f instanceof SpikeFeature || f instanceof IcebergFeature) return 3;
         if (f instanceof LakeFeature) return 8;
         return MODDED_WOODY.get(f.getClass()) ? 0 : -1;

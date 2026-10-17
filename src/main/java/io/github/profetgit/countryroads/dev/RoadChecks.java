@@ -177,9 +177,9 @@ final class RoadChecks {
             }
             if (next[0] < total) return false;
             String verdict = cols[0] > 0 && bad[0] == 0 && breaks[0] == 0 && floating[0] == 0 && snowyBare[0] == 0 && lanternPairs[0] == 0
-                && trees.floatingTrees == 0 && trees.floatingMushrooms == 0 && trees.floatingLeaves == 0 && trees.overhangs == 0 ? "PASS" : "FAIL";
+                && trees.floatingTrees == 0 && trees.floatingMushrooms == 0 && trees.floatingLeaves == 0 && trees.floatingBamboo == 0 && trees.overhangs == 0 ? "PASS" : "FAIL";
             report(src, "CR-CHECK " + verdict + " roadColumns=" + cols[0] + " bad=" + bad[0] + " breaks=" + breaks[0] + " oneBlockSteps=" + steps[0] + " skippedChunks=" + skipped[0] + " floatingPlants=" + floating[0] + " frostyBareGrass=" + snowyBare[0] + " lanternPairs=" + lanternPairs[0]
-                + " treesUndone=" + io.github.profetgit.countryroads.gen.GenContext.UNDONE.get() + " floatingTrees=" + trees.floatingTrees + " floatingMushrooms=" + trees.floatingMushrooms + " floatingLeaves=" + trees.floatingLeaves + " (vanilla loose leaves " + trees.vanillaLeaves + ") overhangs=" + trees.overhangs + " (structure lips " + trees.vanillaLips + ")"
+                + " treesUndone=" + io.github.profetgit.countryroads.gen.GenContext.UNDONE.get() + " floatingTrees=" + trees.floatingTrees + " floatingMushrooms=" + trees.floatingMushrooms + " floatingLeaves=" + trees.floatingLeaves + " floatingBamboo=" + trees.floatingBamboo + " (vanilla loose leaves " + trees.vanillaLeaves + ") overhangs=" + trees.overhangs + " (structure lips " + trees.vanillaLips + ")"
                 + " examples=" + examples);
             report(src, "CR-HASH " + HexFormat.of().formatHex(sha.digest()).substring(0, 16) + " columns=" + cols[0]);
             return true;
