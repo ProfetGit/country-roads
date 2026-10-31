@@ -15,3 +15,9 @@ dev/server/bench/*.jar
 dev/feedback/
 dev/compat/jars/
 dev/compat/out/
+release-art/
+dev/icon/frames/
+dev/icon/banner_frames/
+dev/icon/test/
+dev/icon/seam/
+dev/icon/out/

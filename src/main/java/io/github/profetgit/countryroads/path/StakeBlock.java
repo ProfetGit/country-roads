@@ -20,7 +20,8 @@ import org.jspecify.annotations.Nullable;
 
 /**
  * Placed at a door: surveys a path to the nearest road and shows it. Right-click to build it, sneak + right-click on a
- * built path to keep it for good; break the stake to take the path up again (blocks restored).
+ * built path to keep it for good; break the stake to take the path up again (blocks restored). Sneak + right-click on a
+ * path not built yet makes it end at its last stake instead of joining a road (and back).
  */
 public final class StakeBlock extends Block implements EntityBlock {
     private static final VoxelShape SHAPE = Block.column(5, 0, 15);
@@ -50,6 +51,7 @@ public final class StakeBlock extends Block implements EntityBlock {
         if (level instanceof ServerLevel server && player instanceof ServerPlayer sp) {
             PathData d = HousePaths.data(server, pos);
             if (sp.isShiftKeyDown() && d != null && d.status == PathData.BUILT) HousePaths.keep(server, pos, sp);
+            else if (sp.isShiftKeyDown() && d != null) HousePaths.toggleEnd(server, pos, sp);
             else HousePaths.use(server, pos, sp);
         }
         return InteractionResult.SUCCESS;

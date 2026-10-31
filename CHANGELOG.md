@@ -1,5 +1,14 @@
 # Changelog
 
+## 0.1.65 (unreleased)
+
+- The stake no longer writes to the chat or the action bar. A small card beside the crosshair says what the path is doing ("To the road · 177 blocks", "Ends at stake 2 · 144 blocks") and shows the one to three things you can do as key chips (Right-click Build, Sneak + Right-click End at last stake, Break Cancel). It shows while you hold a stake or look at one, and for a few seconds after anything changes. Failures give a short reason and one hint ("No way through", "Add stakes to steer round").
+- The Surveyor's Stake tooltip lists the gestures.
+
+## 0.1.64 (unreleased)
+
+- Paths between two points: place the first stake, place a second one where the path should end, then sneak + right-click a stake. The path now runs from the first stake to the last one and joins no road. Sneak + right-click again to send it on to the nearest road as before.
+
 ## 0.1.62 (unreleased)
 
 - Fixed bamboo floating in the air beside roads in bamboo jungles: the road's clear space took the lower blocks of a stalk and left the upper ones hanging. Bamboo, cactus and sugar cane now grow whole or not at all near a road.

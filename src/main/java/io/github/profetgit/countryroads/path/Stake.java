@@ -28,7 +28,7 @@ public final class Stake {
         BLOCK = Registry.register(BuiltInRegistries.BLOCK, bk, new StakeBlock(BlockBehaviour.Properties.of().setId(bk)
             .strength(0.3f).sound(SoundType.WOOD).noOcclusion().pushReaction(PushReaction.POPPED)));
         ResourceKey<Item> ik = ResourceKey.create(Registries.ITEM, ID);
-        ITEM = Registry.register(BuiltInRegistries.ITEM, ik, new BlockItem(BLOCK, new Item.Properties().setId(ik).useBlockDescriptionPrefix()));
+        ITEM = Registry.register(BuiltInRegistries.ITEM, ik, new StakeItem(BLOCK, new Item.Properties().setId(ik).useBlockDescriptionPrefix()));
         ENTITY = Registry.register(BuiltInRegistries.BLOCK_ENTITY_TYPE, ID, new BlockEntityType<>(StakeBlockEntity::new, Set.of(BLOCK)));
     }
 

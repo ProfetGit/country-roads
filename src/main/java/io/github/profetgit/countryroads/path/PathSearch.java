@@ -68,6 +68,8 @@ final class PathSearch implements RouteSolver.Host, Runnable {
     final long doorKey;
     final SurveyStats stats = new SurveyStats();
     private final List<Long> waypoints = new ArrayList<>();
+    /** The column a path that joins no road ends on, or Long.MIN_VALUE for a path that goes to a road. */
+    private final long freeEnd;
     private final long[] loadedGoals, pathGoals;
     /** Chunks loaded when the survey began (the coarse corridor never excludes them). */
     private final LongOpenHashSet loadedAtStart = new LongOpenHashSet();
@@ -108,7 +110,7 @@ final class PathSearch implements RouteSolver.Host, Runnable {
 
     private record Waiter(long[] chunks, boolean load, LongOpenHashSet absent, CompletableFuture<long[]> done) {}
 
-    PathSearch(ServerLevel level, BlockPos stake, BlockPos start, ServerPlayer player, List<BlockPos> waypointPos) {
+    PathSearch(ServerLevel level, BlockPos stake, BlockPos start, ServerPlayer player, List<BlockPos> waypointPos, boolean ends) {
         this.level = level;
         this.stake = stake;
         this.player = player;
@@ -123,6 +125,8 @@ final class PathSearch implements RouteSolver.Host, Runnable {
             waypoints.add(RouteSolver.key(w.getX(), w.getZ()));
             overrides.add(new long[]{RouteSolver.key(w.getX(), w.getZ()), w.getY() - 1});
         }
+        // a path drawn between two points: its last waypoint is where the route ends, not a stop on the way to a road
+        this.freeEnd = ends && !waypoints.isEmpty() ? waypoints.remove(waypoints.size() - 1) : Long.MIN_VALUE;
         this.view = new ColumnSnapshot.View(snap, sx, sz, RADIUS, overrides);
         this.view.minY = minY;
         // roads already standing in loaded chunks: read straight from their road bits
@@ -393,11 +397,24 @@ final class PathSearch implements RouteSolver.Host, Runnable {
         }
     }
 
+    boolean freeEnd() {
+        return freeEnd != Long.MIN_VALUE;
+    }
+
+    /** The goal of the last leg: a road, or the column the path ends on. */
+    private RouteSolver.Goal lastGoal(int[] field, int near) {
+        return freeEnd() ? RouteSolver.Goal.column(freeEnd) : RouteSolver.Goal.roads(field, near);
+    }
+
     private void compute() throws InterruptedException {
         long t0 = System.nanoTime();
-        LongOpenHashSet goals = new LongOpenHashSet(loadedGoals);
-        goals.addAll(LongArrayList.wrap(pathGoals));
-        goals.addAll(planGoals(goals.isEmpty()));
+        LongOpenHashSet goals = new LongOpenHashSet();
+        if (freeEnd()) goals.add(freeEnd);
+        else {
+            goals.addAll(LongArrayList.wrap(loadedGoals));
+            goals.addAll(LongArrayList.wrap(pathGoals));
+            goals.addAll(planGoals(goals.isEmpty()));
+        }
         goals.remove(doorKey);
         long tGoals = System.nanoTime();
         if (goals.isEmpty()) {
@@ -455,15 +472,15 @@ final class PathSearch implements RouteSolver.Host, Runnable {
         }
         boolean[] usedBefore = used.clone();
         List<Candidate> cands = new ArrayList<>();
-        RouteSolver.Route best = solve(s, start, inDir, inLevel, used, RouteSolver.Goal.roads(all, -1), true, forbidden, null);
+        RouteSolver.Route best = solve(s, start, inDir, inLevel, used, lastGoal(all, -1), true, forbidden, null);
         if (best == null && s.allowed != null) {
             // the corridor was too narrow (a cliff or lake the coarse terrain did not show): wider, then everywhere
             LongOpenHashSet wide = corridor(coarse, goals, CORRIDOR_WIDE);
             s.allowed = wide;
-            if (wide != null) best = solve(s, start, inDir, inLevel, used, RouteSolver.Goal.roads(all, -1), true, forbidden, null);
+            if (wide != null) best = solve(s, start, inDir, inLevel, used, lastGoal(all, -1), true, forbidden, null);
             if (best == null) {
                 s.allowed = null;
-                best = solve(s, start, inDir, inLevel, used, RouteSolver.Goal.roads(all, -1), true, forbidden, null);
+                best = solve(s, start, inDir, inLevel, used, lastGoal(all, -1), true, forbidden, null);
             }
             stats.candLines.add("CR-STAKE-COARSE widened " + (wide == null ? "-" : wide.size()) + (s.allowed == null ? " then unrestricted" : ""));
         }
@@ -471,7 +488,7 @@ final class PathSearch implements RouteSolver.Host, Runnable {
             int openSides = 0;
             for (int d = 0; d < 4; d++) if (Terrain.usable(view.ground(sx + HousePaths.DX[d], sz + HousePaths.DZ[d]))) openSides++;
             // few columns tried: the start itself is walled in; otherwise a road exists but something is in the way
-            fail(openSides == 0 || stats.expansions < 60 ? "countryroads.stake.boxed_in" : "countryroads.stake.no_route", RADIUS);
+            fail(openSides == 0 || stats.expansions < 60 ? "countryroads.stake.boxed_in" : freeEnd() ? "countryroads.stake.no_route_free" : "countryroads.stake.no_route", RADIUS);
             return;
         }
         cands.add(new Candidate("nearest", best));
@@ -489,7 +506,7 @@ final class PathSearch implements RouteSolver.Host, Runnable {
         }
         others.sort((a, b) -> Integer.compare(a[0], b[0]));
         for (int k = 0; k < others.size() && cands.size() < MAX_CANDIDATES - 1; k++) {
-            RouteSolver.Route r = solve(s, start, inDir, inLevel, used, RouteSolver.Goal.roads(clusters.fields[others.get(k)[1]], 4), true, forbidden, null, false);
+            RouteSolver.Route r = solve(s, start, inDir, inLevel, used, lastGoal(clusters.fields[others.get(k)[1]], 4), true, forbidden, null, false);
             if (r != null && !known(cands, r)) cands.add(new Candidate("road" + (k + 2), r));
         }
         // a route kept apart from the first
@@ -500,7 +517,7 @@ final class PathSearch implements RouteSolver.Host, Runnable {
                 for (int dz = -2 + Math.abs(dx); dz <= 2 - Math.abs(dx); dz++)
                     if (view.inside(x + dx, z + dz)) penalty[s.idx(x + dx, z + dz)] = PENALTY;
         }
-        RouteSolver.Route apart = solve(s, start, inDir, inLevel, used, RouteSolver.Goal.roads(all, -1), true, forbidden, penalty, false);
+        RouteSolver.Route apart = solve(s, start, inDir, inLevel, used, lastGoal(all, -1), true, forbidden, penalty, false);
         if (apart != null) {
             int shared = 0;
             for (long[] e : apart.part()) if (penalty[s.idx(ChunkPos.getX(e[0]), ChunkPos.getZ(e[0]))] > 0) shared++;
@@ -508,7 +525,7 @@ final class PathSearch implements RouteSolver.Host, Runnable {
         }
         // over the hill instead of through it
         if (!best.bores().isEmpty()) {
-            RouteSolver.Route over = solve(s, start, inDir, inLevel, used, RouteSolver.Goal.roads(all, -1), false, forbidden, null, false);
+            RouteSolver.Route over = solve(s, start, inDir, inLevel, used, lastGoal(all, -1), false, forbidden, null, false);
             if (over != null && !known(cands, over)) cands.add(new Candidate("over", over));
         }
         Candidate win = null;
@@ -570,7 +587,7 @@ final class PathSearch implements RouteSolver.Host, Runnable {
                 dir = r.endDir();
                 st = r.endKey();
             }
-            RouteSolver.Route last = ok ? solve(s, st, dir, lvl, used2, RouteSolver.Goal.roads(all, -1), true, forbidden, null) : null;
+            RouteSolver.Route last = ok ? solve(s, st, dir, lvl, used2, lastGoal(all, -1), true, forbidden, null) : null;
             s.prefix(null);
             if (last == null) break;
             acc2.addAll(last.part());
@@ -652,7 +669,7 @@ final class PathSearch implements RouteSolver.Host, Runnable {
         if (!sv.misses().isEmpty()) {
             int[] m = sv.misses().get(0);
             stats.candLines.add("CR-STAKE-KIT no room for the bridge at " + m[0] + "," + m[1]);
-            fail("countryroads.stake.no_bridge", 0);
+            fail(freeEnd() ? "countryroads.stake.no_bridge_free" : "countryroads.stake.no_bridge", 0);
             return;
         }
         finalBores = bores;
@@ -776,7 +793,7 @@ final class PathSearch implements RouteSolver.Host, Runnable {
             dir = r.endDir();
             st = r.endKey();
         }
-        RouteSolver.Route last = solve(s, st, dir, lvl, used, RouteSolver.Goal.roads(goal, -1), true, forbidden, null);
+        RouteSolver.Route last = solve(s, st, dir, lvl, used, lastGoal(goal, -1), true, forbidden, null);
         s.prefix(null);
         if (last == null) return null;
         acc.addAll(last.part());

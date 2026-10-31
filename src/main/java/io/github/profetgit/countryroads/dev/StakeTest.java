@@ -35,6 +35,8 @@ final class StakeTest {
     static int houseMode;
     /** staketest X Z via VX VZ WX WZ: a second waypoint (the chain test). */
     static int[] via2;
+    /** staketest X Z via VX VZ end: the last stake ends the path (sneak + right-click), joining no road. */
+    static boolean endMode;
 
     /** A cabin north of the door (door in its south wall, outside = south): planks, roof, a stair doorstep, a porch roof on fence posts; mode 2 adds a closed fence yard, 3 a stone-brick ring. */
     static void cabin(ServerLevel level, BlockPos door, int mode) {
@@ -82,7 +84,9 @@ final class StakeTest {
         final int house = houseMode;
         houseMode = 0;
         final int[] secondVia = via2;
+        final boolean endTest = endMode;
         via2 = null;
+        endMode = false;
         doorMode = false;
         commitMode = false;
         ServerLevel level = src.getLevel();
@@ -122,6 +126,11 @@ final class StakeTest {
                     HousePaths.useDoor(level, stakeRef[0], null, net.minecraft.core.Direction.SOUTH);
                 } else {
                     level.setBlock(stakeRef[0], Stake.BLOCK.defaultBlockState(), 3);
+                    PathData fresh = HousePaths.data(level, stakeRef[0]);
+                    if (fresh != null) {
+                        fresh.ends = false;
+                        fresh.waypoints.clear();
+                    }
                     HousePaths.survey(level, stakeRef[0], null);
                 }
                 if (viaX != Integer.MIN_VALUE) {
@@ -141,6 +150,7 @@ final class StakeTest {
                         viaRef2[0] = vp2;
                         HousePaths.placed(level, vp2, null);
                     }
+                    if (endTest) HousePaths.toggleEnd(level, viaRef2[0] != null ? viaRef2[0] : viaRef[0], null);
                 }
                 phase[0] = 0;
                 return false;
@@ -369,6 +379,14 @@ final class StakeTest {
                     if (viaRef[0] != null) {
                         boolean onRoute = false;
                         for (var c : cells[0]) if (!c.edge() && c.x() == viaRef[0].getX() && c.z() == viaRef[0].getZ()) onRoute = true;
+                        if (endTest) {
+                            HousePaths.Cell last = null;
+                            for (var c : cells[0]) if (!c.edge() && !c.bank()) last = c;
+                            BlockPos endAt = viaRef2[0] != null ? viaRef2[0] : viaRef[0];
+                            boolean atEnd = last != null && last.x() == endAt.getX() && last.z() == endAt.getZ();
+                            CountryRoads.LOG.info("CR-STAKE-FREE " + (atEnd && be.ends ? "PASS" : "FAIL") + " endsAtStake=" + atEnd + " ends=" + be.ends + " last="
+                                + (last == null ? "-" : last.x() + "," + last.z() + " y=" + last.y()) + " stake=" + endAt.toShortString() + " cells=" + cells[0].size());
+                        }
                         CountryRoads.LOG.info("CR-STAKE-WAYPOINT " + (onRoute ? "PASS" : "FAIL") + " onRoute=" + onRoute + " stakeRemoved=" + !level.getBlockState(viaRef[0]).is(Stake.BLOCK));
                     }
                     {

@@ -158,7 +158,8 @@ final class PathPlan {
             }
             used.add(col);
         }
-        dir[n] = dirOf(ChunkPos.getX(endKey) - px, ChunkPos.getZ(endKey) - pz);
+        // a path that joins no road ends on its last cell: nothing is entered after it
+        dir[n] = endKey == acc.get(n - 1)[0] ? dir[n - 1] : dirOf(ChunkPos.getX(endKey) - px, ChunkPos.getZ(endKey) - pz);
         // a sandbar of up to BRIDGE_GAP cells between two stretches of water is bridged over too: one bridge, not two
         // with a jog between them (user, 0.1.11)
         for (int i = 1; i < n; i++) {

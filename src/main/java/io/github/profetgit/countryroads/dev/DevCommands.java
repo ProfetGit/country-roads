@@ -265,12 +265,26 @@ public final class DevCommands {
                     .then(Commands.literal("via").then(Commands.argument("vx", IntegerArgumentType.integer()).then(Commands.argument("vz", IntegerArgumentType.integer())
                         .executes(c -> StakeTest.run(c.getSource(), IntegerArgumentType.getInteger(c, "x"), IntegerArgumentType.getInteger(c, "z"), false,
                             IntegerArgumentType.getInteger(c, "vx"), IntegerArgumentType.getInteger(c, "vz")))
+                        .then(Commands.literal("end").executes(c -> {
+                            StakeTest.endMode = true;
+                            return StakeTest.run(c.getSource(), IntegerArgumentType.getInteger(c, "x"), IntegerArgumentType.getInteger(c, "z"), false,
+                                IntegerArgumentType.getInteger(c, "vx"), IntegerArgumentType.getInteger(c, "vz"), StakeTest.WARM);
+                        }))
                         .then(Commands.argument("wx", IntegerArgumentType.integer()).then(Commands.argument("wz", IntegerArgumentType.integer())
                             .executes(c -> {
                                 StakeTest.via2 = new int[]{IntegerArgumentType.getInteger(c, "wx"), IntegerArgumentType.getInteger(c, "wz")};
                                 return StakeTest.run(c.getSource(), IntegerArgumentType.getInteger(c, "x"), IntegerArgumentType.getInteger(c, "z"), false,
                                     IntegerArgumentType.getInteger(c, "vx"), IntegerArgumentType.getInteger(c, "vz"), StakeTest.WARM);
                             })))))))))
+            .then(Commands.literal("notice")
+                .then(Commands.argument("code", IntegerArgumentType.integer()).then(Commands.argument("a", IntegerArgumentType.integer()).then(Commands.argument("b", IntegerArgumentType.integer())
+                    .then(Commands.argument("c", IntegerArgumentType.integer()).then(Commands.argument("free", com.mojang.brigadier.arguments.BoolArgumentType.bool())
+                        .executes(c -> {
+                            var n = new io.github.profetgit.countryroads.path.PathNotice(IntegerArgumentType.getInteger(c, "code"), IntegerArgumentType.getInteger(c, "a"),
+                                IntegerArgumentType.getInteger(c, "b"), IntegerArgumentType.getInteger(c, "c"), com.mojang.brigadier.arguments.BoolArgumentType.getBool(c, "free"));
+                            for (var p : c.getSource().getServer().getPlayerList().getPlayers()) net.fabricmc.fabric.api.networking.v1.ServerPlayNetworking.send(p, n);
+                            return 1;
+                        })))))))
             .then(Commands.literal("nearroad")
                 .then(Commands.argument("x", IntegerArgumentType.integer()).then(Commands.argument("z", IntegerArgumentType.integer())
                     .executes(c -> nearRoad(c.getSource(), IntegerArgumentType.getInteger(c, "x"), IntegerArgumentType.getInteger(c, "z"))))))

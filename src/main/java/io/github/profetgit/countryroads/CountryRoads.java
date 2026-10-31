@@ -23,6 +23,7 @@ public final class CountryRoads implements ModInitializer {
         ServerLifecycleEvents.SERVER_STARTING.register(Config::worldStarting);
         CommandRegistrationCallback.EVENT.register((dispatcher, context, selection) -> DevCommands.register(dispatcher));
         RoadColumns.init();
+        io.github.profetgit.countryroads.path.PathNotice.register();
         io.github.profetgit.countryroads.path.Stake.init();
         io.github.profetgit.countryroads.path.HousePaths.init();
         io.github.profetgit.countryroads.path.PathBlocks.init();

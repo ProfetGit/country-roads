@@ -79,6 +79,9 @@ def main() -> int:
         if i == len(shots):
             hi = 1000000
         lines.append(f"execute if score t crcam matches {lo}..{hi} run tp @a {s[0]} {s[1]} {s[2]} {s[3]} {s[4]}")
+        for extra in s[6:]:
+            if extra.startswith("notice="):
+                lines.append(f"execute if score t crcam matches {lo + 30} run countryroads notice {' '.join(extra[7:].split(','))}")
     (fn / "tick.mcfunction").write_text("\n".join(lines) + "\n")
     out = HERE / "out" / a.name
     env = dict(os.environ, EVERY=str(SEG))

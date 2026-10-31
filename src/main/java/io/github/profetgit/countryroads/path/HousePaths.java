@@ -14,13 +14,11 @@ import java.util.Map;
 import java.util.PriorityQueue;
 import java.util.Set;
 import java.util.function.Predicate;
-import net.minecraft.ChatFormatting;
 import net.minecraft.core.BlockPos;
 import net.minecraft.core.Direction;
 import net.minecraft.core.particles.BlockParticleOption;
 import net.minecraft.core.particles.DustParticleOptions;
 import net.minecraft.core.particles.ParticleTypes;
-import net.minecraft.network.chat.Component;
 import net.minecraft.server.level.ServerLevel;
 import net.minecraft.server.level.ServerPlayer;
 import net.minecraft.sounds.SoundSource;
@@ -84,10 +82,13 @@ public final class HousePaths {
 
     private HousePaths() {}
 
-    /** To the player, or to the log when a test drives the stake without one. */
-    private static void tell(ServerPlayer player, Component message, boolean overlay) {
-        if (player != null) player.sendSystemMessage(message, overlay);
-        else io.github.profetgit.countryroads.CountryRoads.LOG.info("CR-STAKE-MSG " + message.getString());
+    /** To the player's HUD card, or to the log when a test drives the stake without one. */
+    private static void note(ServerPlayer player, int code) {
+        PathNotice.send(player, code, 0, 0, 0, false);
+    }
+
+    private static void note(ServerPlayer player, int code, int a) {
+        PathNotice.send(player, code, a, 0, 0, false);
     }
 
     /** Mod init: the survey's chunk ticket type is registered with the other types. */
@@ -222,16 +223,20 @@ public final class HousePaths {
             keep(level, anchor, player);
             return;
         }
+        if (d.status != PathData.BUILT && player != null && player.isShiftKeyDown() && !d.waypoints.isEmpty()) {
+            toggleEnd(level, anchor, player);
+            return;
+        }
         if (d.status != PathData.BUILT) {
             d.start = findStart(level, anchor, outside);
             if (d.start == null) {
                 PathRecords.of(level).drop(anchor);
-                tell(player, Component.translatable("countryroads.stake.door_boxed").withStyle(ChatFormatting.RED), false);
+                note(player, PathNotice.DOOR_BOXED);
                 if (player == null) io.github.profetgit.countryroads.CountryRoads.LOG.info("CR-STAKE-DOORBOXED no open start within 8 blocks");
                 return;
             }
             int far = Math.max(Math.abs(d.start.getX() - anchor.getX()), Math.abs(d.start.getZ() - anchor.getZ()));
-            if (far > 3) tell(player, Component.translatable("countryroads.stake.start_far", far).withStyle(ChatFormatting.YELLOW), false);
+            if (far > 3) note(player, PathNotice.START_FAR, far);
         }
         use(level, anchor, player);
     }
@@ -252,8 +257,29 @@ public final class HousePaths {
         dbe.waypoints.add(pos.immutable());
         dbe.setChanged();
         wbe.setChanged();
-        tell(player, Component.translatable("countryroads.stake.waypoint", dbe.waypoints.size()).withStyle(ChatFormatting.AQUA), true);
+        PathNotice.send(player, PathNotice.WAYPOINT, dbe.waypoints.size(), 0, 0, dbe.ends);
         later(level, door, player);
+    }
+
+    /**
+     * Sneak + right-click on a stake of a path not built yet: the path ends at its last stake and joins no road, or (again)
+     * goes on to the nearest road. Surveyed again at once.
+     */
+    public static void toggleEnd(ServerLevel level, BlockPos stake, ServerPlayer player) {
+        PathData be = data(level, stake);
+        if (be == null || be.status == PathData.BUILT) return;
+        BlockPos door = be.role == PathData.WAYPOINT && be.door != null ? be.door : stake;
+        PathData d = data(level, door);
+        if (d == null) return;
+        d.waypoints.removeIf(w -> !level.getBlockState(w).is(Stake.BLOCK));
+        if (d.waypoints.isEmpty()) {
+            note(player, PathNotice.NEEDS_TWO);
+            return;
+        }
+        d.ends = !d.ends;
+        d.setChanged();
+        note(player, d.ends ? PathNotice.END_ON : PathNotice.END_OFF, d.waypoints.size());
+        survey(level, door, player);
     }
 
     private static BlockPos nearestDoor(ServerLevel level, BlockPos pos, ServerPlayer player) {
@@ -401,17 +427,20 @@ public final class HousePaths {
 
     public static void survey(ServerLevel level, BlockPos stake, ServerPlayer player) {
         if (!io.github.profetgit.countryroads.Config.get().housePaths) {
-            tell(player, Component.translatable("countryroads.stake.disabled").withStyle(ChatFormatting.RED), true);
+            note(player, PathNotice.DISABLED);
             return;
         }
         cancelSurveys(stake);
         PREVIEWS.remove(stake);
         List<BlockPos> waypoints = new ArrayList<>();
         BlockPos start = stake;
+        boolean ends = false;
         PathData be = data(level, stake);
         if (be != null) {
             be.waypoints.removeIf(w -> !level.getBlockState(w).is(Stake.BLOCK));
             waypoints.addAll(be.waypoints);
+            if (be.waypoints.isEmpty()) be.ends = false;
+            ends = be.ends;
             if (be.start != null) start = be.start;
             if (be.status == PathData.PREVIEW) {
                 be.status = PathData.NONE;
@@ -421,8 +450,8 @@ public final class HousePaths {
         if (player != null) OWNERS.put(stake, player);
         OPEN.put(stake, new Open(level, player));
         DEBOUNCE.remove(stake);
-        SURVEYS.add(new PathSearch(level, stake, start, player, waypoints));
-        tell(player, Component.translatable("countryroads.stake.surveying").withStyle(ChatFormatting.GRAY), true);
+        SURVEYS.add(new PathSearch(level, stake, start, player, waypoints, ends));
+        note(player, PathNotice.SURVEYING);
     }
 
     public static void use(ServerLevel level, BlockPos stake, ServerPlayer player) {
@@ -433,7 +462,7 @@ public final class HousePaths {
             return;
         }
         if (be.status == PathData.BUILT) {
-            tell(player, Component.translatable("countryroads.path.built_hint"), true);
+            note(player, PathNotice.BUILT);
             return;
         }
         if (be.status != PathData.PREVIEW || be.survey == null) {
@@ -459,12 +488,12 @@ public final class HousePaths {
             if (!c.bank && !c.rail) cols.add(key(c.x, c.z));
         }
         ROLLOUTS.add(new Rollout(level, stake, s.cells, new int[]{0}, chunks, new int[]{0}, cols, rocky(level, s.cells), s.bridges, new java.util.HashSet<>()));
-        tell(player, Component.translatable("countryroads.stake.building", s.cells.size()), true);
+        note(player, PathNotice.BUILDING, s.cells.size());
     }
 
     /** Sneak + right-click on a built path: it stays for good. */
     public static void keep(ServerLevel level, BlockPos anchor, ServerPlayer player) {
-        if (commit(level, anchor)) tell(player, Component.translatable("countryroads.path.committed"), true);
+        if (commit(level, anchor)) note(player, PathNotice.COMMITTED);
     }
 
     /**
@@ -476,7 +505,7 @@ public final class HousePaths {
         if (PathRecords.of(level).door(anchor) == null) return false;
         takeUp(level, anchor);
         PathRecords.of(level).drop(anchor);
-        tell(player, Component.translatable("countryroads.path.undone"), true);
+        note(player, PathNotice.UNDONE);
         return true;
     }
 
@@ -506,6 +535,7 @@ public final class HousePaths {
 
     /** The stake is being broken (or the path undone from a door): put back every block the path changed and give back the materials. */
     public static void takeUp(ServerLevel level, BlockPos stake) {
+        ServerPlayer owner = OWNERS.get(stake);
         PREVIEWS.remove(stake);
         OPEN.remove(stake);
         DEBOUNCE.remove(stake);
@@ -532,6 +562,7 @@ public final class HousePaths {
         PathData be = first;
         if (be == null || be.status != PathData.BUILT) {
             if (be != null && !level.getBlockState(stake).is(Stake.BLOCK)) PathRecords.of(level).drop(stake);
+            note(owner, PathNotice.CLEAR);
             return;
         }
         // torches the player mined out of the tunnel are not paid back a second time
@@ -570,6 +601,7 @@ public final class HousePaths {
         be.forget();
         if (level.getBlockState(stake).is(Stake.BLOCK)) PathRecords.of(level).unmark(stake);
         else PathRecords.of(level).drop(stake);
+        note(owner, PathNotice.UNDONE);
     }
 
     public static void tick(net.minecraft.server.MinecraftServer server) {
@@ -616,7 +648,7 @@ public final class HousePaths {
                     BlockPos p = BlockPos.of(k);
                     if (!lv.hasChunkAt(p) || ROLLOUTS.stream().anyMatch(r -> r.stake.equals(p))) continue;
                     ServerPlayer owner = OWNERS.get(p);
-                    if (commit(lv, p) && owner != null) tell(owner, Component.translatable("countryroads.path.committed"), true);
+                    if (commit(lv, p) && owner != null) note(owner, PathNotice.COMMITTED);
                 }
             }
         }
@@ -659,8 +691,7 @@ public final class HousePaths {
     /** The search is over: show the route and the bill, or say why there is none. */
     private static void finished(PathSearch j) {
         if (j.survey == null) {
-            if ("countryroads.stake.on_road".equals(j.failure)) tell(j.player, Component.translatable(j.failure), true);
-            else if (j.failure != null) tell(j.player, Component.translatable(j.failure, j.failureArg).withStyle(ChatFormatting.RED), false);
+            if (j.failure != null) PathNotice.send(j.player, PathNotice.failure(j.failure), j.failureArg, 0, 0, false);
             return;
         }
         Survey sv = j.survey;
@@ -669,7 +700,7 @@ public final class HousePaths {
             be.status = PathData.PREVIEW;
             be.survey = sv;
             if (j.player != null) PREVIEWS.put(j.stake, new Preview(j.level, j.stake, j.player, sv.cells, j.level.getGameTime() + PREVIEW_TICKS, legsOf(sv.cells, be.waypoints)));
-            tell(j.player, Component.translatable("countryroads.stake.preview", sv.length, sv.tunnelCells).withStyle(ChatFormatting.YELLOW), false);
+            PathNotice.send(j.player, PathNotice.PREVIEW, sv.length, sv.tunnelCells, be.waypoints.size(), j.freeEnd());
         }
     }
 

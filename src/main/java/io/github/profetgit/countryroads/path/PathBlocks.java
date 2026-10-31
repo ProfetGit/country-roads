@@ -9,10 +9,8 @@ import java.util.Map;
 import java.util.UUID;
 import java.util.concurrent.ConcurrentHashMap;
 import net.fabricmc.fabric.api.event.player.PlayerBlockBreakEvents;
-import net.minecraft.ChatFormatting;
 import net.minecraft.core.BlockPos;
 import net.minecraft.core.registries.BuiltInRegistries;
-import net.minecraft.network.chat.Component;
 import net.minecraft.resources.Identifier;
 import net.minecraft.server.level.ServerLevel;
 import net.minecraft.server.level.ServerPlayer;
@@ -100,7 +98,7 @@ public final class PathBlocks extends SavedData {
             level.destroyBlock(pos, false, player);
             long now = level.getGameTime();
             Long last = NOTICED.put(sp.getUUID(), now);
-            if (last == null || now - last > NOTICE_GAP) sp.sendSystemMessage(Component.translatable("countryroads.path.nodrop").withStyle(ChatFormatting.GRAY), true);
+            if (last == null || now - last > NOTICE_GAP) PathNotice.send(sp, PathNotice.NODROP, 0, 0, 0, false);
             return false;
         });
     }

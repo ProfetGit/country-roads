@@ -10,6 +10,7 @@
   "environment": "*",
   "entrypoints": {
     "main": ["io.github.profetgit.countryroads.CountryRoads"],
+    "client": ["io.github.profetgit.countryroads.client.CountryRoadsClient"],
     "modmenu": ["io.github.profetgit.countryroads.client.ModMenuEntry"]
   },
   "mixins": ["countryroads.mixins.json"],

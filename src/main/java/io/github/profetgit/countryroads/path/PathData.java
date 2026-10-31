@@ -35,10 +35,11 @@ public final class PathData {
         Codec.LONG.optionalFieldOf("built_at", 0L).forGetter(d -> d.builtAt),
         Codec.INT.optionalFieldOf("role", DOOR).forGetter(d -> d.role),
         BlockPos.CODEC.optionalFieldOf("door").forGetter(d -> Optional.ofNullable(d.door)),
-        BlockPos.CODEC.listOf().optionalFieldOf("waypoints", List.of()).forGetter(d -> d.waypoints)).apply(i, PathData::of));
+        BlockPos.CODEC.listOf().optionalFieldOf("waypoints", List.of()).forGetter(d -> d.waypoints),
+        Codec.BOOL.optionalFieldOf("ends", false).forGetter(d -> d.ends)).apply(i, PathData::of));
 
     private static PathData of(int status, List<Entry> journal, List<ItemStack> paid, List<Long> columns, List<Long> torches, long builtAt, int role, Optional<BlockPos> door,
-                               List<BlockPos> waypoints) {
+                               List<BlockPos> waypoints, boolean ends) {
         PathData d = new PathData(() -> {});
         d.status = status;
         d.journal.addAll(journal);
@@ -49,6 +50,7 @@ public final class PathData {
         d.role = role;
         d.door = door.orElse(null);
         d.waypoints.addAll(waypoints);
+        d.ends = ends;
         return d;
     }
 
@@ -65,6 +67,8 @@ public final class PathData {
     public int role = DOOR;
     public BlockPos door;
     public final List<BlockPos> waypoints = new ArrayList<>();
+    /** The path ends at its last waypoint and joins no road (a path drawn between two points). */
+    public boolean ends;
     /** The surveyed path while it is only a preview; not saved (a reload means a fresh survey). */
     public transient HousePaths.Survey survey;
     /** Where a path from a door or fence gate starts (the cell outside it); null for a stake, which starts where it stands. */
