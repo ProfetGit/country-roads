@@ -167,13 +167,16 @@ public final class Planner {
         List<int[]> joins = new ArrayList<>();
         for (Trunk t : trunks) {
             int[] match = new int[L];
+            double[] off2 = new double[L];
             java.util.Arrays.fill(match, -1);
             for (int i = 0; i < L; i++) {
                 if (!Float.isNaN(pinY[i])) continue;
                 double[] q = line.get(i);
                 double bd = 81;
+                off2[i] = Double.MAX_VALUE;
                 for (int j = 0; j < t.p.length(); j++) {
                     double dx = t.p.x[j] - q[0], dz = t.p.z[j] - q[1], d2 = dx * dx + dz * dz;
+                    if (d2 < off2[i]) off2[i] = d2;
                     if (d2 < bd) {
                         bd = d2;
                         match[i] = j;
@@ -186,13 +189,19 @@ public final class Planner {
                     continue;
                 }
                 int a = i, b = i, gap = 0;
+                double bulge2 = 0;
                 // a road that leaves the shared line for a few samples (it bulged more than 9 blocks off it) is still on
-                // it: two shared stretches with a short gap overlapped there at different heights
-                for (int k = i + 1; k < L && gap <= SHARE_GAP; k++) {
+                // it: two shared stretches with a short gap overlapped there at different heights; a longer gap that
+                // stays within SHARE_BULGE of the line is the same road cutting a corner, not a second road
+                for (int k = i + 1; k < L && (gap <= SHARE_GAP || gap <= SHARE_GAP_FAR && bulge2 <= SHARE_BULGE * SHARE_BULGE); k++) {
                     if (match[k] >= 0) {
                         b = k;
                         gap = 0;
-                    } else gap++;
+                        bulge2 = 0;
+                    } else {
+                        gap++;
+                        bulge2 = Math.max(bulge2, off2[k]);
+                    }
                 }
                 i = b + 1;
                 if (TRACE_BRIDGES) io.github.profetgit.countryroads.CountryRoads.LOG.info("CR-TRUNK edge " + e.a().pos().toShortString() + "->" + e.b().pos().toShortString()
@@ -1294,6 +1303,9 @@ public final class Planner {
     static final double OVERLAP = 4.5;
     /** Samples off the shared line that still count as one shared stretch. */
     static final int SHARE_GAP = Integer.getInteger("countryroads.shareGap", 20);
+    /** Longest gap that still counts as one shared stretch while no sample of it strays more than SHARE_BULGE blocks. */
+    static final int SHARE_GAP_FAR = Integer.getInteger("countryroads.shareGapFar", 40);
+    static final int SHARE_BULGE = Integer.getInteger("countryroads.shareBulge", 24);
     static final int NUDGE_STEP = 8, NUDGE_MAX = 12, NUDGE_TRY = 3, NUDGE_KEEP = 24;
     /** Station cost (squared blocks of hillside the cut slope cannot meet) above which shifts are tried at all. */
     static final double NUDGE_FROM = 6;

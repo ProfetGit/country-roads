@@ -4,7 +4,9 @@ import io.github.profetgit.countryroads.path.PathNotice;
 import io.github.profetgit.countryroads.path.Stake;
 import java.util.ArrayList;
 import java.util.List;
+import com.mojang.blaze3d.platform.InputConstants;
 import net.minecraft.client.DeltaTracker;
+import net.minecraft.client.KeyMapping;
 import net.minecraft.client.Minecraft;
 import net.minecraft.client.gui.Font;
 import net.minecraft.client.gui.GuiGraphicsExtractor;
@@ -15,7 +17,7 @@ import net.minecraft.world.phys.HitResult;
 
 /**
  * The stake path card: a headline (what the path is doing), the one or two things the player can do now as key + action
- * chips, and for a failure one line on how to fix it. It sits just below the crosshair and shows while the player holds
+ * chips, and for a failure one line on how to fix it. It sits on the right side of the screen and shows while the player holds
  * the stake or looks at one, and for a few seconds after every change. Words come from the lang file; the server only
  * sends a code and numbers.
  */
@@ -82,7 +84,14 @@ final class PathHud {
         newsAt = now;
     }
 
-    private record Chip(String key, Component action) {}
+    private enum Gesture { USE, PLACE, BREAK, SNEAK_USE }
+
+    private record Chip(Gesture gesture, Component action) {}
+
+    /** One drawn symbol of a gesture: a mouse with a button lit (mouse > 0), a key-cap (label) or the plus sign. */
+    private record Glyph(int mouse, String label) {
+        static final Glyph PLUS = new Glyph(0, "+");
+    }
 
     private static boolean aiming(Minecraft mc) {
         if (mc.player == null) return false;
@@ -137,13 +146,13 @@ final class PathHud {
     private static List<Chip> chips() {
         List<Chip> out = new ArrayList<>();
         if (state == PathNotice.PREVIEW) {
-            out.add(new Chip("countryroads.hud.key.use", Component.translatable("countryroads.hud.build")));
-            if (stakes > 0) out.add(new Chip("countryroads.hud.key.sneak_use", Component.translatable(free ? "countryroads.hud.join_road" : "countryroads.hud.end_here")));
-            else out.add(new Chip("countryroads.hud.key.place", Component.translatable("countryroads.hud.add_stake")));
-            out.add(new Chip("countryroads.hud.key.break", Component.translatable("countryroads.hud.cancel")));
+            out.add(new Chip(Gesture.USE, Component.translatable("countryroads.hud.build")));
+            if (stakes > 0) out.add(new Chip(Gesture.SNEAK_USE, Component.translatable(free ? "countryroads.hud.join_road" : "countryroads.hud.end_here")));
+            else out.add(new Chip(Gesture.PLACE, Component.translatable("countryroads.hud.add_stake")));
+            out.add(new Chip(Gesture.BREAK, Component.translatable("countryroads.hud.cancel")));
         } else if (state == PathNotice.BUILT) {
-            out.add(new Chip("countryroads.hud.key.sneak_use", Component.translatable("countryroads.hud.keep")));
-            out.add(new Chip("countryroads.hud.key.break", Component.translatable("countryroads.hud.undo")));
+            out.add(new Chip(Gesture.SNEAK_USE, Component.translatable("countryroads.hud.keep")));
+            out.add(new Chip(Gesture.BREAK, Component.translatable("countryroads.hud.undo")));
         }
         return out;
     }
@@ -174,26 +183,85 @@ final class PathHud {
         return new Component[]{head, net.minecraft.locale.Language.getInstance().has(hintKey) ? Component.translatable(hintKey, a) : null};
     }
 
+    private static Glyph glyph(KeyMapping m) {
+        int[] buttons = {InputConstants.MOUSE_BUTTON_LEFT, InputConstants.MOUSE_BUTTON_RIGHT, InputConstants.MOUSE_BUTTON_MIDDLE};
+        for (int i = 0; i < buttons.length; i++) {
+            if (m.matches(InputConstants.Type.MOUSE.getOrCreate(buttons[i]))) return new Glyph(i + 1, "");
+        }
+        if (m.isUnbound()) return new Glyph(0, "-");
+        for (int b = InputConstants.MOUSE_BUTTON_4; b <= InputConstants.MOUSE_BUTTON_8; b++) {
+            if (m.matches(InputConstants.Type.MOUSE.getOrCreate(b))) return new Glyph(4, "");
+        }
+        String t = m.getTranslatedKeyMessage().getString();
+        t = t.replace("Left ", "").replace("Right ", "R ").replace("Control", "Ctrl").replace("Escape", "Esc");
+        if (t.length() > 6) t = t.substring(0, 6);
+        return new Glyph(0, t);
+    }
+
+    private static List<Glyph> glyphs(Gesture g) {
+        Minecraft mc = Minecraft.getInstance();
+        return switch (g) {
+            case USE, PLACE -> List.of(glyph(mc.options.keyUse));
+            case BREAK -> List.of(glyph(mc.options.keyAttack));
+            case SNEAK_USE -> List.of(glyph(mc.options.keyShift), Glyph.PLUS, glyph(mc.options.keyUse));
+        };
+    }
+
+    private static final int MOUSE_W = 11, MOUSE_H = 14, GAP = 2;
+
+    private static int glyphW(Font font, Glyph g) {
+        if (g.mouse() > 0) return MOUSE_W;
+        return g == Glyph.PLUS ? font.width("+") : font.width(g.label()) + 7;
+    }
+
+    private static int glyphsW(Font font, List<Glyph> gs) {
+        int w = 0;
+        for (Glyph g : gs) w += glyphW(font, g) + GAP;
+        return w - GAP;
+    }
+
+    /** A mouse seen from above, 11 x 14 pixels, with the button the binding uses lit in apricot. */
+    private static void mouse(GuiGraphicsExtractor g, int x, int y, int lit, float alpha) {
+        int line = ARGB.color(alpha, CREAM), body = ARGB.color(alpha, 0x4A3A4E), on = ARGB.color(alpha, APRICOT);
+        g.fill(x + 1, y, x + MOUSE_W - 1, y + MOUSE_H, line);
+        g.fill(x, y + 1, x + MOUSE_W, y + MOUSE_H - 1, line);
+        g.fill(x + 1, y + 1, x + MOUSE_W - 1, y + MOUSE_H - 1, body);
+        g.fill(x + 1, y + 7, x + MOUSE_W - 1, y + 8, line);
+        g.fill(x + 5, y + 1, x + 6, y + 7, line);
+        if (lit == 1) g.fill(x + 1, y + 1, x + 5, y + 7, on);
+        else if (lit == 2) g.fill(x + 6, y + 1, x + 10, y + 7, on);
+        else if (lit == 3) g.fill(x + 4, y + 2, x + 7, y + 6, on);
+        else if (lit == 4) g.fill(x + 1, y + 8, x + 10, y + 13, on);
+    }
+
+    private static void keycap(GuiGraphicsExtractor g, Font font, int x, int y, String label, float alpha) {
+        int kw = font.width(label) + 7;
+        g.fill(x + 1, y, x + kw - 1, y + 10, ARGB.color(alpha, APRICOT));
+        g.fill(x, y + 1, x + kw, y + 9, ARGB.color(alpha, APRICOT));
+        g.fill(x + 1, y + 10, x + kw - 1, y + 11, ARGB.color(alpha, KEY_SHADE));
+        g.text(font, label, x + 3, y + 1, ARGB.color(alpha, PLUM), false);
+    }
+
     /**
-     * Draws the card: one panel, headline on top, one row per key chip (key box, then the action), the hint last. It
-     * sits just below the crosshair, centred, at about three quarters of the GUI scale rounded so text stays on whole
-     * pixels.
+     * Draws the card: one panel, headline on top, one row per gesture (mouse / key-cap symbols from the player's own
+     * bindings, then the action), the hint last. It sits on the right edge, vertically centred, at about three
+     * quarters of the GUI scale rounded so text stays on whole pixels.
      */
     private static void paint(GuiGraphicsExtractor g, Font font, Component head, int accent, List<Chip> chips, Component hint, float alpha) {
         int w = g.guiWidth(), h = g.guiHeight();
         double gui = Math.max(1, Minecraft.getInstance().getWindow().getGuiScale());
         float s = (float) (Math.max(1, Math.round(gui * 0.75)) / gui);
-        int padX = 6, padY = 5, rowH = 12, headH = 12;
+        int padX = 6, padY = 5, rowH = 16, headH = 12;
         int innerW = font.width(head);
         int keyW = 0;
-        for (Chip c : chips) keyW = Math.max(keyW, font.width(Component.translatable(c.key())) + 7);
-        for (Chip c : chips) innerW = Math.max(innerW, keyW + 4 + font.width(c.action()));
+        for (Chip c : chips) keyW = Math.max(keyW, glyphsW(font, glyphs(c.gesture())));
+        for (Chip c : chips) innerW = Math.max(innerW, keyW + 5 + font.width(c.action()));
         if (hint != null) innerW = Math.max(innerW, font.width(hint));
         int cw = innerW + padX * 2;
-        int ch = padY * 2 + headH + chips.size() * rowH + (hint != null ? rowH - 1 : 0) - 2;
+        int ch = padY * 2 + headH + 2 + chips.size() * rowH + (hint != null ? 10 : 0) - 2;
         float sw = cw * s, sh = ch * s;
-        int ax = Math.round(Math.max(2, Math.min(w - sw - 2, (w - sw) / 2)));
-        int ay = Math.round(Math.min(h / 2f + 14, h - 26 - sh));
+        int ax = Math.round(Math.max(2, w - sw - 6));
+        int ay = Math.round(Math.max(2, Math.min(h - sh - 2, (h - sh) / 2f)));
         g.pose().pushMatrix();
         g.pose().translate(ax, ay);
         g.pose().scale(s, s);
@@ -201,19 +269,19 @@ final class PathHud {
         int y = padY;
         g.text(font, head, padX, y + 1, ARGB.color(alpha, CREAM), false);
         g.fill(padX, y + 11, padX + 10, y + 12, ARGB.color(alpha, accent));
-        y += headH + 1;
+        y += headH + 3;
         for (Chip c : chips) {
-            Component key = Component.translatable(c.key());
-            int kw = font.width(key) + 7;
-            int kx = padX + (keyW - kw);
-            g.fill(kx + 1, y, kx + kw - 1, y + 10, ARGB.color(alpha, APRICOT));
-            g.fill(kx, y + 1, kx + kw, y + 9, ARGB.color(alpha, APRICOT));
-            g.fill(kx + 1, y + 10, kx + kw - 1, y + 11, ARGB.color(alpha, KEY_SHADE));
-            g.text(font, key, kx + 3, y + 1, ARGB.color(alpha, PLUM), false);
-            g.text(font, c.action(), padX + keyW + 4, y + 1, ARGB.color(alpha, CREAM), false);
+            int x = padX + keyW - glyphsW(font, glyphs(c.gesture()));
+            for (Glyph gl : glyphs(c.gesture())) {
+                if (gl.mouse() > 0) mouse(g, x, y - 2, gl.mouse(), alpha);
+                else if (gl == Glyph.PLUS) g.text(font, "+", x, y + 2, ARGB.color(alpha, DIM), false);
+                else keycap(g, font, x, y, gl.label(), alpha);
+                x += glyphW(font, gl) + GAP;
+            }
+            g.text(font, c.action(), padX + keyW + 5, y + 2, ARGB.color(alpha, CREAM), false);
             y += rowH;
         }
-        if (hint != null) g.text(font, hint, padX, y + 1, ARGB.color(alpha, DIM), false);
+        if (hint != null) g.text(font, hint, padX, y - 1, ARGB.color(alpha, DIM), false);
         g.pose().popMatrix();
     }
 

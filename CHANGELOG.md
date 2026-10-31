@@ -1,5 +1,10 @@
 # Changelog
 
+## 0.1.67 (unreleased)
+
+- Two roads that run side by side to the same bridge now merge into one road instead of forking at the landing.
+- The stake card moved to the right side of the screen and shows mouse and key icons instead of the words Right-click, Place and Break.
+
 ## 0.1.66 (unreleased)
 
 - Sneak + right-click with the stake in hand now ends the path at the last stake (it only worked with an empty hand).
