@@ -1,0 +1,33 @@
+# config: {"playerSpeed": 0, "mountSpeed": 0, "noMonstersOnRoads": false, "roadsOnMaps": false}
+# roads_off: fresh survival world (hard), stand on the generated road at -239,1896: speed attribute, walking, map, monsters at midnight
+world new normal seed=12345 mode=survival difficulty=hard
+cmd tp @s -239 130 1896
+cmd effect give @s minecraft:slow_falling 30 0 true
+wait 200
+cmd execute positioned -239 0 1896 positioned over world_surface run tp @s ~ ~ ~ -90 6
+wait 40
+state road_start
+cmd attribute @s minecraft:movement_speed modifier value get countryroads:road_speed
+cmd attribute @s minecraft:movement_speed get
+shot on_road
+hold forward 20
+state road_end
+cmd execute positioned -239 0 1860 positioned over world_surface run tp @s ~ ~ ~ -90 6
+wait 40
+state off_start
+cmd attribute @s minecraft:movement_speed modifier value get countryroads:road_speed
+cmd attribute @s minecraft:movement_speed get
+hold forward 20
+state off_end
+cmd execute positioned -239 0 1896 positioned over world_surface run tp @s ~ ~ ~ -90 6
+wait 20
+cmd give @s minecraft:map
+slot 1
+look -90 50
+use
+wait 160
+shot map
+state map
+cmd time set midnight
+cmd countryroads perks 150
+wait 400

@@ -1,5 +1,12 @@
 # Changelog
 
+## 0.1.66 (unreleased)
+
+- Sneak + right-click with the stake in hand now ends the path at the last stake (it only worked with an empty hand).
+- The preview and the build card show the same block count (the path's length).
+- The stake recipe unlocks when you pick up paper or sticks.
+- The stake card is one small tooltip-style panel below the crosshair. The config screen is translatable.
+
 ## 0.1.65 (unreleased)
 
 - The stake no longer writes to the chat or the action bar. A small card beside the crosshair says what the path is doing ("To the road · 177 blocks", "Ends at stake 2 · 144 blocks") and shows the one to three things you can do as key chips (Right-click Build, Sneak + Right-click End at last stake, Break Cancel). It shows while you hold a stake or look at one, and for a few seconds after anything changes. Failures give a short reason and one hint ("No way through", "Add stakes to steer round").

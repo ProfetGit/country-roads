@@ -1,0 +1,30 @@
+# edges_cage: stake in a 5x5 stone pen 2 high, open top
+world new normal seed=12345 mode=creative difficulty=normal
+cmd tp @s -239 130 1888
+cmd effect give @s minecraft:slow_falling 30 0 true
+wait 200
+cmd execute positioned -239 0 1888 positioned over world_surface run tp @s ~ ~ ~ 180 6
+wait 10
+cmd fill ~-12 ~-1 ~-14 ~12 ~6 ~2 air
+cmd fill ~-12 ~-2 ~-14 ~12 ~-1 ~2 grass_block
+cmd fill ~-2 ~0 ~-8 ~2 ~3 ~-3 oak_planks hollow
+cmd setblock ~ ~ ~-3 oak_door[facing=south,half=lower]
+cmd setblock ~ ~1 ~-3 oak_door[facing=south,half=upper]
+cmd give @s countryroads:surveyors_stake 6
+slot 1
+assert holding hand=surveyors_stake
+cmd fill ~5 ~-1 ~-12 ~11 ~1 ~-6 stone
+cmd fill ~6 ~0 ~-11 ~10 ~1 ~-7 air
+cmd tp @s ~8 ~2 ~-6 180 60
+wait 20
+lookat ~ ~-2 ~-3
+wait 8
+state cage_aim
+use
+wait 25
+shot caged_25
+wait 40
+shot caged_65
+wait 60
+shot caged
+state caged

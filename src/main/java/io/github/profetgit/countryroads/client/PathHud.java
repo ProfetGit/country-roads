@@ -15,12 +15,12 @@ import net.minecraft.world.phys.HitResult;
 
 /**
  * The stake path card: a headline (what the path is doing), the one or two things the player can do now as key + action
- * chips, and for a failure one line on how to fix it. It sits right of the crosshair and shows while the player holds
+ * chips, and for a failure one line on how to fix it. It sits just below the crosshair and shows while the player holds
  * the stake or looks at one, and for a few seconds after every change. Words come from the lang file; the server only
  * sends a code and numbers.
  */
 final class PathHud {
-    private static final int APRICOT = 0xF2A65A, PLUM = 0x2A1E2E, CREAM = 0xFFF1DC, DIM = 0xB9A58F, WARN = 0xE8735A, SAGE = 0x9CCB7A, SKY = 0x8FC1D9;
+    private static final int APRICOT = 0xF2A65A, PLUM = 0x2A1E2E, CREAM = 0xFFF1DC, DIM = 0xB9A58F, WARN = 0xE8735A, SAGE = 0x9CCB7A, SKY = 0x8FC1D9, KEY_SHADE = 0xB5733A;
     private static final long NEWS_MS = 4000, FAIL_MS = 7000, GRACE_MS = 1500, FADE_MS = 250, PREVIEW_MS = 120_000;
 
     /** What the path is doing (kept), as last told. */
@@ -175,47 +175,60 @@ final class PathHud {
     }
 
     /**
-     * Draws the card. Rows: the headline (an accent bar, then text), then the chips (a key box and the action), then a
-     * hint. About three quarters of the GUI scale, rounded so the text stays on whole pixels.
+     * Draws the card: one panel, headline on top, one row per key chip (key box, then the action), the hint last. It
+     * sits just below the crosshair, centred, at about three quarters of the GUI scale rounded so text stays on whole
+     * pixels.
      */
     private static void paint(GuiGraphicsExtractor g, Font font, Component head, int accent, List<Chip> chips, Component hint, float alpha) {
         int w = g.guiWidth(), h = g.guiHeight();
         double gui = Math.max(1, Minecraft.getInstance().getWindow().getGuiScale());
         float s = (float) (Math.max(1, Math.round(gui * 0.75)) / gui);
-        int rowH = 15, gap = 2, padX = 6;
-        int rows = 1 + chips.size() + (hint != null ? 1 : 0);
-        int total = rows * (rowH + gap) - gap;
-        int ax = w / 2 + 16, ay = Math.round(h / 2f - total * s / 2);
+        int padX = 6, padY = 5, rowH = 12, headH = 12;
+        int innerW = font.width(head);
+        int keyW = 0;
+        for (Chip c : chips) keyW = Math.max(keyW, font.width(Component.translatable(c.key())) + 7);
+        for (Chip c : chips) innerW = Math.max(innerW, keyW + 4 + font.width(c.action()));
+        if (hint != null) innerW = Math.max(innerW, font.width(hint));
+        int cw = innerW + padX * 2;
+        int ch = padY * 2 + headH + chips.size() * rowH + (hint != null ? rowH - 1 : 0) - 2;
+        float sw = cw * s, sh = ch * s;
+        int ax = Math.round(Math.max(2, Math.min(w - sw - 2, (w - sw) / 2)));
+        int ay = Math.round(Math.min(h / 2f + 14, h - 26 - sh));
         g.pose().pushMatrix();
         g.pose().translate(ax, ay);
         g.pose().scale(s, s);
-        int y = 0;
-        int hw = font.width(head) + padX * 2 + 4;
-        panel(g, 0, y, hw, rowH, alpha, accent);
-        g.text(font, head, padX + 3, y + 4, ARGB.color(alpha, CREAM), false);
-        y += rowH + gap;
+        card(g, 0, 0, cw, ch, alpha, accent);
+        int y = padY;
+        g.text(font, head, padX, y + 1, ARGB.color(alpha, CREAM), false);
+        g.fill(padX, y + 11, padX + 10, y + 12, ARGB.color(alpha, accent));
+        y += headH + 1;
         for (Chip c : chips) {
             Component key = Component.translatable(c.key());
-            int kw = font.width(key) + 8, aw = font.width(c.action());
-            int cw = kw + aw + padX + 8;
-            panel(g, 0, y, cw, rowH, alpha, 0);
-            g.fill(padX - 2, y + 2, padX - 2 + kw, y + rowH - 2, ARGB.color(alpha * 0.9f, APRICOT));
-            g.text(font, key, padX + 2, y + 4, ARGB.color(alpha, PLUM), false);
-            g.text(font, c.action(), padX + kw + 3, y + 4, ARGB.color(alpha, CREAM), false);
-            y += rowH + gap;
+            int kw = font.width(key) + 7;
+            int kx = padX + (keyW - kw);
+            g.fill(kx + 1, y, kx + kw - 1, y + 10, ARGB.color(alpha, APRICOT));
+            g.fill(kx, y + 1, kx + kw, y + 9, ARGB.color(alpha, APRICOT));
+            g.fill(kx + 1, y + 10, kx + kw - 1, y + 11, ARGB.color(alpha, KEY_SHADE));
+            g.text(font, key, kx + 3, y + 1, ARGB.color(alpha, PLUM), false);
+            g.text(font, c.action(), padX + keyW + 4, y + 1, ARGB.color(alpha, CREAM), false);
+            y += rowH;
         }
-        if (hint != null) {
-            panel(g, 0, y, font.width(hint) + padX * 2 + 4, rowH, alpha * 0.9f, 0);
-            g.text(font, hint, padX + 3, y + 4, ARGB.color(alpha, DIM), false);
-        }
+        if (hint != null) g.text(font, hint, padX, y + 1, ARGB.color(alpha, DIM), false);
         g.pose().popMatrix();
     }
 
-    /** A dark plum plate with a thin apricot edge, and an accent bar on the left when it has one. */
-    private static void panel(GuiGraphicsExtractor g, int x, int y, int w, int h, float alpha, int accent) {
-        g.fill(x, y, x + w, y + h, ARGB.color(alpha * 0.88f, PLUM));
-        g.fill(x, y, x + w, y + 1, ARGB.color(alpha * 0.55f, APRICOT));
-        g.fill(x, y + h - 1, x + w, y + h, ARGB.color(alpha * 0.55f, APRICOT));
-        if (accent != 0) g.fill(x, y, x + 3, y + h, ARGB.color(alpha, accent));
+    /** A tooltip-like card: plum plate, one pixel border in the accent colour, corners stepped by one pixel. */
+    private static void card(GuiGraphicsExtractor g, int x, int y, int w, int h, float alpha, int accent) {
+        int edge = ARGB.color(alpha * 0.8f, accent), fill = ARGB.color(alpha * 0.92f, PLUM), inner = ARGB.color(alpha * 0.35f, APRICOT);
+        g.fill(x + 1, y, x + w - 1, y + h, fill);
+        g.fill(x, y + 1, x + w, y + h - 1, fill);
+        g.fill(x + 1, y, x + w - 1, y + 1, edge);
+        g.fill(x + 1, y + h - 1, x + w - 1, y + h, edge);
+        g.fill(x, y + 1, x + 1, y + h - 1, edge);
+        g.fill(x + w - 1, y + 1, x + w, y + h - 1, edge);
+        g.fill(x + 2, y + 1, x + w - 2, y + 2, inner);
+        g.fill(x + 2, y + h - 2, x + w - 2, y + h - 1, inner);
+        g.fill(x + 1, y + 2, x + 2, y + h - 2, inner);
+        g.fill(x + w - 2, y + 2, x + w - 1, y + h - 2, inner);
     }
 }

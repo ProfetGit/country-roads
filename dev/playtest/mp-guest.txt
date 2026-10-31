@@ -1,0 +1,20 @@
+# mp-guest: player 2 stands by and watches player 1's rollout; must get no HUD card
+world wait
+until chat~HOST_READY timeout=3000
+cmd execute at Host run tp @s ~4 ~ ~3 150 10
+wait 40
+state guest_near
+cmd tellraw @a "GUEST_READY"
+shot guest_before
+until chat~HOST_BUILDING timeout=3000
+wait 20
+shot guest_g20
+wait 40
+lookat ~-4 ~-0.5 ~-6
+shot guest_g60
+wait 100
+shot guest_g160
+wait 200
+shot guest_built
+state guest_built
+wait 60

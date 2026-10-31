@@ -1,0 +1,49 @@
+# edges_failures: stake on the road, in a cage, in water
+world new normal seed=12345 mode=creative difficulty=normal
+cmd tp @s -239 130 1888
+cmd effect give @s minecraft:slow_falling 30 0 true
+wait 200
+cmd execute positioned -239 0 1888 positioned over world_surface run tp @s ~ ~ ~ 180 6
+wait 10
+cmd fill ~-12 ~-1 ~-14 ~12 ~6 ~2 air
+cmd fill ~-12 ~-2 ~-14 ~12 ~-1 ~2 grass_block
+cmd fill ~-2 ~0 ~-8 ~2 ~3 ~-3 oak_planks hollow
+cmd setblock ~ ~ ~-3 oak_door[facing=south,half=lower]
+cmd setblock ~ ~1 ~-3 oak_door[facing=south,half=upper]
+cmd give @s countryroads:surveyors_stake 6
+slot 1
+assert holding hand=surveyors_stake
+# F1: a stake on the road
+cmd execute positioned -239 0 1896 positioned over world_surface run tp @s ~ ~ ~ 180 8
+wait 20
+lookat ~ ~-1 ~-2
+wait 8
+use
+wait 100
+shot on_road
+state on_road
+# F2: stake in a 1x1 cage, 2 high, open top
+cmd execute positioned -239 0 1888 positioned over world_surface run tp @s ~ ~ ~ 180 6
+wait 10
+cmd fill ~6 ~-1 ~-8 ~8 ~1 ~-6 stone
+cmd fill ~7 ~0 ~-7 ~7 ~1 ~-7 air
+cmd tp @s ~7 ~2 ~-4 180 60
+wait 10
+lookat ~7 ~-1.9 ~-6.5
+wait 8
+use
+wait 160
+shot caged
+state caged
+# F3: stake in water (pool)
+cmd execute positioned -239 0 1888 positioned over world_surface run tp @s ~ ~ ~ 180 6
+wait 10
+cmd fill ~-8 ~-3 ~-7 ~-4 ~-1 ~-3 water
+cmd tp @s ~-6 ~ ~ 180 30
+wait 10
+lookat ~ ~-2.5 ~-4
+wait 8
+use
+wait 160
+shot in_water
+state in_water

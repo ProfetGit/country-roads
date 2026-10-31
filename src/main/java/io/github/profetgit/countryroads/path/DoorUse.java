@@ -20,14 +20,14 @@ public final class DoorUse {
         UseBlockCallback.EVENT.register((player, world, hand, hit) -> {
             if (player.isSpectator() || !player.getItemInHand(hand).is(Stake.ITEM)) return InteractionResult.PASS;
             if (player.isShiftKeyDown() && world.getBlockState(hit.getBlockPos()).is(Stake.BLOCK)) {
-                // the stake in hand on a built stake: keep that path for good (otherwise it would place another stake)
+                // the stake in hand on a stake: keep a built path, or toggle "end at last stake" on an unbuilt one
                 if (world instanceof ServerLevel level && player instanceof ServerPlayer sp) {
                     var d = HousePaths.data(level, hit.getBlockPos());
-                    if (d == null || d.status != PathData.BUILT) return InteractionResult.PASS;
-                    HousePaths.keep(level, hit.getBlockPos(), sp);
-                    return InteractionResult.SUCCESS;
+                    if (d == null) return InteractionResult.PASS;
+                    if (d.status == PathData.BUILT) HousePaths.keep(level, hit.getBlockPos(), sp);
+                    else HousePaths.toggleEnd(level, hit.getBlockPos(), sp);
                 }
-                return InteractionResult.PASS;
+                return InteractionResult.SUCCESS;
             }
             if (!HousePaths.isDoorLike(world.getBlockState(hit.getBlockPos()))) return InteractionResult.PASS;
             if (world instanceof ServerLevel level && player instanceof ServerPlayer sp) {

@@ -1,0 +1,20 @@
+{
+  "id": "countryroads",
+  "fabric_api": true,
+  "options": {"fps": 60, "volume": 0.0001, "render_distance": 8},
+  "mp": {
+    "properties": {"level-type": "minecraft\\:normal", "level-seed": "12345", "generate-structures": "true", "difficulty": "normal"},
+    "cases": {
+      "playtest": {
+        "clients": [
+          {"user": "Host", "role": "host", "script": "dev/playtest/mp-host.txt", "seconds": 300},
+          {"user": "Guest", "role": "guest", "script": "dev/playtest/mp-guest.txt", "seconds": 300, "after": "Host joined the game"}
+        ],
+        "steps": [
+          {"wait": "Host joined the game", "send": ["op Host"]},
+          {"wait": "Guest joined the game", "send": ["op Guest"]}
+        ]
+      }
+    }
+  }
+}

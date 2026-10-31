@@ -1,0 +1,22 @@
+# config: {"housePaths": false}
+# edges_pathsoff: housePaths false, stake on a door
+world new normal seed=12345 mode=survival difficulty=normal
+cmd tp @s -239 130 1888
+cmd effect give @s minecraft:slow_falling 30 0 true
+wait 200
+cmd execute positioned -239 0 1888 positioned over world_surface run tp @s ~ ~ ~ 180 6
+wait 10
+cmd fill ~-12 ~-1 ~-14 ~12 ~6 ~2 air
+cmd fill ~-12 ~-2 ~-14 ~12 ~-1 ~2 grass_block
+cmd fill ~-2 ~0 ~-8 ~2 ~3 ~-3 oak_planks hollow
+cmd setblock ~ ~ ~-3 oak_door[facing=south,half=lower]
+cmd setblock ~ ~1 ~-3 oak_door[facing=south,half=upper]
+cmd give @s countryroads:surveyors_stake 6
+slot 1
+assert holding hand=surveyors_stake
+lookat ~ ~0.5 ~-3
+wait 8
+use
+wait 100
+shot housepaths_off
+state housepaths_off

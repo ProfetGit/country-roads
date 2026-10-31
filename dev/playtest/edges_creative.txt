@@ -1,0 +1,72 @@
+# options: {"extra": {"toggleCrouch": "true"}}
+# edges_creative: creative, two stakes, sneak+use = free end, build, break stake
+world new normal seed=12345 mode=creative difficulty=normal
+cmd tp @s -239 130 1888
+cmd effect give @s minecraft:slow_falling 30 0 true
+wait 200
+cmd execute positioned -239 0 1888 positioned over world_surface run tp @s ~ ~ ~ 180 6
+wait 10
+cmd fill ~-12 ~-1 ~-14 ~12 ~6 ~2 air
+cmd fill ~-12 ~-2 ~-14 ~12 ~-1 ~2 grass_block
+cmd fill ~-2 ~0 ~-8 ~2 ~3 ~-3 oak_planks hollow
+cmd setblock ~ ~ ~-3 oak_door[facing=south,half=lower]
+cmd setblock ~ ~1 ~-3 oak_door[facing=south,half=upper]
+cmd give @s countryroads:surveyors_stake 6
+slot 1
+assert holding hand=surveyors_stake
+# stake A in front of the door
+lookat ~ ~-1 ~-2
+wait 8
+use
+wait 8
+state stakeA
+wait 100
+shot a_preview
+# stake B 8 blocks east, a waypoint
+cmd tp @s ~8 ~ ~ 180 6
+wait 5
+lookat ~ ~-1 ~-2
+wait 8
+use
+wait 10
+shot b_waypoint
+wait 120
+shot b_preview
+# sneak + use on stake B: path ends there
+lookat ~ ~0.4 ~-2
+wait 8
+press sneak
+wait 5
+state sneakcheck
+use
+wait 20
+press sneak
+wait 40
+shot free_end
+state free_end
+slot 7
+wait 3
+press sneak
+wait 5
+use
+wait 25
+shot free_end_emptyhand
+state free_end_emptyhand
+wait 40
+shot free_end_emptyhand_70
+press sneak
+wait 5
+slot 1
+wait 3
+# build
+use
+wait 30
+shot build30
+wait 200
+shot built
+state built
+# break stake B (creative: one click), then stake A
+attack
+wait 40
+shot after_break_B
+state after_break_B

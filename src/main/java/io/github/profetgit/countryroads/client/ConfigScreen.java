@@ -13,39 +13,39 @@ import net.minecraft.network.chat.Component;
  */
 public final class ConfigScreen extends OptionsSubScreen {
     public ConfigScreen(Screen parent) {
-        super(parent, Minecraft.getInstance().options, Component.literal("Country Roads"));
+        super(parent, Minecraft.getInstance().options, Component.translatable("countryroads.config.title"));
     }
 
     @Override
     protected void addOptions() {
         Config c = Config.get();
         Config.Gen g = c.newWorlds;
-        list.addHeader(Component.literal("Gameplay (servers: config/countryroads.json)"));
+        list.addHeader(Component.translatable("countryroads.config.header.gameplay"));
         list.addSmall(
-            percent("Walking speed on roads", "Speed bonus for players on a road. 20% is about Speed I.", 5, 10, c.playerSpeed, v -> c.playerSpeed = v),
-            percent("Riding speed on roads", "Speed bonus for horses, donkeys, mules and camels on a road.", 5, 10, c.mountSpeed, v -> c.mountSpeed = v),
-            bool("No monsters on roads", "Monsters do not spawn on the road surface. Caves under a road are not affected.", c.noMonstersOnRoads, v -> c.noMonstersOnRoads = v),
-            bool("Roads on maps", "Roads are drawn as light lines on maps.", c.roadsOnMaps, v -> c.roadsOnMaps = v),
-            bool("House paths", "The Surveyor's Stake builds a path from your door to the nearest road.", c.housePaths, v -> c.housePaths = v),
-            bool("Roads in old chunks", "Chunks generated before Country Roads was installed get their road when they load. Chunks you have lived in are never touched.",
-                c.roadsInOldChunks, v -> c.roadsInOldChunks = v));
-        list.addHeader(Component.literal("New worlds (each world keeps what it was created with)"));
+            percent("player_speed", 5, 10, c.playerSpeed, v -> c.playerSpeed = v),
+            percent("mount_speed", 5, 10, c.mountSpeed, v -> c.mountSpeed = v),
+            bool("no_monsters", c.noMonstersOnRoads, v -> c.noMonstersOnRoads = v),
+            bool("maps", c.roadsOnMaps, v -> c.roadsOnMaps = v),
+            bool("house_paths", c.housePaths, v -> c.housePaths = v),
+            bool("old_chunks", c.roadsInOldChunks, v -> c.roadsInOldChunks = v));
+        list.addHeader(Component.translatable("countryroads.config.header.new_worlds"));
         list.addSmall(
-            bool("Village streets", "Village streets get the same look as the roads. Off: vanilla streets (roads still join them).", g.villageStreets, v -> g.villageStreets = v),
-            bool("Signposts and lamps", "Signposts with destinations and distances, and lamp posts near villages.", g.signposts, v -> g.signposts = v),
-            bool("Wayside camps", "Abandoned camps beside some long roads.", g.waysideCamps, v -> g.waysideCamps = v),
-            percent("Roadside finds", "Milestones, lost carts, shrines, benches and hay carts. 0%: none.", 25, 12, g.roadsideProps, v -> g.roadsideProps = v),
-            percent("Wheat fields", "Wheat fields beside roads in plains. 0%: none.", 25, 12, g.wheatFields, v -> g.wheatFields = v));
+            bool("streets", g.villageStreets, v -> g.villageStreets = v),
+            bool("signposts", g.signposts, v -> g.signposts = v),
+            bool("camps", g.waysideCamps, v -> g.waysideCamps = v),
+            percent("props", 25, 12, g.roadsideProps, v -> g.roadsideProps = v),
+            percent("wheat", 25, 12, g.wheatFields, v -> g.wheatFields = v));
     }
 
-    private static OptionInstance<Boolean> bool(String name, String tip, boolean value, OptionInstance.ValueUpdateListener<Boolean> set) {
-        return OptionInstance.createBoolean(name, OptionInstance.cachedConstantTooltip(Component.literal(tip)), value, set);
+    private static OptionInstance<Boolean> bool(String key, boolean value, OptionInstance.ValueUpdateListener<Boolean> set) {
+        return OptionInstance.createBoolean("countryroads.config." + key, OptionInstance.cachedConstantTooltip(Component.translatable("countryroads.config." + key + ".tip")), value, set);
     }
 
     /** A slider from 0 to steps x step percent. */
-    private static OptionInstance<Integer> percent(String name, String tip, int step, int steps, int value, java.util.function.IntConsumer set) {
-        return new OptionInstance<>(name, OptionInstance.cachedConstantTooltip(Component.literal(tip)),
-            (caption, v) -> Component.literal(name + ": " + v * step + "%"), new OptionInstance.IntRange(0, steps),
+    private static OptionInstance<Integer> percent(String key, int step, int steps, int value, java.util.function.IntConsumer set) {
+        String name = "countryroads.config." + key;
+        return new OptionInstance<>(name, OptionInstance.cachedConstantTooltip(Component.translatable(name + ".tip")),
+            (caption, v) -> Component.translatable("countryroads.config.percent", Component.translatable(name), v * step), new OptionInstance.IntRange(0, steps),
             Math.clamp(Math.round(value / (float) step), 0, steps), v -> set.accept(v * step));
     }
 

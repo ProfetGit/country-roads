@@ -488,7 +488,7 @@ public final class HousePaths {
             if (!c.bank && !c.rail) cols.add(key(c.x, c.z));
         }
         ROLLOUTS.add(new Rollout(level, stake, s.cells, new int[]{0}, chunks, new int[]{0}, cols, rocky(level, s.cells), s.bridges, new java.util.HashSet<>()));
-        note(player, PathNotice.BUILDING, s.cells.size());
+        note(player, PathNotice.BUILDING, s.length());
     }
 
     /** Sneak + right-click on a built path: it stays for good. */
