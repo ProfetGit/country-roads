@@ -18,7 +18,7 @@
 
 ![How to use](https://raw.githubusercontent.com/ProfetGit/country-roads/main/docs/desc/title-how-to-use.webp)
 
-Craft the **Surveyor's Stake** from paper over two sticks (it makes two). Place it by your door, or right-click a door or fence gate with it. The mod finds the way to the nearest road over real terrain and shows it in particles. Right-click again to build it. It costs nothing: the path is graded three blocks wide, bridges rivers with a medieval bridge and tunnels through rock when that is shorter. Place more stakes to show it where to go.
+Craft the **Surveyor's Stake** from paper over two sticks (it makes two). Place it by your door, or right-click a door or fence gate with it. The mod finds the way to the nearest road over real terrain and shows it in particles. Right-click again to build it. It costs nothing: the path is graded three blocks wide, bridges rivers with a medieval bridge and tunnels through rock when that is shorter. Place more stakes to show it where to go. A small card on the right of the screen shows what the path is doing and which buttons do what. To make a path between two points that joins no road, place a second stake where it should end, then sneak and right-click a stake.
 
 For 20 minutes you can take the path up again (left-click the door with the stake, or break the stake). After that it is part of the land, or sneak and right-click to keep it at once.
 

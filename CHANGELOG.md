@@ -1,5 +1,13 @@
 # Changelog
 
+## 1.0.0-beta.1
+
+First public beta. Roads between villages generated with the world, over valleys, rivers, ravines and through rock, with bridges, tunnels, signposts, lamp posts, fences, roadside props, wheat fields and village streets. The Surveyor's Stake builds a free path from your door to the nearest road, or between two points. Worldgen settings and a Mod Menu screen, roads on maps, a speed bonus and no monsters on roads (all optional). Works with Terralith, Tectonic, Biomes O' Plenty, Geophilic and the Dungeons and Taverns, Towns and Towers and Repurposed Structures villages. Old chunks nobody has lived in get their roads when they load.
+
+Known: villagers and traders do not use the roads yet.
+
+## Development log
+
 ## 0.1.67 (unreleased)
 
 - Two roads that run side by side to the same bridge now merge into one road instead of forking at the landing.
