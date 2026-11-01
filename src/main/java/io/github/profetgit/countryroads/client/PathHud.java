@@ -190,7 +190,7 @@ final class PathHud {
         }
         if (m.isUnbound()) return new Glyph(0, "-");
         for (int b = InputConstants.MOUSE_BUTTON_4; b <= InputConstants.MOUSE_BUTTON_8; b++) {
-            if (m.matches(InputConstants.Type.MOUSE.getOrCreate(b))) return new Glyph(4, "");
+            if (m.matches(InputConstants.Type.MOUSE.getOrCreate(b))) return new Glyph(0, "M" + (b + 1));
         }
         String t = m.getTranslatedKeyMessage().getString();
         t = t.replace("Left ", "").replace("Right ", "R ").replace("Control", "Ctrl").replace("Escape", "Esc");
@@ -207,11 +207,11 @@ final class PathHud {
         };
     }
 
-    private static final int MOUSE_W = 11, MOUSE_H = 14, GAP = 2;
+    private static final int MOUSE_W = 12, MOUSE_H = 14, GAP = 2;
 
     private static int glyphW(Font font, Glyph g) {
         if (g.mouse() > 0) return MOUSE_W;
-        return g == Glyph.PLUS ? font.width("+") : font.width(g.label()) + 7;
+        return g == Glyph.PLUS ? font.width("+") : font.width(g.label()) + 8;
     }
 
     private static int glyphsW(Font font, List<Glyph> gs) {
@@ -220,26 +220,36 @@ final class PathHud {
         return w - GAP;
     }
 
-    /** A mouse seen from above, 11 x 14 pixels, with the button the binding uses lit in apricot. */
-    private static void mouse(GuiGraphicsExtractor g, int x, int y, int lit, float alpha) {
-        int line = ARGB.color(alpha, CREAM), body = ARGB.color(alpha, 0x4A3A4E), on = ARGB.color(alpha, APRICOT);
-        g.fill(x + 1, y, x + MOUSE_W - 1, y + MOUSE_H, line);
-        g.fill(x, y + 1, x + MOUSE_W, y + MOUSE_H - 1, line);
-        g.fill(x + 1, y + 1, x + MOUSE_W - 1, y + MOUSE_H - 1, body);
-        g.fill(x + 1, y + 7, x + MOUSE_W - 1, y + 8, line);
-        g.fill(x + 5, y + 1, x + 6, y + 7, line);
-        if (lit == 1) g.fill(x + 1, y + 1, x + 5, y + 7, on);
-        else if (lit == 2) g.fill(x + 6, y + 1, x + 10, y + 7, on);
-        else if (lit == 3) g.fill(x + 4, y + 2, x + 7, y + 6, on);
-        else if (lit == 4) g.fill(x + 1, y + 8, x + 10, y + 13, on);
+    private static final net.minecraft.resources.Identifier MOUSE_LEFT = tex("mouse_left"), MOUSE_RIGHT = tex("mouse_right"),
+            MOUSE_WHEEL = tex("mouse_wheel"), KEYCAP = tex("keycap");
+
+    private static net.minecraft.resources.Identifier tex(String name) {
+        return net.minecraft.resources.Identifier.fromNamespaceAndPath("countryroads", "textures/gui/" + name + ".png");
     }
 
+    private static void sprite(GuiGraphicsExtractor g, net.minecraft.resources.Identifier t, int x, int y, int w, int h, float alpha) {
+        g.blit(net.minecraft.client.renderer.RenderPipelines.GUI_TEXTURED, t, x, y, 0, 0, w, h, 16, 16, 16, 16, ARGB.color(alpha, 0xFFFFFF));
+    }
+
+    /** The shipped 16 x 16 mouse (2 empty columns each side) with the bound button lit; 12 of its columns are drawn. */
+    private static void mouse(GuiGraphicsExtractor g, int x, int y, int button, float alpha) {
+        sprite(g, button == 1 ? MOUSE_LEFT : button == 2 ? MOUSE_RIGHT : MOUSE_WHEEL, x - 2, y - 1, 16, 16, alpha);
+    }
+
+    /** A key cap of any width: the 16 x 16 sprite with its 7 pixel corners kept and the middle stretched. */
     private static void keycap(GuiGraphicsExtractor g, Font font, int x, int y, String label, float alpha) {
-        int kw = font.width(label) + 7;
-        g.fill(x + 1, y, x + kw - 1, y + 10, ARGB.color(alpha, APRICOT));
-        g.fill(x, y + 1, x + kw, y + 9, ARGB.color(alpha, APRICOT));
-        g.fill(x + 1, y + 10, x + kw - 1, y + 11, ARGB.color(alpha, KEY_SHADE));
-        g.text(font, label, x + 3, y + 1, ARGB.color(alpha, PLUM), false);
+        int kw = font.width(label) + 8, h = 14, sl = 7, o = y - 1;
+        int[] sx = {0, sl, 16 - sl}, sw = {sl, 16 - 2 * sl, sl};
+        int[] dx = {x, x + sl, x + kw - sl}, dw = {sl, kw - 2 * sl, sl};
+        int[] sy = {0, sl, 16 - sl}, sh = {sl, 16 - 2 * sl, sl};
+        int[] dy = {o, o + sl, o + h - sl}, dh = {sl, h - 2 * sl, sl};
+        for (int j = 0; j < 3; j++) {
+            for (int i = 0; i < 3; i++) {
+                if (dw[i] <= 0 || dh[j] <= 0) continue;
+                g.blit(net.minecraft.client.renderer.RenderPipelines.GUI_TEXTURED, KEYCAP, dx[i], dy[j], sx[i], sy[j], dw[i], dh[j], sw[i], sh[j], 16, 16, ARGB.color(alpha, 0xFFFFFF));
+            }
+        }
+        g.text(font, label, x + 4, y + 1, ARGB.color(alpha, 0x1B1220), false);
     }
 
     /**
