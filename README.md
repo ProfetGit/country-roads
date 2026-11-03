@@ -7,6 +7,10 @@
 
 **A road to every door.** Country Roads gives your world roads that follow the land: through valleys, along rivers, over stone bridges and boardwalks, with signposts that say where they lead. They join villages as the world generates, and a Surveyor's Stake builds a path from your own front door. For Minecraft Java 26.3 on Fabric, Quilt, NeoForge and Forge.
 
+<p align="center">
+<img src="https://raw.githubusercontent.com/ProfetGit/country-roads/main/docs/clips/path-generation.webp" alt="A Surveyor's Stake path grows from a house door, bridges the lake and joins the main road" width="100%">
+</p>
+
 ![Features](https://raw.githubusercontent.com/ProfetGit/country-roads/main/docs/desc/title-features.webp)
 
 - **Roads between villages.** They follow the land: valleys first, hillside cuts instead of sheer walls, tunnels through rock when that is shorter, stone arch and timber bridges, boardwalks over shallow water. The look follows the biome.
