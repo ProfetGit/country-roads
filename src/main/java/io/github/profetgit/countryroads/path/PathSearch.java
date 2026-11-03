@@ -21,11 +21,10 @@ import java.util.concurrent.Semaphore;
 import java.util.concurrent.TimeUnit;
 import java.util.concurrent.TimeoutException;
 import java.util.concurrent.atomic.AtomicInteger;
-import net.fabricmc.fabric.api.attachment.v1.AttachmentTarget;
 import net.minecraft.core.BlockPos;
-import net.minecraft.core.Registry;
-import net.minecraft.core.registries.BuiltInRegistries;
+import net.minecraft.core.registries.Registries;
 import net.minecraft.resources.Identifier;
+import net.minecraft.resources.ResourceKey;
 import net.minecraft.server.level.ServerLevel;
 import net.minecraft.server.level.ServerPlayer;
 import net.minecraft.server.level.TicketType;
@@ -49,8 +48,7 @@ final class PathSearch implements RouteSolver.Host, Runnable {
     /** Coarse planning when more chunks than this on the line to the nearest road are not loaded; corridor half-widths in 8-block cells. */
     static final int COARSE_ABOVE = 6, CORRIDOR = 3, CORRIDOR_WIDE = 8, COARSE_ROUTES = 3;
     /** Keeps fetched chunks loaded while a survey runs; not saved with the world, expires if a survey forgets it. */
-    static final TicketType TICKET = Registry.register(BuiltInRegistries.TICKET_TYPE, Identifier.fromNamespaceAndPath(CountryRoads.ID, "survey"),
-        new TicketType(400L, TicketType.FLAG_LOADING));
+    static TicketType TICKET;
     /** Workers allowed to compute at once (a waiting worker gives its turn away). */
     private static final Semaphore COMPUTE = new Semaphore(Runtime.getRuntime().availableProcessors() >= 8 ? 2 : 1);
     private static final AtomicInteger IDS = new AtomicInteger();
@@ -58,7 +56,9 @@ final class PathSearch implements RouteSolver.Host, Runnable {
     static int held;
 
     /** Registers the ticket type (mod init, before the registries freeze). */
-    static void init() {
+    public static void register(CountryRoads.Registrar r) {
+        TICKET = r.add(Registries.TICKET_TYPE, ResourceKey.create(Registries.TICKET_TYPE, Identifier.fromNamespaceAndPath(CountryRoads.ID, "survey")),
+            new TicketType(400L, TicketType.FLAG_LOADING));
     }
 
     final ServerLevel level;
@@ -138,7 +138,7 @@ final class PathSearch implements RouteSolver.Host, Runnable {
                 if (c == null) continue;
                 loadedChunks.add(ChunkPos.pack(cx, cz));
                 loadedAtStart.add(ChunkPos.pack(cx, cz));
-                RoadColumns rc = ((AttachmentTarget) c).getAttached(RoadColumns.TYPE);
+                RoadColumns rc = RoadColumns.get(c);
                 if (rc == null || !rc.any()) continue;
                 goalChunks.add(ChunkPos.pack(cx, cz));
                 for (int lz = 0; lz < 16; lz++)

@@ -7,7 +7,6 @@ import java.util.Arrays;
 import java.util.List;
 import java.util.Map;
 import java.util.concurrent.ConcurrentHashMap;
-import net.fabricmc.fabric.api.attachment.v1.AttachmentTarget;
 import net.minecraft.core.BlockPos;
 import net.minecraft.tags.BlockTags;
 import net.minecraft.world.level.ChunkPos;
@@ -99,7 +98,7 @@ final class ColumnSnapshot {
 
     /** Reads one loaded chunk (server thread). About 1-2k block reads; nothing outside the chunk. */
     static Chunk capture(LevelChunk c, int minY) {
-        RoadColumns rc = ((AttachmentTarget) c).getAttached(RoadColumns.TYPE);
+        RoadColumns rc = RoadColumns.get(c);
         long[] road = rc == null || !rc.any() ? null : rc.bits().clone();
         int[] ground = new int[256];
         byte[] leaves = new byte[256];

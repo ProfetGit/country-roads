@@ -10,7 +10,6 @@ import net.minecraft.world.level.ChunkPos;
 import io.github.profetgit.countryroads.paint.PaintRules;
 import io.github.profetgit.countryroads.paint.RoadPainter;
 import io.github.profetgit.countryroads.world.RoadColumns;
-import net.fabricmc.fabric.api.attachment.v1.AttachmentTarget;
 import net.minecraft.server.level.WorldGenRegion;
 import net.minecraft.tags.BlockTags;
 import net.minecraft.world.level.WorldGenLevel;
@@ -177,7 +176,7 @@ public final class GenContext {
 
     private static boolean painted(WorldGenRegion region, int cx, int cz) {
         if (!region.hasChunk(cx, cz)) return false;
-        return ((AttachmentTarget) region.getChunk(cx, cz)).getAttached(RoadColumns.TYPE) != null;
+        return RoadColumns.get(region.getChunk(cx, cz)) != null;
     }
 
     /** The old ground under a road column (terrain as the painter will see it), cached per column. */

@@ -282,7 +282,14 @@ public final class DevCommands {
                         .executes(c -> {
                             var n = new io.github.profetgit.countryroads.path.PathNotice(IntegerArgumentType.getInteger(c, "code"), IntegerArgumentType.getInteger(c, "a"),
                                 IntegerArgumentType.getInteger(c, "b"), IntegerArgumentType.getInteger(c, "c"), com.mojang.brigadier.arguments.BoolArgumentType.getBool(c, "free"));
-                            for (var p : c.getSource().getServer().getPlayerList().getPlayers()) net.fabricmc.fabric.api.networking.v1.ServerPlayNetworking.send(p, n);
+                            int sent = 0, players = 0;
+                            for (var p : c.getSource().getServer().getPlayerList().getPlayers()) {
+                                players++;
+                                if (!io.github.profetgit.countryroads.path.PathNotice.CAN_SEND.test(p)) continue;
+                                io.github.profetgit.countryroads.path.PathNotice.SEND.accept(p, n);
+                                sent++;
+                            }
+                            CountryRoads.LOG.info("CR-NOTICE sent=" + sent + " players=" + players);
                             return 1;
                         })))))))
             .then(Commands.literal("nearroad")

@@ -92,8 +92,9 @@ public final class HousePaths {
     }
 
     /** Mod init: the survey's chunk ticket type is registered with the other types. */
-    public static void init() {
-        PathSearch.init();
+    /** The survey's chunk ticket type. */
+    public static void register(io.github.profetgit.countryroads.CountryRoads.Registrar r) {
+        PathSearch.register(r);
     }
 
     /** Survey chunk tickets held right now (all surveys). */

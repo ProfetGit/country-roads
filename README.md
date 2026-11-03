@@ -5,7 +5,7 @@
 <a href="https://ko-fi.com/profetgit"><img src="https://raw.githubusercontent.com/ProfetGit/assets/main/buttons/kofi.webp" alt="Ko-fi" width="23.96%"></a>
 </p>
 
-**A road to every door.** Country Roads gives your world roads that follow the land: through valleys, along rivers, over stone bridges and boardwalks, with signposts that say where they lead. They join villages as the world generates, and a Surveyor's Stake builds a path from your own front door. For Minecraft Java 26.3 on Fabric.
+**A road to every door.** Country Roads gives your world roads that follow the land: through valleys, along rivers, over stone bridges and boardwalks, with signposts that say where they lead. They join villages as the world generates, and a Surveyor's Stake builds a path from your own front door. For Minecraft Java 26.3 on Fabric, Quilt, NeoForge and Forge.
 
 ![Features](https://raw.githubusercontent.com/ProfetGit/country-roads/main/docs/desc/title-features.webp)
 
@@ -28,11 +28,11 @@ Open them in Mod Menu: walking and riding speed on roads, no monsters on roads, 
 
 ![Compatibility](https://raw.githubusercontent.com/ProfetGit/country-roads/main/docs/desc/title-compatibility.webp)
 
-Works with Terralith, Tectonic, Biomes O' Plenty, Geophilic, Dungeons and Taverns, Towns and Towers and Repurposed Structures: modded villages get roads too, and modded village streets are left as they are. Requires Fabric API. Mod Menu is optional, for the settings screen.
+Works with Terralith, Tectonic, Biomes O' Plenty, Geophilic, Dungeons and Taverns, Towns and Towers and Repurposed Structures: modded villages get roads too, and modded village streets are left as they are. On Fabric and Quilt it requires Fabric API, and Mod Menu is optional for the settings screen; on NeoForge and Forge the settings are under Mods.
 
 ![Installation](https://raw.githubusercontent.com/ProfetGit/country-roads/main/docs/desc/title-installation.webp)
 
-Put the jar in your `mods` folder, with Fabric API, for Minecraft 26.3 on Fabric. Install it on the server and on the clients.
+Put the jar for your loader in your `mods` folder, for Minecraft 26.3: the `-fabric` jar on Fabric and Quilt (with Fabric API), the `-neoforge` jar on NeoForge, the `-forge` jar on Forge. Install it on the server and on the clients.
 
 ![Good to know](https://raw.githubusercontent.com/ProfetGit/country-roads/main/docs/desc/title-good-to-know.webp)
 

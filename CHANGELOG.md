@@ -1,5 +1,10 @@
 # Changelog
 
+## 1.0.0-beta.2
+
+- Now on NeoForge and Forge as well as Fabric and Quilt (Quilt uses the Fabric jar). Same roads on every loader: a world generated with the same seed gets the same roads, bridges, signposts and house paths.
+- NeoForge and Forge need no extra library; Fabric and Quilt still need Fabric API.
+
 ## 1.0.0-beta.1
 
 First public beta. Roads between villages generated with the world, over valleys, rivers, ravines and through rock, with bridges, tunnels, signposts, lamp posts, fences, roadside props, wheat fields and village streets. The Surveyor's Stake builds a free path from your door to the nearest road, or between two points. Worldgen settings and a Mod Menu screen, roads on maps, a speed bonus and no monsters on roads (all optional). Works with Terralith, Tectonic, Biomes O' Plenty, Geophilic and the Dungeons and Taverns, Towns and Towers and Repurposed Structures villages. Old chunks nobody has lived in get their roads when they load.

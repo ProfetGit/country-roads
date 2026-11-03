@@ -1,13 +1,14 @@
 package io.github.profetgit.countryroads.path;
 
 import io.github.profetgit.countryroads.CountryRoads;
-import net.fabricmc.fabric.api.networking.v1.PayloadTypeRegistry;
-import net.fabricmc.fabric.api.networking.v1.ServerPlayNetworking;
 import net.minecraft.network.RegistryFriendlyByteBuf;
 import net.minecraft.network.codec.StreamCodec;
 import net.minecraft.network.protocol.common.custom.CustomPacketPayload;
 import net.minecraft.resources.Identifier;
 import net.minecraft.server.level.ServerPlayer;
+import java.util.function.BiConsumer;
+import java.util.function.Consumer;
+import java.util.function.Predicate;
 
 /**
  * Server to client: what the player's stake path is doing, as a code and up to three numbers. The client turns it into
@@ -38,9 +39,11 @@ public record PathNotice(int code, int a, int b, int c, boolean flag) implements
         return TYPE;
     }
 
-    public static void register() {
-        PayloadTypeRegistry.clientboundPlay().register(TYPE, CODEC);
-    }
+    /** Set by the loader entry: whether the player's client takes the notice, and sending it. */
+    public static Predicate<ServerPlayer> CAN_SEND = p -> false;
+    public static BiConsumer<ServerPlayer, PathNotice> SEND = (p, n) -> {};
+    /** Set by the client entry on loaders whose payload handler is registered in common code. */
+    public static Consumer<PathNotice> RECEIVE = n -> {};
 
     /** To the player (a test without one only logs it). Clients without the mod's HUD get nothing. */
     static void send(ServerPlayer player, int code, int a, int b, int c, boolean flag) {
@@ -49,7 +52,7 @@ public record PathNotice(int code, int a, int b, int c, boolean flag) implements
             return;
         }
         PathNotice n = new PathNotice(code, a, b, c, flag);
-        if (ServerPlayNetworking.canSend(player, TYPE)) ServerPlayNetworking.send(player, n);
+        if (CAN_SEND.test(player)) SEND.accept(player, n);
     }
 
     /** The code of a failed survey (PathSearch's translation-key-style reason), or -1. */

@@ -1,8 +1,8 @@
 plugins {
-    id("net.fabricmc.fabric-loom") version "1.18.2"
+    id("net.fabricmc.fabric-loom")
 }
 
-val mc = property("mc") as String
+val mc = stonecutter.current.version
 val modId = property("mod.id") as String
 
 version = "${property("mod.version")}+$mc-fabric"
@@ -64,6 +64,7 @@ tasks.processResources {
         "fabric_loader" to project.property("deps.fabric_loader"),
     )
     inputs.properties(props)
+    exclude("META-INF/neoforge.mods.toml", "META-INF/mods.toml", "countryroads.chunkdata.mixins.json")
     filesMatching("fabric.mod.json") { expand(props) }
 }
 

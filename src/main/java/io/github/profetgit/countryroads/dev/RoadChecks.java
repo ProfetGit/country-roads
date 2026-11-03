@@ -95,7 +95,7 @@ final class RoadChecks {
                 ChunkMask m = n.mask(cx, cz);
                 if (!m.any()) continue;
                 ChunkAccess chunk = level.getChunkSource().getChunk(cx, cz, ChunkStatus.FULL, true);
-                var saved = ((net.fabricmc.fabric.api.attachment.v1.AttachmentTarget) chunk).getAttached(io.github.profetgit.countryroads.world.RoadColumns.TYPE);
+                var saved = io.github.profetgit.countryroads.world.RoadColumns.get(chunk);
                 boolean hasRoad = false;
                 for (float v : m.in) hasRoad |= v >= 0;
                 if (saved != null && !saved.any() && hasRoad) {
@@ -507,7 +507,7 @@ final class RoadChecks {
                     ChunkMask mask = n.mask(cx, cz);
                     if (!mask.any()) continue;
                     var chunk = (net.minecraft.world.level.chunk.LevelChunk) level.getChunk(cx, cz);
-                    var cols = ((net.fabricmc.fabric.api.attachment.v1.AttachmentTarget) chunk).getAttached(io.github.profetgit.countryroads.world.RoadColumns.TYPE);
+                    var cols = io.github.profetgit.countryroads.world.RoadColumns.get(chunk);
                     var streets = n.streets(cx, cz);
                     for (int lz = 0; lz < 16; lz++)
                         for (int lx = 0; lx < 16; lx++) {

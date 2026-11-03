@@ -2,7 +2,7 @@
 # Client stills for compat configs: shoot.py with the config's jars on server and client.
 cd "$(dirname "$0")/../.."
 FAPI=$(ls ~/.local/share/ModrinthApp/profiles/"Fabric 26.3"/mods/fabric-api-*.jar | head -1)
-CR=$(ls -t build/libs/countryroads-*+26.3-fabric.jar | head -1)
+CR=$(ls -t versions/26.3-fabric/build/libs/countryroads-*+26.3-fabric.jar | head -1)
 J=dev/compat/jars
 shoot() { # name seed x z jars...
   local name=$1 seed=$2 x=$3 z=$4; shift 4

@@ -9,9 +9,9 @@
   "license": "LicenseRef-All-Rights-Reserved",
   "environment": "*",
   "entrypoints": {
-    "main": ["io.github.profetgit.countryroads.CountryRoads"],
-    "client": ["io.github.profetgit.countryroads.client.CountryRoadsClient"],
-    "modmenu": ["io.github.profetgit.countryroads.client.ModMenuEntry"]
+    "main": ["io.github.profetgit.countryroads.platform.fabric.FabricEntry"],
+    "client": ["io.github.profetgit.countryroads.platform.fabric.FabricClientEntry"],
+    "modmenu": ["io.github.profetgit.countryroads.platform.fabric.ModMenuEntry"]
   },
   "mixins": ["countryroads.mixins.json"],
   "depends": {

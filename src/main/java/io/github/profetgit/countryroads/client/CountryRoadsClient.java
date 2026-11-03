@@ -2,17 +2,31 @@ package io.github.profetgit.countryroads.client;
 
 import io.github.profetgit.countryroads.CountryRoads;
 import io.github.profetgit.countryroads.path.PathNotice;
-import net.fabricmc.api.ClientModInitializer;
-import net.fabricmc.fabric.api.client.networking.v1.ClientPlayNetworking;
-import net.fabricmc.fabric.api.client.rendering.v1.hud.HudElementRegistry;
-import net.fabricmc.fabric.api.client.rendering.v1.hud.VanillaHudElements;
-import net.minecraft.resources.Identifier;
+import net.minecraft.client.DeltaTracker;
+import net.minecraft.client.gui.GuiGraphicsExtractor;
 
-/** Client entry: the stake path card beside the crosshair. */
-public final class CountryRoadsClient implements ClientModInitializer {
-    @Override
-    public void onInitializeClient() {
-        ClientPlayNetworking.registerGlobalReceiver(PathNotice.TYPE, (notice, context) -> PathHud.receive(notice));
-        HudElementRegistry.attachElementAfter(VanillaHudElements.CROSSHAIR, Identifier.fromNamespaceAndPath(CountryRoads.ID, "path_card"), PathHud::draw);
+/** Client side, loader-neutral: the stake path card beside the crosshair (the platform client entry wires these). */
+public final class CountryRoadsClient {
+    /** Dev: log each notice received and the first HUD layer call after it ({@code -Dcountryroads.traceNotices=true}). */
+    private static final boolean TRACE = Boolean.getBoolean("countryroads.traceNotices");
+    private static volatile boolean traceDraw;
+
+    private CountryRoadsClient() {}
+
+    /** A notice from the server, on the client thread. */
+    public static void receive(PathNotice notice) {
+        if (TRACE) {
+            CountryRoads.LOG.info("CR-NOTICE-RECV code={} a={} thread={}", notice.code(), notice.a(), Thread.currentThread().getName());
+            traceDraw = true;
+        }
+        PathHud.receive(notice);
+    }
+
+    public static void drawHud(GuiGraphicsExtractor g, DeltaTracker delta) {
+        if (traceDraw) {
+            traceDraw = false;
+            CountryRoads.LOG.info("CR-HUD-LAYER drawn");
+        }
+        PathHud.draw(g, delta);
     }
 }

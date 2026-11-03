@@ -391,7 +391,15 @@ final class StakeTest {
                     }
                     {
                         int mud = 0, tracked = 0, blocked = 0, dropped = 0, normalOk = 0, normalBad = 0;
+                        //? if fabric {
                         var fake = net.fabricmc.fabric.api.entity.FakePlayer.get(level);
+                        //?} else if neoforge {
+                        /*var fake = net.neoforged.neoforge.common.util.FakePlayerFactory.getMinecraft(level);
+                        *///?} else {
+                        /*var fake = new net.minecraft.server.level.ServerPlayer(level.getServer(), level,
+                            new com.mojang.authlib.GameProfile(java.util.UUID.nameUUIDFromBytes("countryroads:test".getBytes()), "[CR test]"),
+                            net.minecraft.server.level.ClientInformation.createDefault());
+                        *///?}
                         var pb = io.github.profetgit.countryroads.path.PathBlocks.of(level);
                         for (var e : be.journal) {
                             var cur = level.getBlockState(e.pos());
@@ -403,7 +411,7 @@ final class StakeTest {
                             boolean free = cur.is(Blocks.DIRT) || cur.is(Blocks.DIRT_PATH) || cur.is(Blocks.COARSE_DIRT) || cur.is(Blocks.ROOTED_DIRT) || cur.is(Blocks.GRASS_BLOCK);
                             if (free) {
                                 if (normalOk + normalBad < 20) {
-                                    boolean okb = net.fabricmc.fabric.api.event.player.PlayerBlockBreakEvents.BEFORE.invoker().beforeBlockBreak(level, fake, e.pos(), cur, null);
+                                    boolean okb = io.github.profetgit.countryroads.path.PathBlocks.beforeBreak(level, fake, e.pos(), cur);
                                     if (okb && !level.getBlockState(e.pos()).isAir()) normalOk++; else normalBad++;
                                 }
                                 continue;
@@ -411,7 +419,7 @@ final class StakeTest {
                             if (cur.getBlock() instanceof net.minecraft.world.level.block.BushBlock || cur.is(Blocks.TALL_GRASS) || cur.is(Blocks.SHORT_GRASS) || cur.getCollisionShape(level, e.pos()).isEmpty() && cur.getFluidState().isEmpty() && !cur.is(Blocks.LANTERN) && !cur.is(Blocks.WALL_TORCH)) continue;
                             tracked++;
                             if (blocked + dropped >= 40) continue;
-                            boolean brk = net.fabricmc.fabric.api.event.player.PlayerBlockBreakEvents.BEFORE.invoker().beforeBlockBreak(level, fake, e.pos(), cur, null);
+                            boolean brk = io.github.profetgit.countryroads.path.PathBlocks.beforeBreak(level, fake, e.pos(), cur);
                             boolean items = !level.getEntitiesOfClass(net.minecraft.world.entity.item.ItemEntity.class, new net.minecraft.world.phys.AABB(e.pos()).inflate(2)).isEmpty();
                             if (!brk && level.getBlockState(e.pos()).isAir() && !items) blocked++;
                             else {

@@ -1,16 +1,29 @@
 package io.github.profetgit.countryroads.paint;
 
 import net.minecraft.core.Holder;
+import net.minecraft.core.registries.Registries;
+import net.minecraft.resources.Identifier;
+import net.minecraft.tags.TagKey;
 import net.minecraft.tags.BiomeTags;
 import net.minecraft.world.level.biome.Biome;
 import net.minecraft.world.level.biome.Biomes;
 import net.minecraft.world.level.block.Block;
 import net.minecraft.world.level.block.Blocks;
 import net.minecraft.world.level.block.state.BlockState;
-import net.fabricmc.fabric.api.tag.convention.v2.ConventionalBiomeTags;
 
 /** Road materials. Biome surface palettes come with the look pass; wood styles are chosen per 16 samples at plan time. */
 public final class Palette {
+    /** The shared {@code c:} biome tags (Fabric's convention tags; NeoForge and Forge fill the same ids). */
+    private static final class C {
+        static final TagKey<Biome> IS_BADLANDS = tag("is_badlands"), IS_SNOWY = tag("is_snowy"), IS_ICY = tag("is_icy"), IS_DESERT = tag("is_desert"),
+            IS_SANDY = tag("is_sandy"), IS_BEACH = tag("is_beach"), IS_SWAMP = tag("is_swamp"), IS_SAVANNA = tag("is_savanna"), IS_JUNGLE = tag("is_jungle"),
+            IS_TAIGA = tag("is_taiga"), IS_MOUNTAIN_PEAK = tag("is_mountain/peak"), IS_STONY_SHORES = tag("is_stony_shores"), IS_WINDSWEPT = tag("is_windswept");
+
+        private static TagKey<Biome> tag(String path) {
+            return TagKey.create(Registries.BIOME, Identifier.fromNamespaceAndPath("c", path));
+        }
+    }
+
     private Palette() {}
 
     public record Wood(Block planks, Block log, Block fence, Block slab, Block sign, Block wallSign, Block strippedLog, Block trapdoor, Block gate, Block hangingSign) {}
@@ -158,15 +171,15 @@ public final class Palette {
 
     /** Palette from biome tags (vanilla, then conventional c: tags), else from climate. */
     public static Surface surface(Holder<Biome> b) {
-        if (b.is(ConventionalBiomeTags.IS_BADLANDS) || b.is(BiomeTags.IS_BADLANDS)) return BADLANDS;
-        boolean cold = b.is(ConventionalBiomeTags.IS_SNOWY) || b.is(ConventionalBiomeTags.IS_ICY) || b.value().getBaseTemperature() < 0.15f;
-        if (!cold && (b.is(ConventionalBiomeTags.IS_DESERT) || b.is(ConventionalBiomeTags.IS_SANDY) || b.is(ConventionalBiomeTags.IS_BEACH))) return DESERT;
-        if (b.is(ConventionalBiomeTags.IS_SWAMP) || b.is(Biomes.MANGROVE_SWAMP)) return SWAMP;
-        if (b.is(ConventionalBiomeTags.IS_SAVANNA) || b.is(BiomeTags.IS_SAVANNA)) return SAVANNA;
-        if (b.is(ConventionalBiomeTags.IS_JUNGLE) || b.is(BiomeTags.IS_JUNGLE)) return JUNGLE;
-        if (b.is(ConventionalBiomeTags.IS_SNOWY) || b.is(ConventionalBiomeTags.IS_ICY) || b.value().getBaseTemperature() < 0.15f) return SNOWY;
-        if (b.is(ConventionalBiomeTags.IS_TAIGA) || b.is(BiomeTags.IS_TAIGA)) return TAIGA;
-        if (b.is(ConventionalBiomeTags.IS_MOUNTAIN_PEAK) || b.is(ConventionalBiomeTags.IS_STONY_SHORES) || b.is(ConventionalBiomeTags.IS_WINDSWEPT)) return STONY;
+        if (b.is(C.IS_BADLANDS) || b.is(BiomeTags.IS_BADLANDS)) return BADLANDS;
+        boolean cold = b.is(C.IS_SNOWY) || b.is(C.IS_ICY) || b.value().getBaseTemperature() < 0.15f;
+        if (!cold && (b.is(C.IS_DESERT) || b.is(C.IS_SANDY) || b.is(C.IS_BEACH))) return DESERT;
+        if (b.is(C.IS_SWAMP) || b.is(Biomes.MANGROVE_SWAMP)) return SWAMP;
+        if (b.is(C.IS_SAVANNA) || b.is(BiomeTags.IS_SAVANNA)) return SAVANNA;
+        if (b.is(C.IS_JUNGLE) || b.is(BiomeTags.IS_JUNGLE)) return JUNGLE;
+        if (b.is(C.IS_SNOWY) || b.is(C.IS_ICY) || b.value().getBaseTemperature() < 0.15f) return SNOWY;
+        if (b.is(C.IS_TAIGA) || b.is(BiomeTags.IS_TAIGA)) return TAIGA;
+        if (b.is(C.IS_MOUNTAIN_PEAK) || b.is(C.IS_STONY_SHORES) || b.is(C.IS_WINDSWEPT)) return STONY;
         float t = b.value().getBaseTemperature();
         if (!b.value().hasPrecipitation() && t > 1.0f) return t > 1.9f ? DESERT : SAVANNA;
         if (t < 0.3f) return TAIGA;
@@ -243,7 +256,7 @@ public final class Palette {
         Block[] set;
         // beaches share the desert road palette, but white sandstone steps on a temperate shore stand out: sandstone only
         // in real deserts
-        boolean desert = pal == DESERT && (biome.is(ConventionalBiomeTags.IS_DESERT) || biome.is(BiomeTags.IS_BADLANDS) || !biome.is(ConventionalBiomeTags.IS_BEACH));
+        boolean desert = pal == DESERT && (biome.is(C.IS_DESERT) || biome.is(BiomeTags.IS_BADLANDS) || !biome.is(C.IS_BEACH));
         if (desert) set = r < 600 ? SAND_SET : SMOOTH_SAND_SET;
         else if (pal == BADLANDS) set = r < 600 ? RED_SET : SMOOTH_RED_SET;
         else if (STEP.equals("mud") || STEP.equals("auto") && !rocky) set = MUD_SET;

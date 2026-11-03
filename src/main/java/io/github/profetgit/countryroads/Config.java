@@ -4,7 +4,6 @@ import com.google.gson.Gson;
 import com.google.gson.GsonBuilder;
 import java.nio.file.Files;
 import java.nio.file.Path;
-import net.fabricmc.loader.api.FabricLoader;
 import net.minecraft.server.MinecraftServer;
 import net.minecraft.world.level.storage.LevelResource;
 
@@ -71,7 +70,7 @@ public final class Config {
     }
 
     public static synchronized void load() {
-        file = FabricLoader.getInstance().getConfigDir().resolve(NAME);
+        file = CountryRoads.configDir.resolve(NAME);
         Config c = null;
         try {
             if (Files.isRegularFile(file)) c = GSON.fromJson(Files.readString(file), Config.class);

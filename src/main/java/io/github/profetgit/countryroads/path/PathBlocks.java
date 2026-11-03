@@ -8,7 +8,6 @@ import java.util.List;
 import java.util.Map;
 import java.util.UUID;
 import java.util.concurrent.ConcurrentHashMap;
-import net.fabricmc.fabric.api.event.player.PlayerBlockBreakEvents;
 import net.minecraft.core.BlockPos;
 import net.minecraft.core.registries.BuiltInRegistries;
 import net.minecraft.resources.Identifier;
@@ -84,22 +83,23 @@ public final class PathBlocks extends SavedData {
         return mine != null && level.getBlockState(pos).getBlock() == mine;
     }
 
-    public static void init() {
-        net.fabricmc.fabric.api.event.lifecycle.v1.ServerEntityEvents.ENTITY_LOAD.register((entity, world) -> {
-            if (entity instanceof net.minecraft.world.entity.item.ItemEntity && dropless(world, entity.blockPosition())) entity.discard();
-        });
-        PlayerBlockBreakEvents.BEFORE.register((world, player, pos, state, be) -> {
-            if (!(world instanceof ServerLevel level) || !(player instanceof ServerPlayer sp)) return true;
-            PathBlocks pb = of(level);
-            Block mine = pb.blocks.get(pos.asLong());
-            if (mine == null) return true;
-            pb.forget(pos);
-            if (mine != state.getBlock() || sp.getAbilities().instabuild) return true;
-            level.destroyBlock(pos, false, player);
-            long now = level.getGameTime();
-            Long last = NOTICED.put(sp.getUUID(), now);
-            if (last == null || now - last > NOTICE_GAP) PathNotice.send(sp, PathNotice.NODROP, 0, 0, 0, false);
-            return false;
-        });
+    /** An item entity entering the world that a tracked block dropped: the loader discards (or refuses) it. */
+    public static boolean droppedItem(net.minecraft.world.entity.Entity entity, ServerLevel world) {
+        return entity instanceof net.minecraft.world.entity.item.ItemEntity && dropless(world, entity.blockPosition());
+    }
+
+    /** A player is about to break a block: false cancels the break (a tracked block is removed here, without drops). */
+    public static boolean beforeBreak(net.minecraft.world.level.Level world, net.minecraft.world.entity.player.Player player, BlockPos pos, BlockState state) {
+        if (!(world instanceof ServerLevel level) || !(player instanceof ServerPlayer sp)) return true;
+        PathBlocks pb = of(level);
+        Block mine = pb.blocks.get(pos.asLong());
+        if (mine == null) return true;
+        pb.forget(pos);
+        if (mine != state.getBlock() || sp.getAbilities().instabuild) return true;
+        level.destroyBlock(pos, false, player);
+        long now = level.getGameTime();
+        Long last = NOTICED.put(sp.getUUID(), now);
+        if (last == null || now - last > NOTICE_GAP) PathNotice.send(sp, PathNotice.NODROP, 0, 0, 0, false);
+        return false;
     }
 }
