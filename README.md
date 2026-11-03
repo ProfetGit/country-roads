@@ -24,11 +24,11 @@ For 20 minutes you can take the path up again (left-click the door with the stak
 
 ![Settings](https://raw.githubusercontent.com/ProfetGit/country-roads/main/docs/desc/title-settings.webp)
 
-Open them in Mod Menu: walking and riding speed on roads, no monsters on roads, roads on maps, house paths and roads in old chunks, and for new worlds village streets, signposts and lamps, wayside camps, roadside finds and wheat fields. Gameplay settings apply at once. The world generation settings are copied into each world the first time it loads and stay fixed there.
+Open them in Mod Menu on Fabric and Quilt, or from the Mods list on NeoForge and Forge: walking and riding speed on roads, no monsters on roads, roads on maps, house paths and roads in old chunks, and for new worlds village streets, signposts and lamps, wayside camps, roadside finds and wheat fields. Gameplay settings apply at once. The world generation settings are copied into each world the first time it loads and stay fixed there.
 
 ![Compatibility](https://raw.githubusercontent.com/ProfetGit/country-roads/main/docs/desc/title-compatibility.webp)
 
-Works with Terralith, Tectonic, Biomes O' Plenty, Geophilic, Dungeons and Taverns, Towns and Towers and Repurposed Structures: modded villages get roads too, and modded village streets are left as they are. On Fabric and Quilt it requires Fabric API, and Mod Menu is optional for the settings screen; on NeoForge and Forge the settings are under Mods.
+Works with Terralith, Tectonic, Biomes O' Plenty, Geophilic, Dungeons and Taverns, Towns and Towers and Repurposed Structures: modded villages get roads too, and modded village streets are left as they are. On Fabric and Quilt it requires Fabric API; Mod Menu is optional there, for the settings screen.
 
 ![Installation](https://raw.githubusercontent.com/ProfetGit/country-roads/main/docs/desc/title-installation.webp)
 
