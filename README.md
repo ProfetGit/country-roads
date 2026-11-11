@@ -5,7 +5,7 @@
 <a href="https://ko-fi.com/profetgit"><img src="https://raw.githubusercontent.com/ProfetGit/assets/main/buttons/kofi.webp" alt="Ko-fi" width="23.96%"></a>
 </p>
 
-**A road to every door.** Country Roads gives your world roads that follow the land: through valleys, along rivers, over stone bridges and boardwalks, with signposts that say where they lead. They join villages as the world generates, and a Surveyor's Stake builds a path from your own front door. For Minecraft Java 26.3 on Fabric, Quilt, NeoForge and Forge.
+**A road to every door.** Country Roads gives your world roads that follow the land: through valleys, along rivers, over stone bridges and boardwalks, with signposts that say where they lead. They join villages as the world generates, and a Surveyor's Stake builds a path from your own front door. For Minecraft Java 26.3, 26.2, 1.21.1 and 1.20.1 on Fabric, Quilt, NeoForge and Forge.
 
 <p align="center">
 <img src="https://raw.githubusercontent.com/ProfetGit/country-roads/main/docs/clips/path-generation.webp" alt="A Surveyor's Stake path grows from a house door, bridges the lake and joins the main road" width="100%">
@@ -36,7 +36,7 @@ Works with Terralith, Tectonic, Biomes O' Plenty, Geophilic, Dungeons and Tavern
 
 ![Installation](https://raw.githubusercontent.com/ProfetGit/country-roads/main/docs/desc/title-installation.webp)
 
-Put the jar for your loader in your `mods` folder, for Minecraft 26.3: the `-fabric` jar on Fabric and Quilt (with Fabric API), the `-neoforge` jar on NeoForge, the `-forge` jar on Forge. Install it on the server and on the clients.
+Put the jar for your loader in your `mods` folder, for your Minecraft version (26.3, 26.2, 1.21.1 or 1.20.1): the `-fabric` jar on Fabric and Quilt (with Fabric API), the `-neoforge` jar on NeoForge, the `-forge` jar on Forge. On 1.20.1 NeoForge uses the `-forge` jar. The same seed gives the same roads on 26.3, 26.2 and 1.21.1; 1.20.1 has its own terrain. The cushion benches are 26.3 only, and 1.21.1 and 1.20.1 swap some newer roadside plants for older ones. Install it on the server and on the clients.
 
 ![Good to know](https://raw.githubusercontent.com/ProfetGit/country-roads/main/docs/desc/title-good-to-know.webp)
 

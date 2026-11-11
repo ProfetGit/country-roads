@@ -27,10 +27,11 @@ USER = "ModTester"
 def main() -> int:
     ap = argparse.ArgumentParser()
     ap.add_argument("--loader", default="fabric", choices=ms.ALL_LOADERS)
+    ap.add_argument("--mc", default=wg.MC)
     ap.add_argument("--port", type=int, default=25651)
     ap.add_argument("--seed", default="12345")
     a = ap.parse_args()
-    work = HERE / ".work" / f"join-{a.loader}"
+    work = HERE / ".work" / f"join-{a.mc}-{a.loader}"
     shutil.rmtree(work, ignore_errors=True)
     (work / "server/mods").mkdir(parents=True)
     srv = work / "server"
@@ -39,14 +40,14 @@ def main() -> int:
         f"online-mode=false\nserver-ip=127.0.0.1\nserver-port={a.port}\nlevel-seed={a.seed}\nview-distance=4\n"
         "simulation-distance=4\nspawn-protection=0\ndifficulty=peaceful\nmax-tick-time=-1\npause-when-empty-seconds=-1\n"
         "enforce-secure-profile=false\nwhite-list=false\n")
-    jar = wg.mod_jar(a.loader)
+    jar = wg.mod_jar(a.loader, a.mc)
     fabric = a.loader in ("fabric", "quilt")
-    for j in [jar, *([ms.fabric_api(wg.MC)] if fabric else [])]:
+    for j in [jar, *([ms.fabric_api(a.mc)] if fabric else [])]:
         shutil.copy(j, srv / "mods")
     log = srv / "server.log"
     res = {}
     with slots.slot("server", f"countryroads join {a.loader}"), open(log, "w") as out:
-        proc = subprocess.Popen(ms.command(wg.MC, a.loader, srv), cwd=srv, stdin=subprocess.PIPE, stdout=out, stderr=subprocess.STDOUT, text=True)
+        proc = subprocess.Popen(ms.command(a.mc, a.loader, srv), cwd=srv, stdin=subprocess.PIPE, stdout=out, stderr=subprocess.STDOUT, text=True)
         try:
             if not ms.wait_for(log, proc, r"Done \(\d", ms.BOOT_TIMEOUT):
                 print("FAIL server did not start")
@@ -54,7 +55,7 @@ def main() -> int:
 
             def run_client():
                 with slots.slot("client", f"countryroads join {a.loader}"):
-                    res.update(client.run(mc=wg.MC, loader=a.loader, out=work / "out", game=work / "game", mod_jars=[jar],
+                    res.update(client.run(mc=a.mc, loader=a.loader, out=work / "out", game=work / "game", mod_jars=[jar],
                                           fabric_api_jar=fabric, join=f"127.0.0.1:{a.port}", user=USER, timeout=240,
                                           props={"countryroads.traceNotices": "true"}))
 
