@@ -478,7 +478,12 @@ public final class RoadPainter {
 
     private static SignText text(String a, String b, String c, String d) {
         List<Component> lines = List.of(Component.literal(a), Component.literal(b), Component.literal(c), Component.literal(d));
+        //? if >=26.3 {
         return new SignText(lines, lines, DyeColor.BLACK, false);
+        //?} else {
+        /*Component[] arr = lines.toArray(new Component[0]);
+        return new SignText(arr, arr, DyeColor.BLACK, false);
+        *///?}
     }
 
     private BlockState get(int x, int y, int z) {

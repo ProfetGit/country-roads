@@ -44,7 +44,14 @@ public final class NeoForgeEntry {
         modBus.addListener(NeoForgeEntry::register);
         modBus.addListener(NeoForgeEntry::tabs);
         modBus.addListener(RegisterPayloadHandlersEvent.class, NeoForgeEntry::payloads);
-        PathNotice.CAN_SEND = p -> p.connection != null && p.connection.hasChannel(PathNotice.TYPE);
+        PathNotice.CAN_SEND = p -> {
+            if (p.connection == null) return false;
+            try {
+                return p.connection.hasChannel(PathNotice.TYPE);
+            } catch (NullPointerException e) {
+                return false; // a fake player's connection has no netty channel
+            }
+        };
         PathNotice.SEND = PacketDistributor::sendToPlayer;
 
         var bus = NeoForge.EVENT_BUS;

@@ -497,11 +497,6 @@ final class RoadChecks {
         DevCommands.queue(() -> {
             long planned = 0, saved = 0, mismatch = 0, tested = 0, blocked = 0, offTested = 0, offAllowed = 0;
             try {
-                var m = net.minecraft.world.level.NaturalSpawner.class.getDeclaredMethod("isValidSpawnPostitionForType", ServerLevel.class,
-                    net.minecraft.world.entity.MobCategory.class, net.minecraft.world.level.StructureManager.class,
-                    net.minecraft.world.level.chunk.ChunkGenerator.class, net.minecraft.world.level.biome.MobSpawnSettings.SpawnerData.class,
-                    BlockPos.MutableBlockPos.class, double.class);
-                m.setAccessible(true);
                 for (int k = 0; k < a[2] * a[2]; k++) {
                     int cx = a[0] + k % a[2], cz = a[1] + k / a[2];
                     ChunkMask mask = n.mask(cx, cz);
@@ -521,21 +516,25 @@ final class RoadChecks {
                             if (plan != have && !(street && have)) mismatch++;
                             int x = (cx << 4) + lx, z = (cz << 4) + lz;
                             int y = level.getHeight(net.minecraft.world.level.levelgen.Heightmap.Types.MOTION_BLOCKING_NO_LEAVES, x, z);
+                            //? if >=26.3 {
                             var mobs = level.getChunkSource().getGenerator().getMobsAt(level, level.structureManager(), net.minecraft.world.entity.MobCategory.MONSTER, new BlockPos(x, y, z)).unwrap();
+                            //?} else {
+                            /*var mobs = level.getChunkSource().getGenerator().getMobsAt(level.getBiome(new BlockPos(x, y, z)), level.structureManager(), net.minecraft.world.entity.MobCategory.MONSTER, new BlockPos(x, y, z)).unwrap();
+                            *///?}
                             var zombie = mobs.stream().map(w -> w.value()).filter(d -> d.type() == net.minecraft.world.entity.EntityTypes.ZOMBIE).findFirst().orElse(null);
                             if (zombie == null) continue;
                             if (have && cols.open(lx, lz) && (x + z) % 7 == 0) {
                                 tested++;
-                                if (!(boolean) m.invoke(null, level, net.minecraft.world.entity.MobCategory.MONSTER, level.structureManager(),
+                                if (!io.github.profetgit.countryroads.mixin.NaturalSpawnerInvoker.countryroads$valid(level, net.minecraft.world.entity.MobCategory.MONSTER, level.structureManager(),
                                     level.getChunkSource().getGenerator(), zombie, new BlockPos.MutableBlockPos(x, y, z), 600.0)) blocked++;
                             } else if (!have && mask.in[c] < -3 && (x + z) % 7 == 0 && offTested < 400) {
                                 offTested++;
-                                if ((boolean) m.invoke(null, level, net.minecraft.world.entity.MobCategory.MONSTER, level.structureManager(),
+                                if (io.github.profetgit.countryroads.mixin.NaturalSpawnerInvoker.countryroads$valid(level, net.minecraft.world.entity.MobCategory.MONSTER, level.structureManager(),
                                     level.getChunkSource().getGenerator(), zombie, new BlockPos.MutableBlockPos(x, y, z), 600.0)) offAllowed++;
                             }
                         }
                 }
-            } catch (ReflectiveOperationException e) {
+            } catch (RuntimeException e) {
                 report(src, "CR-PERKS FAIL " + e);
                 return true;
             }

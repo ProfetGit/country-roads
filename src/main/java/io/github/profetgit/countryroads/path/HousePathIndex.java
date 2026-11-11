@@ -1,18 +1,13 @@
 package io.github.profetgit.countryroads.path;
 
 import com.mojang.serialization.Codec;
-import io.github.profetgit.countryroads.CountryRoads;
+import io.github.profetgit.countryroads.world.SavedDataCompat;
 import it.unimi.dsi.fastutil.longs.LongArrayList;
 import it.unimi.dsi.fastutil.longs.LongOpenHashSet;
-import java.util.Map;
-import java.util.concurrent.ConcurrentHashMap;
 import java.util.stream.LongStream;
-import net.minecraft.resources.Identifier;
 import net.minecraft.server.level.ServerLevel;
-import net.minecraft.util.datafix.DataFixTypes;
 import net.minecraft.world.level.ChunkPos;
 import net.minecraft.world.level.saveddata.SavedData;
-import net.minecraft.world.level.saveddata.SavedDataType;
 
 /**
  * Every column a built house path took, per dimension: a survey knows where the paths are (they count as roads to
@@ -20,8 +15,6 @@ import net.minecraft.world.level.saveddata.SavedDataType;
  */
 public final class HousePathIndex extends SavedData {
     public static final Codec<HousePathIndex> CODEC = Codec.LONG_STREAM.xmap(s -> new HousePathIndex(s.toArray()), h -> LongStream.of(h.columns.toLongArray()));
-    /** One type per dimension, cached: the storage keys by the type record. */
-    private static final Map<String, SavedDataType<HousePathIndex>> TYPES = new ConcurrentHashMap<>();
 
     private final LongOpenHashSet columns;
 
@@ -33,15 +26,16 @@ public final class HousePathIndex extends SavedData {
         this.columns = new LongOpenHashSet(cols);
     }
 
-    private static SavedDataType<HousePathIndex> type(ServerLevel level) {
-        String dim = level.dimension().identifier().toString().replace(':', '_').replace('/', '_');
-        return TYPES.computeIfAbsent(dim, d -> new SavedDataType<>(Identifier.fromNamespaceAndPath(CountryRoads.ID, "house_paths_" + d), HousePathIndex::new, CODEC,
-            DataFixTypes.SAVED_DATA_COMMAND_STORAGE));
+    public static HousePathIndex of(ServerLevel level) {
+        return SavedDataCompat.of(level, "house_paths_", CODEC, HousePathIndex::new);
     }
 
-    public static HousePathIndex of(ServerLevel level) {
-        return level.getDataStorage().computeIfAbsent(type(level));
+    //? if <26.1 {
+    /*@Override
+    public net.minecraft.nbt.CompoundTag save(net.minecraft.nbt.CompoundTag tag, net.minecraft.core.HolderLookup.Provider provider) {
+        return SavedDataCompat.save(CODEC, this, tag, provider);
     }
+    *///?}
 
     public void set(int x, int z, boolean path) {
         if (path ? columns.add(ChunkPos.pack(x, z)) : columns.remove(ChunkPos.pack(x, z))) setDirty();

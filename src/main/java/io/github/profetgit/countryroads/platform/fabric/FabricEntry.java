@@ -9,11 +9,15 @@ import io.github.profetgit.countryroads.path.Stake;
 import io.github.profetgit.countryroads.retro.Retrofit;
 import io.github.profetgit.countryroads.world.RoadColumns;
 import net.fabricmc.api.ModInitializer;
+//? if >=1.21 {
 import net.fabricmc.fabric.api.attachment.v1.AttachmentRegistry;
 import net.fabricmc.fabric.api.attachment.v1.AttachmentTarget;
 import net.fabricmc.fabric.api.attachment.v1.AttachmentType;
+//?}
 import net.fabricmc.fabric.api.command.v2.CommandRegistrationCallback;
+//? if >=26.1 {
 import net.fabricmc.fabric.api.creativetab.v1.CreativeModeTabEvents;
+//?}
 import net.fabricmc.fabric.api.event.lifecycle.v1.ServerChunkEvents;
 import net.fabricmc.fabric.api.event.lifecycle.v1.ServerEntityEvents;
 import net.fabricmc.fabric.api.event.lifecycle.v1.ServerLifecycleEvents;
@@ -21,7 +25,9 @@ import net.fabricmc.fabric.api.event.lifecycle.v1.ServerTickEvents;
 import net.fabricmc.fabric.api.event.player.AttackBlockCallback;
 import net.fabricmc.fabric.api.event.player.PlayerBlockBreakEvents;
 import net.fabricmc.fabric.api.event.player.UseBlockCallback;
+//? if >=1.21 {
 import net.fabricmc.fabric.api.networking.v1.PayloadTypeRegistry;
+//?}
 import net.fabricmc.fabric.api.networking.v1.ServerPlayNetworking;
 import net.fabricmc.loader.api.FabricLoader;
 import net.minecraft.core.Registry;
@@ -32,13 +38,16 @@ import net.minecraft.resources.ResourceKey;
 import net.minecraft.world.level.chunk.ChunkAccess;
 
 public final class FabricEntry implements ModInitializer {
-    /** Road columns saved with the chunk; the id and codec are what 1.0.0-beta.1 worlds hold. */
+    //? if >=1.21 {
+    // Road columns saved with the chunk; the id and codec are what 1.0.0-beta.1 worlds hold.
     static final AttachmentType<RoadColumns> ROAD_COLUMNS = AttachmentRegistry.create(
         Identifier.fromNamespaceAndPath(CountryRoads.ID, "road_columns"), b -> b.persistent(RoadColumns.CODEC));
+    //?}
 
     @Override
     @SuppressWarnings({"unchecked", "rawtypes"})
     public void onInitialize() {
+        //? if >=1.21 {
         RoadColumns.store = new RoadColumns.Store() {
             @Override
             public RoadColumns get(ChunkAccess chunk) {
@@ -50,6 +59,9 @@ public final class FabricEntry implements ModInitializer {
                 ((AttachmentTarget) chunk).setAttached(ROAD_COLUMNS, cols);
             }
         };
+        //?} else {
+        /*RoadColumns.store = new io.github.profetgit.countryroads.world.MixinStore();
+        *///?}
         CountryRoads.init("fabric", FabricLoader.getInstance().getConfigDir());
         CountryRoads.register(new CountryRoads.Registrar() {
             @Override
@@ -58,11 +70,25 @@ public final class FabricEntry implements ModInitializer {
                 return Registry.register(target, key, value);
             }
         });
+        //? if >=1.21 {
         PayloadTypeRegistry.clientboundPlay().register(PathNotice.TYPE, PathNotice.CODEC);
-        PathNotice.CAN_SEND = p -> ServerPlayNetworking.canSend(p, PathNotice.TYPE);
+        PathNotice.CAN_SEND = p -> p.connection != null && ServerPlayNetworking.canSend(p, PathNotice.TYPE);
         PathNotice.SEND = ServerPlayNetworking::send;
+        //?} else {
+        /*PathNotice.CAN_SEND = p -> p.connection != null && ServerPlayNetworking.canSend(p, PathNotice.ID);
+        PathNotice.SEND = (p, n) -> {
+            net.minecraft.network.FriendlyByteBuf buf = net.fabricmc.fabric.api.networking.v1.PacketByteBufs.create();
+            n.write(buf);
+            ServerPlayNetworking.send(p, PathNotice.ID, buf);
+        };
+        *///?}
+        //? if >=26.1 {
         CreativeModeTabEvents.modifyOutputEvent(ResourceKey.create(Registries.CREATIVE_MODE_TAB, Identifier.withDefaultNamespace("tools_and_utilities")))
             .register(out -> out.accept(Stake.ITEM));
+        //?} else {
+        /*net.fabricmc.fabric.api.itemgroup.v1.ItemGroupEvents.modifyEntriesEvent(net.minecraft.world.item.CreativeModeTabs.TOOLS_AND_UTILITIES)
+            .register(out -> out.accept(Stake.ITEM));
+        *///?}
 
         ServerLifecycleEvents.SERVER_STARTING.register(CountryRoads::serverStarting);
         CommandRegistrationCallback.EVENT.register((dispatcher, context, selection) -> CountryRoads.commands(dispatcher));

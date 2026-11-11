@@ -46,8 +46,19 @@ public final class StakeBlock extends Block implements EntityBlock {
         if (level instanceof ServerLevel server && by instanceof ServerPlayer player) HousePaths.placed(server, pos, player);
     }
 
+    //? if >=1.21 {
     @Override
     protected InteractionResult useWithoutItem(BlockState state, Level level, BlockPos pos, Player player, BlockHitResult hit) {
+        return useStake(level, pos, player);
+    }
+    //?} else {
+    /*@Override
+    public InteractionResult use(BlockState state, Level level, BlockPos pos, Player player, net.minecraft.world.InteractionHand hand, BlockHitResult hit) {
+        return useStake(level, pos, player);
+    }
+    *///?}
+
+    private static InteractionResult useStake(Level level, BlockPos pos, Player player) {
         if (level instanceof ServerLevel server && player instanceof ServerPlayer sp) {
             PathData d = HousePaths.data(server, pos);
             if (sp.isShiftKeyDown() && d != null && d.status == PathData.BUILT) HousePaths.keep(server, pos, sp);
@@ -57,9 +68,17 @@ public final class StakeBlock extends Block implements EntityBlock {
         return InteractionResult.SUCCESS;
     }
 
+    //? if >=1.21 {
     @Override
     public BlockState playerWillDestroy(Level level, BlockPos pos, BlockState state, Player player) {
         if (level instanceof ServerLevel server) HousePaths.takeUp(server, pos);
         return super.playerWillDestroy(level, pos, state, player);
     }
+    //?} else {
+    /*@Override
+    public void playerWillDestroy(Level level, BlockPos pos, BlockState state, Player player) {
+        if (level instanceof ServerLevel server) HousePaths.takeUp(server, pos);
+        super.playerWillDestroy(level, pos, state, player);
+    }
+    *///?}
 }

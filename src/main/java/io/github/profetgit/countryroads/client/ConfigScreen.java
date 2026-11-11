@@ -16,12 +16,35 @@ public final class ConfigScreen extends OptionsSubScreen {
         super(parent, Minecraft.getInstance().options, Component.translatable("countryroads.config.title"));
     }
 
+    //? if <1.21 {
+    /*private net.minecraft.client.gui.components.OptionsList list;
+
+    @Override
+    protected void init() {
+        list = new net.minecraft.client.gui.components.OptionsList(minecraft, width, height, 32, height - 32, 25);
+        addOptions();
+        addWidget(list);
+        addRenderableWidget(net.minecraft.client.gui.components.Button.builder(net.minecraft.network.chat.CommonComponents.GUI_DONE, b -> onClose())
+            .bounds(width / 2 - 100, height - 27, 200, 20).build());
+    }
+
+    @Override
+    public void render(net.minecraft.client.gui.GuiGraphics g, int mouseX, int mouseY, float partial) {
+        basicListRender(g, list, mouseX, mouseY, partial);
+    }
+    *///?}
+
+    private void small(OptionInstance<?>... options) {
+        list.addSmall(options);
+    }
+
+    //? if >=1.21
     @Override
     protected void addOptions() {
         Config c = Config.get();
         Config.Gen g = c.newWorlds;
         list.addHeader(Component.translatable("countryroads.config.header.gameplay"));
-        list.addSmall(
+        small(
             percent("player_speed", 5, 10, c.playerSpeed, v -> c.playerSpeed = v),
             percent("mount_speed", 5, 10, c.mountSpeed, v -> c.mountSpeed = v),
             bool("no_monsters", c.noMonstersOnRoads, v -> c.noMonstersOnRoads = v),
@@ -29,7 +52,7 @@ public final class ConfigScreen extends OptionsSubScreen {
             bool("house_paths", c.housePaths, v -> c.housePaths = v),
             bool("old_chunks", c.roadsInOldChunks, v -> c.roadsInOldChunks = v));
         list.addHeader(Component.translatable("countryroads.config.header.new_worlds"));
-        list.addSmall(
+        small(
             bool("streets", g.villageStreets, v -> g.villageStreets = v),
             bool("signposts", g.signposts, v -> g.signposts = v),
             bool("camps", g.waysideCamps, v -> g.waysideCamps = v),

@@ -21,3 +21,6 @@ dev/icon/banner_frames/
 dev/icon/test/
 dev/icon/seam/
 dev/icon/out/
+forge-*/build/
+forge-*/run/
+forge-*/.gradle/

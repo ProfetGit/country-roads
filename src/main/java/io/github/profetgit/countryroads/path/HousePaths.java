@@ -120,6 +120,22 @@ public final class HousePaths {
     private static final Map<BlockPos, Due> DEBOUNCE = new HashMap<>();
     static final int DEBOUNCE_TICKS = 20;
     /** Dust colours of the legs of a path with waypoints (door to the first stake, then on). */
+    private static DustParticleOptions dust(int rgb, float scale) {
+        //? if >=26.1 {
+        return new DustParticleOptions(rgb, scale);
+        //?} else {
+        /*return new DustParticleOptions(net.minecraft.world.phys.Vec3.fromRGB24(rgb).toVector3f(), scale);
+        *///?}
+    }
+
+    private static void preview(ServerLevel level, ServerPlayer player, DustParticleOptions o, double x, double y, double z, int n, double dx, double dy, double dz, double speed) {
+        //? if >=26.1 {
+        level.sendParticles(player, o, true, false, x, y, z, n, dx, dy, dz, speed);
+        //?} else {
+        /*level.sendParticles(player, o, true, x, y, z, n, dx, dy, dz, speed);
+        *///?}
+    }
+
     static final int[] LEG_COLORS = {0xF5D76E, 0x4FC3F7, 0x81C784, 0xBA68C8, 0xFFB74D, 0xE57373};
 
     /** The leg of every cell: how many waypoints the route has passed (the cell on a waypoint ends its leg). */
@@ -669,12 +685,12 @@ public final class HousePaths {
                     // waypoint n shows n dots above its stake, in the colour of the leg that ends there
                     for (int wi = 0; wi < pbe.waypoints.size(); wi++) {
                         BlockPos w = pbe.waypoints.get(wi);
-                        DustParticleOptions mark = new DustParticleOptions(LEG_COLORS[wi % LEG_COLORS.length], 1.6f);
-                        for (int dot = 0; dot <= wi; dot++) p.level.sendParticles(p.player, mark, true, false, w.getX() + 0.5, w.getY() + 1.3 + dot * 0.45, w.getZ() + 0.5, 1, 0.03, 0.03, 0.03, 0);
+                        DustParticleOptions mark = dust(LEG_COLORS[wi % LEG_COLORS.length], 1.6f);
+                        for (int dot = 0; dot <= wi; dot++) preview(p.level, p.player, mark, w.getX() + 0.5, w.getY() + 1.3 + dot * 0.45, w.getZ() + 0.5, 1, 0.03, 0.03, 0.03, 0);
                     }
                 }
                 DustParticleOptions[] legDust = new DustParticleOptions[LEG_COLORS.length];
-                for (int li = 0; li < legDust.length; li++) legDust[li] = new DustParticleOptions(LEG_COLORS[li], 1.1f);
+                for (int li = 0; li < legDust.length; li++) legDust[li] = dust(LEG_COLORS[li], 1.1f);
                 double px = p.player.getX(), pz = p.player.getZ();
                 for (int ci = 0; ci < p.cells.size(); ci++) {
                     Cell c = p.cells.get(ci);
@@ -683,7 +699,7 @@ public final class HousePaths {
                     double dx = c.x + 0.5 - px, dz = c.z + 0.5 - pz;
                     if (dx * dx + dz * dz > PREVIEW_REACH * PREVIEW_REACH) continue;
                     DustParticleOptions dust = legDust[p.legs[ci] % legDust.length];
-                    p.level.sendParticles(p.player, dust, true, false, c.x + 0.5, c.y + 1.15 + c.arch / 2.0, c.z + 0.5, 1, 0.15, 0.02, 0.15, 0);
+                    preview(p.level, p.player, dust, c.x + 0.5, c.y + 1.15 + c.arch / 2.0, c.z + 0.5, 1, 0.15, 0.02, 0.15, 0);
                 }
             }
         }
@@ -712,7 +728,7 @@ public final class HousePaths {
      */
     private static boolean roll(Rollout r) {
         if (r.age[0]++ % PathSearch.TICKET_EVERY == 0)
-            for (long ch : r.chunks) r.level.getChunkSource().addTicketWithRadius(net.minecraft.server.level.TicketType.PORTAL, new ChunkPos(ChunkPos.getX(ch), ChunkPos.getZ(ch)), 0);
+            for (long ch : r.chunks) io.github.profetgit.countryroads.world.TicketCompat.keepLoaded(r.level, new ChunkPos(ChunkPos.getX(ch), ChunkPos.getZ(ch)));
         if (!r.level.hasChunkAt(r.stake)) return false;
         PathData be = data(r.level, r.stake);
         if (be == null) return true;
@@ -1023,7 +1039,11 @@ public final class HousePaths {
         BridgeKit.Bridge br = new BridgeKit.Bridge(x, z, dir, 1, top + 1);
         BlockPos at = BridgeKit.world(br, BridgeKit.MID + 2, 0, 2);
         BlockPos ground = new BlockPos(at.getX(), level.getHeight(Heightmap.Types.MOTION_BLOCKING_NO_LEAVES, at.getX(), at.getZ()), at.getZ());
+        //? if >=26.3 {
         var feature = level.registryAccess().lookupOrThrow(net.minecraft.core.registries.Registries.FEATURE)
+        //?} else {
+        /*var feature = level.registryAccess().lookupOrThrow(net.minecraft.core.registries.Registries.CONFIGURED_FEATURE)
+        *///?}
             .getOrThrow(net.minecraft.data.worldgen.features.TreeFeatures.BIRCH);
         boolean planted = feature.value().place(level, level.getChunkSource().getGenerator(), level.getRandom(), ground);
         java.util.Map<BlockPos, BlockState> before = new java.util.HashMap<>();

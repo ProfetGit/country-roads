@@ -1,9 +1,13 @@
 package io.github.profetgit.countryroads.path;
 
 import io.github.profetgit.countryroads.CountryRoads;
+//? if >=1.21 {
 import net.minecraft.network.RegistryFriendlyByteBuf;
 import net.minecraft.network.codec.StreamCodec;
 import net.minecraft.network.protocol.common.custom.CustomPacketPayload;
+//?} else {
+/*import net.minecraft.network.FriendlyByteBuf;
+*///?}
 import net.minecraft.resources.Identifier;
 import net.minecraft.server.level.ServerPlayer;
 import java.util.function.BiConsumer;
@@ -14,8 +18,14 @@ import java.util.function.Predicate;
  * Server to client: what the player's stake path is doing, as a code and up to three numbers. The client turns it into
  * a short card beside the crosshair (client/PathHud); no sentence ever travels or goes to the chat.
  */
+//? if >=1.21 {
 public record PathNotice(int code, int a, int b, int c, boolean flag) implements CustomPacketPayload {
     public static final Type<PathNotice> TYPE = new Type<>(Identifier.fromNamespaceAndPath(CountryRoads.ID, "path_notice"));
+//?} else {
+/*public record PathNotice(int code, int a, int b, int c, boolean flag) {
+    // 1.20.1 has no payload types: a plain channel id and a FriendlyByteBuf codec
+    public static final Identifier ID = Identifier.fromNamespaceAndPath(CountryRoads.ID, "path_notice");
+*///?}
 
     /** Where a path stands (kept until it is built, taken up or surveyed away). */
     public static final int SURVEYING = 0, PREVIEW = 1, BUILT = 2, BUILDING = 3, CLEAR = 4;
@@ -24,6 +34,7 @@ public record PathNotice(int code, int a, int b, int c, boolean flag) implements
     /** Why there is no path. */
     public static final int DOOR_BOXED = 13, BOXED_IN = 14, NO_ROUTE = 15, NO_BRIDGE = 16, NO_ROAD = 17, NO_WAYPOINT = 18, ON_ROAD = 19, DISABLED = 20;
 
+//? if >=1.21 {
     public static final StreamCodec<RegistryFriendlyByteBuf, PathNotice> CODEC = StreamCodec.of(
         (buf, p) -> {
             buf.writeByte(p.code);
@@ -38,6 +49,19 @@ public record PathNotice(int code, int a, int b, int c, boolean flag) implements
     public Type<PathNotice> type() {
         return TYPE;
     }
+//?} else {
+/*    public void write(FriendlyByteBuf buf) {
+        buf.writeByte(code);
+        buf.writeVarInt(a);
+        buf.writeVarInt(b);
+        buf.writeVarInt(c);
+        buf.writeBoolean(flag);
+    }
+
+    public static PathNotice read(FriendlyByteBuf buf) {
+        return new PathNotice(buf.readUnsignedByte(), buf.readVarInt(), buf.readVarInt(), buf.readVarInt(), buf.readBoolean());
+    }
+*///?}
 
     /** Set by the loader entry: whether the player's client takes the notice, and sending it. */
     public static Predicate<ServerPlayer> CAN_SEND = p -> false;

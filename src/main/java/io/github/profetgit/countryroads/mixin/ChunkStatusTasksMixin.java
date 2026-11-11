@@ -1,5 +1,6 @@
 package io.github.profetgit.countryroads.mixin;
 
+//? if >=1.21 {
 import io.github.profetgit.countryroads.CountryRoads;
 import io.github.profetgit.countryroads.gen.GenContext;
 import io.github.profetgit.countryroads.paint.RoadPainter;
@@ -47,7 +48,7 @@ abstract class ChunkStatusTasksMixin {
         }
     }
 
-    /** Surface of an already painted connector column in a neighbouring chunk, or RoadPainter.NO_TOP. */
+    // Surface of an already painted connector column in a neighbouring chunk, or RoadPainter.NO_TOP.
     private static int countryroads$neighbourTop(StaticCache2D<GenerationChunkHolder> chunks, int x, int z) {
         try {
             int cx = x >> 4, cz = z >> 4;
@@ -68,3 +69,69 @@ abstract class ChunkStatusTasksMixin {
         }
     }
 }
+//?} else {
+/*import io.github.profetgit.countryroads.CountryRoads;
+import io.github.profetgit.countryroads.gen.GenContext;
+import io.github.profetgit.countryroads.paint.RoadPainter;
+import io.github.profetgit.countryroads.plan.ChunkMask;
+import net.minecraft.server.level.WorldGenRegion;
+import net.minecraft.world.level.StructureManager;
+import net.minecraft.world.level.WorldGenLevel;
+import net.minecraft.world.level.chunk.ChunkAccess;
+import net.minecraft.world.level.chunk.ChunkGenerator;
+import org.spongepowered.asm.mixin.Mixin;
+import org.spongepowered.asm.mixin.injection.At;
+import org.spongepowered.asm.mixin.injection.Inject;
+import org.spongepowered.asm.mixin.injection.callback.CallbackInfo;
+
+// 1.20.1: the FEATURES step is a lambda in ChunkStatus, so the hooks sit on the generator call it makes (applyBiomeDecoration, then Blender.generateBorderTicks)
+@Mixin(ChunkGenerator.class)
+abstract class ChunkStatusTasksMixin {
+    @Inject(method = "applyBiomeDecoration", at = @At("HEAD"))
+    private void countryroads$begin(WorldGenLevel level, ChunkAccess chunk, StructureManager structures, CallbackInfo ci) {
+        try {
+            GenContext.begin(level.getLevel(), chunk.getPos());
+        } catch (Throwable t) {
+            GenContext.end();
+            CountryRoads.LOG.error("Road planning failed for chunk {}", chunk.getPos(), t);
+        }
+    }
+
+    @Inject(method = "applyBiomeDecoration", at = @At("RETURN"))
+    private void countryroads$paint(WorldGenLevel level, ChunkAccess chunk, StructureManager structures, CallbackInfo ci) {
+        try {
+            ChunkMask m = GenContext.mask(chunk.getPos());
+            var network = io.github.profetgit.countryroads.plan.RoadNetwork.get(level.getLevel());
+            if (m != null) RoadPainter.paint(chunk, m, network == null ? java.util.List.of() : network.streets(chunk.getPos().x(), chunk.getPos().z()),
+                (x, z) -> countryroads$neighbourTop((WorldGenRegion) level, x, z));
+            else if (network != null)
+                io.github.profetgit.countryroads.world.RoadColumns.store(chunk, io.github.profetgit.countryroads.world.RoadColumns.empty());
+        } catch (Throwable t) {
+            CountryRoads.LOG.error("Road painting failed for chunk {}", chunk.getPos(), t);
+        } finally {
+            GenContext.end();
+        }
+    }
+
+    // Surface of an already painted connector column in a neighbouring chunk, or RoadPainter.NO_TOP.
+    private static int countryroads$neighbourTop(WorldGenRegion region, int x, int z) {
+        try {
+            int cx = x >> 4, cz = z >> 4;
+            if (!region.hasChunk(cx, cz)) return RoadPainter.NO_TOP;
+            ChunkAccess nb = region.getChunk(cx, cz);
+            if (nb == null || !io.github.profetgit.countryroads.world.RoadColumns.handled(nb)) return RoadPainter.NO_TOP;
+            ChunkMask nm = GenContext.mask(nb.getPos());
+            if (nm == null) return RoadPainter.NO_TOP;
+            int i = ChunkMask.idx(x & 15, z & 15);
+            if (!nm.conn[i] || nm.in[i] < 0 || nm.connD[i] >= RoadPainter.CONN_EASE || nm.kind[i] != io.github.profetgit.countryroads.plan.EdgePlan.GROUND) return RoadPainter.NO_TOP;
+            net.minecraft.core.BlockPos.MutableBlockPos pos = new net.minecraft.core.BlockPos.MutableBlockPos();
+            int from = Math.round(nm.y[i]) + 10, to = Math.max(nb.getMinY(), from - 40);
+            for (int y = from; y >= to; y--)
+                if (io.github.profetgit.countryroads.paint.PaintRules.terrain(nb.getBlockState(pos.set(x, y, z)))) return y;
+            return RoadPainter.NO_TOP;
+        } catch (RuntimeException e) {
+            return RoadPainter.NO_TOP;
+        }
+    }
+}
+*///?}

@@ -11,4 +11,9 @@ import org.spongepowered.asm.mixin.gen.Accessor;
 public interface SinglePoolElementAccessor {
     @Accessor("processors")
     Holder<StructureProcessorList> countryroads$processors();
+
+    //? if <26.1 {
+    /*@Accessor("template")
+    com.mojang.datafixers.util.Either<net.minecraft.resources.ResourceLocation, net.minecraft.world.level.levelgen.structure.templatesystem.StructureTemplate> countryroads$template();
+    *///?}
 }

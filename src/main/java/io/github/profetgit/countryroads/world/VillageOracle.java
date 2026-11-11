@@ -17,7 +17,6 @@ import net.minecraft.world.level.chunk.ChunkGenerator;
 import net.minecraft.world.level.chunk.ChunkGeneratorStructureState;
 import net.minecraft.world.level.levelgen.LegacyRandomSource;
 import net.minecraft.world.level.levelgen.RandomState;
-import net.minecraft.world.level.levelgen.densityfunction.SamplerContext;
 import net.minecraft.world.level.levelgen.WorldgenRandom;
 import net.minecraft.world.level.levelgen.structure.BoundingBox;
 import net.minecraft.world.level.levelgen.structure.PoolElementStructurePiece;
@@ -89,7 +88,7 @@ public final class VillageOracle {
         this.sets = state.possibleStructureSets().stream()
             .filter(set -> set.value().structures().stream().anyMatch(e -> isVillage(e.structure(), extraIds)))
             .toList();
-        this.sampler = ThreadLocal.withInitial(() -> randomState.createClimateSampler(SamplerContext.builder().enableCaches().build()));
+        this.sampler = ThreadLocal.withInitial(() -> GenCompat.sampler(randomState));
         this.memo = new ConcurrentHashMap[sets.size()];
         for (int i = 0; i < memo.length; i++) memo[i] = new ConcurrentHashMap<>();
     }
@@ -168,8 +167,7 @@ public final class VillageOracle {
             var holder = level.registryAccess().lookupOrThrow(net.minecraft.core.registries.Registries.STRUCTURE).get(v.structure());
             if (holder.isPresent()) {
                 Structure structure = holder.get().value();
-                var ctx = new Structure.GenerationContext(level.registryAccess(), generator, generator.getBiomeSource(), sampler.get(),
-                    randomState, level.getStructureTemplateManager(), state.getLevelSeed(), v.chunk(), level, structure.biomes()::contains);
+                var ctx = GenCompat.context(level, generator, sampler.get(), randomState, state.getLevelSeed(), v.chunk(), structure.biomes()::contains);
                 var built = jigsaw(() -> structure.findValidGenerationPoint(ctx).map(stub -> stub.getPiecesBuilder().build().pieces()).orElse(List.of()));
                 for (StructurePiece p : built) {
                     pieces.add(p.getBoundingBox());
@@ -184,8 +182,8 @@ public final class VillageOracle {
                 }
             }
             if (pieces.isEmpty()) pieces.add(new BoundingBox(v.pos().getX() - 8, 0, v.pos().getZ() - 8, v.pos().getX() + 8, 0, v.pos().getZ() + 8));
-            StreetBands bands = jigsaw(() -> StreetBands.of(level.getStructureTemplateManager(), bandPieces));
-            List<List<int[]>> walks = bands.isEmpty() ? jigsaw(() -> DoorWalks.of(level.getStructureTemplateManager(), allPieces, pieces)) : List.of();
+            StreetBands bands = jigsaw(() -> StreetBands.of(GenCompat.templates(level), bandPieces));
+            List<List<int[]>> walks = bands.isEmpty() ? jigsaw(() -> DoorWalks.of(GenCompat.templates(level), allPieces, pieces)) : List.of();
             var doorCols = new it.unimi.dsi.fastutil.longs.Long2IntOpenHashMap();
             for (List<int[]> w : walks) for (int[] c : w) doorCols.put(StreetBands.pack(c[0], c[1]), c[2]);
             return new Footprint(List.copyOf(pieces), List.copyOf(streets), bands, List.copyOf(others), walks, doorCols);
@@ -240,8 +238,7 @@ public final class VillageOracle {
     /** null when this option fails (try the next); empty when a non-village structure wins the chunk. */
     private Optional<Village> tryGenerate(StructureSet.StructureSelectionEntry entry, ChunkPos c) {
         Structure structure = entry.structure().value();
-        var ctx = new Structure.GenerationContext(level.registryAccess(), generator, generator.getBiomeSource(), sampler.get(),
-            randomState, level.getStructureTemplateManager(), state.getLevelSeed(), c, level, structure.biomes()::contains);
+        var ctx = GenCompat.context(level, generator, sampler.get(), randomState, state.getLevelSeed(), c, structure.biomes()::contains);
         var stub = structure.findValidGenerationPoint(ctx);
         if (stub.isEmpty()) return null;
         if (!isVillage(entry.structure(), extraIds)) return Optional.empty();

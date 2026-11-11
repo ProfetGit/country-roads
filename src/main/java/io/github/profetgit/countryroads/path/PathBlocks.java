@@ -2,7 +2,7 @@ package io.github.profetgit.countryroads.path;
 
 import com.mojang.serialization.Codec;
 import com.mojang.serialization.codecs.RecordCodecBuilder;
-import io.github.profetgit.countryroads.CountryRoads;
+import io.github.profetgit.countryroads.world.SavedDataCompat;
 import it.unimi.dsi.fastutil.longs.Long2ObjectOpenHashMap;
 import java.util.List;
 import java.util.Map;
@@ -13,12 +13,10 @@ import net.minecraft.core.registries.BuiltInRegistries;
 import net.minecraft.resources.Identifier;
 import net.minecraft.server.level.ServerLevel;
 import net.minecraft.server.level.ServerPlayer;
-import net.minecraft.util.datafix.DataFixTypes;
 import net.minecraft.world.level.block.Block;
 import net.minecraft.world.level.block.Blocks;
 import net.minecraft.world.level.block.state.BlockState;
 import net.minecraft.world.level.saveddata.SavedData;
-import net.minecraft.world.level.saveddata.SavedDataType;
 
 /**
  * Where a house path put a block that has item value (steps, bridges, lanterns, stone): the path is free, so these
@@ -37,7 +35,6 @@ public final class PathBlocks extends SavedData {
         p.blocks.long2ObjectEntrySet().forEach(e -> out.add(new Entry(e.getLongKey(), BuiltInRegistries.BLOCK.getKey(e.getValue()))));
         return out;
     });
-    private static final Map<String, SavedDataType<PathBlocks>> TYPES = new ConcurrentHashMap<>();
     /** Show the explanation again after this many ticks without a blocked drop (10 minutes). */
     static final long NOTICE_GAP = 12000;
     private static final Map<UUID, Long> NOTICED = new ConcurrentHashMap<>();
@@ -50,15 +47,16 @@ public final class PathBlocks extends SavedData {
         for (Entry e : list) BuiltInRegistries.BLOCK.getOptional(e.block).ifPresent(b -> blocks.put(e.pos, b));
     }
 
-    private static SavedDataType<PathBlocks> type(ServerLevel level) {
-        String dim = level.dimension().identifier().toString().replace(':', '_').replace('/', '_');
-        return TYPES.computeIfAbsent(dim, d -> new SavedDataType<>(Identifier.fromNamespaceAndPath(CountryRoads.ID, "path_blocks_" + d), PathBlocks::new, CODEC,
-            DataFixTypes.SAVED_DATA_COMMAND_STORAGE));
+    public static PathBlocks of(ServerLevel level) {
+        return SavedDataCompat.of(level, "path_blocks_", CODEC, PathBlocks::new);
     }
 
-    public static PathBlocks of(ServerLevel level) {
-        return level.getDataStorage().computeIfAbsent(type(level));
+    //? if <26.1 {
+    /*@Override
+    public net.minecraft.nbt.CompoundTag save(net.minecraft.nbt.CompoundTag tag, net.minecraft.core.HolderLookup.Provider provider) {
+        return SavedDataCompat.save(CODEC, this, tag, provider);
     }
+    *///?}
 
     /** Blocks that drop as usual: free in survival anyway. */
     static boolean droppable(BlockState s) {

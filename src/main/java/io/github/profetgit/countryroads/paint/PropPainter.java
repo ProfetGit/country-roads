@@ -15,6 +15,7 @@ import net.minecraft.tags.BlockTags;
 import net.minecraft.world.RandomizableContainer;
 import net.minecraft.world.entity.EntitySpawnReason;
 import net.minecraft.world.entity.EntityTypes;
+//? if >=26.3
 import net.minecraft.world.entity.decoration.Cushion;
 import net.minecraft.world.level.block.Blocks;
 import net.minecraft.world.level.block.EntityBlock;
@@ -240,6 +241,7 @@ public final class PropPainter {
             }
         }
 
+        //? if >=26.3 {
         ServerLevel level = cv.level();
         for (Props.Ent e : pr.entities) {
             if (!e.type().equals("cushion")) continue;
@@ -253,6 +255,7 @@ public final class PropPainter {
             cushion.snapTo(wx + 0.5, floor + e.y(), wz + 0.5, rot.rotate(e.facing()).toYRot(), 0f);
             cv.addEntity(cushion);
         }
+        //?}
         return null;
     }
 }

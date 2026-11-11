@@ -1,0 +1,474 @@
+[
+  {
+    "regex": "org\\.jspecify\\.annotations\\.Nullable",
+    "to": "org.jetbrains.annotations.Nullable",
+    "when": "<1.21.11"
+  },
+  {
+    "from": "FarmlandBlock",
+    "to": "FarmBlock",
+    "when": "<26.1"
+  },
+  {
+    "from": "VegetationBlock",
+    "to": "BushBlock",
+    "when": "<26.1"
+  },
+  {
+    "from": "FlowerBedBlock",
+    "to": "PinkPetalsBlock",
+    "when": "<26.1"
+  },
+  {
+    "regex": "\\banimal\\.equine\\.AbstractHorse\\b",
+    "to": "animal.horse.AbstractHorse",
+    "when": "<26.1"
+  },
+  {
+    "from": "EntityTypes",
+    "to": "EntityType",
+    "when": "<26.2"
+  },
+  {
+    "regex": "\\.create\\(level, net\\.minecraft\\.world\\.entity\\.EntitySpawnReason\\.\\w+\\)",
+    "to": ".create(level)",
+    "when": "<1.21.2"
+  },
+  {
+    "from": "EntitySpawnReason",
+    "to": "MobSpawnType",
+    "when": "<1.21.2"
+  },
+  {
+    "regex": "\\.setId\\(\\w+\\)",
+    "to": "",
+    "when": "<1.21.2"
+  },
+  {
+    "regex": "\\.useBlockDescriptionPrefix\\(\\)",
+    "to": "",
+    "when": "<1.21.2"
+  },
+  {
+    "regex": "Block\\.column\\(5, 0, 15\\)",
+    "to": "Block.box(5.5, 0, 5.5, 10.5, 15, 10.5)",
+    "when": "<26.1"
+  },
+  {
+    "regex": "OptionInstance\\.ValueUpdateListener<",
+    "to": "java.util.function.Consumer<",
+    "when": "<26.1"
+  },
+  {
+    "regex": "list\\.addHeader\\([^;]*\\);",
+    "to": "",
+    "when": "<26.1"
+  },
+  {
+    "regex": "ChunkPos\\.pack\\(",
+    "to": "ChunkPos.asLong(",
+    "when": "<26.1"
+  },
+  {
+    "regex": "((?:net\\.minecraft\\.world\\.level\\.)?)ChunkPos\\.unpack\\(",
+    "to": "new $1ChunkPos(",
+    "when": "<26.1",
+    "groups": "1"
+  },
+  {
+    "regex": "getPos\\(\\)\\.([xz])\\(\\)",
+    "to": "getPos().$1",
+    "when": "<26.1",
+    "groups": "1"
+  },
+  {
+    "regex": "\\.chunk\\(\\)\\.([xz])\\(\\)",
+    "to": ".chunk().$1",
+    "when": "<26.1",
+    "groups": "1"
+  },
+  {
+    "regex": "\\bc\\.([xz])\\(\\)",
+    "to": "c.$1",
+    "when": "<26.1",
+    "groups": "1",
+    "files": "^(VillageOracle|RoadChecks)\\.java$"
+  },
+  {
+    "from": "getMinY",
+    "to": "getMinBuildHeight",
+    "when": "<1.21.2"
+  },
+  {
+    "regex": "(\\w+)\\.getMaxY\\(\\)",
+    "to": "($1.getMaxBuildHeight() - 1)",
+    "groups": "1",
+    "when": "<1.21.2"
+  },
+  {
+    "regex": "\\.requires\\(Commands\\.hasPermission\\(Commands\\.LEVEL_GAMEMASTERS\\)\\)",
+    "to": ".requires(s -> s.hasPermission(2))",
+    "when": "<1.21.2"
+  },
+  {
+    "regex": "getWorldGenSettings\\(\\)\\.options\\(\\)",
+    "to": "getWorldData().worldGenOptions()",
+    "when": "<1.21.2"
+  },
+  {
+    "regex": "\\.lookupOrThrow\\((net\\.minecraft\\.core\\.registries\\.Registries\\.STRUCTURE)\\)\\.get\\(",
+    "to": ".registryOrThrow($1).getHolder(",
+    "groups": "1",
+    "when": "<1.21.2"
+  },
+  {
+    "regex": "\\bregistry\\.get\\(p\\.camp\\)",
+    "to": "registry.getHolder(p.camp)",
+    "when": "<1.21.2"
+  },
+  {
+    "regex": "\\.lookupOrThrow\\(",
+    "to": ".registryOrThrow(",
+    "when": "<1.21.2"
+  },
+  {
+    "regex": "\\.getOrThrow\\(net\\.minecraft\\.data\\.worldgen\\.features\\.TreeFeatures\\.BIRCH\\)",
+    "to": ".getHolderOrThrow(net.minecraft.data.worldgen.features.TreeFeatures.BIRCH)",
+    "when": "<1.21.2"
+  },
+  {
+    "regex": "\\.getUnitVec3i\\(\\)",
+    "to": ".getNormal()",
+    "when": "<26.1"
+  },
+  {
+    "regex": "(add|remove)TicketWithRadius\\(((?:net\\.minecraft\\.server\\.level\\.)?TicketType)\\.PLAYER_LOADING, (new net\\.minecraft\\.world\\.level\\.ChunkPos\\(cx, cz\\)|[\\w\\[\\]]+), ([\\w +]+?)\\)",
+    "to": "$1RegionTicket($2.PLAYER, $3, $4, $3)",
+    "groups": "1",
+    "when": "<1.21.2"
+  },
+  {
+    "from": "getApproximateNearest",
+    "to": "getNearest",
+    "when": "<1.21.2"
+  },
+  {
+    "regex": "\\bc\\.([xz])\\(\\)",
+    "to": "c.$1",
+    "when": "<26.1",
+    "groups": "1",
+    "files": "^Camps\\.java$"
+  },
+  {
+    "regex": "\\bregistry\\.get\\(id\\)\\.orElse\\(null\\)",
+    "to": "registry.getHolder(id).orElse(null)",
+    "when": "<1.21.2"
+  },
+  {
+    "regex": "BlockTags\\.SUPPORTS_BAMBOO",
+    "to": "BlockTags.BAMBOO_PLANTABLE_ON",
+    "when": "<1.21.2"
+  },
+  {
+    "regex": "\\.markUnsaved\\(\\)",
+    "to": ".setUnsaved(true)",
+    "when": "<26.1"
+  },
+  {
+    "regex": "BuiltInRegistries\\.(\\w+)\\.getValue\\(",
+    "to": "BuiltInRegistries.$1.get(",
+    "when": "<1.21.2",
+    "groups": "1"
+  },
+  {
+    "regex": "\\.map\\(w -> w\\.value\\(\\)\\)\\.filter\\(d -> d\\.type\\(\\) == ",
+    "to": ".filter(d -> d.type == ",
+    "when": "<1.21.2"
+  },
+  {
+    "regex": "\\b(chunk|c|pos|j\\.pos)\\.pack\\(\\)",
+    "to": "$1.toLong()",
+    "when": "<26.1",
+    "groups": "1"
+  },
+  {
+    "regex": "\\b(center|pos|here|j\\.pos)\\.([xz])\\(\\)",
+    "to": "$1.$2",
+    "when": "<26.1",
+    "groups": "1",
+    "files": "^(GenContext|Retrofit|LatencyCheck)\\.java$"
+  },
+  {
+    "regex": "InputConstants\\.MOUSE_BUTTON_4\\b",
+    "to": "3",
+    "when": "<1.21.2"
+  },
+  {
+    "regex": "InputConstants\\.MOUSE_BUTTON_8\\b",
+    "to": "7",
+    "when": "<1.21.2"
+  },
+  {
+    "regex": "chunk\\.setBlockState\\(pos, state, 0\\)",
+    "to": "chunk.setBlockState(pos, state, false)",
+    "when": "<26.1"
+  },
+  {
+    "from": "markPosForPostProcessing",
+    "to": "markPosForPostprocessing",
+    "when": "<26.1"
+  },
+  {
+    "regex": "Blocks\\.CARPET\\.brown\\(\\)",
+    "to": "Blocks.BROWN_CARPET",
+    "when": "<1.21.2"
+  },
+  {
+    "regex": "CrossCollisionBlock\\.PROPERTY_BY_DIRECTION",
+    "to": "PipeBlock.PROPERTY_BY_DIRECTION",
+    "when": "<26.1"
+  },
+  {
+    "regex": "(coldEnoughToSnow\\([^;]*?), 63\\)",
+    "to": "$1)",
+    "when": "<26.1",
+    "groups": "1"
+  },
+  {
+    "regex": "Blocks\\.WILDFLOWERS\\b",
+    "to": "Blocks.CORNFLOWER",
+    "when": "<1.21.2"
+  },
+  {
+    "regex": "Blocks\\.SHORT_DRY_GRASS\\b",
+    "to": "Blocks.DEAD_BUSH",
+    "when": "<1.21.2"
+  },
+  {
+    "regex": "Blocks\\.TALL_DRY_GRASS\\b",
+    "to": "Blocks.TALL_GRASS",
+    "when": "<1.21.2"
+  },
+  {
+    "regex": "Blocks\\.(?:FIREFLY_BUSH|BUSH)\\b",
+    "to": "Blocks.FERN",
+    "when": "<1.21.2"
+  },
+  {
+    "regex": "Blocks\\.LEAF_LITTER\\b",
+    "to": "Blocks.SHORT_GRASS",
+    "when": "<1.21.2"
+  },
+  {
+    "regex": "Blocks\\.GOLDEN_DANDELION\\b",
+    "to": "Blocks.DANDELION",
+    "when": "<1.21.2"
+  },
+  {
+    "regex": " \\|\\| s\\.is\\(Blocks\\.CACTUS_FLOWER\\)",
+    "to": "",
+    "when": "<1.21.2"
+  },
+  {
+    "regex": " \\|\\| b\\.is\\(Biomes\\.PALE_GARDEN\\)",
+    "to": "",
+    "when": "<1.21.2"
+  },
+  {
+    "regex": "BlockTags\\.SUPPORTS_DRY_VEGETATION",
+    "to": "BlockTags.DEAD_BUSH_MAY_PLACE_ON",
+    "when": "<1.21.2"
+  },
+  {
+    "regex": "BuiltInRegistries\\.REGISTRY\\.getValueOrThrow\\(",
+    "to": "BuiltInRegistries.REGISTRY.getOrThrow(",
+    "when": "<1.21.2"
+  },
+  {
+    "regex": "PayloadTypeRegistry\\.clientboundPlay\\(\\)",
+    "to": "PayloadTypeRegistry.playS2C()",
+    "when": "<1.21.2"
+  },
+  {
+    "from": "END_LEVEL_TICK",
+    "to": "END_WORLD_TICK",
+    "when": "<1.21.2"
+  },
+  {
+    "regex": "ServerChunkEvents\\.CHUNK_LOAD\\.register\\(Retrofit::onLoad\\)",
+    "to": "ServerChunkEvents.CHUNK_LOAD.register((w, c) -> Retrofit.onLoad(w, c, false))",
+    "when": "<1.21.2"
+  },
+  {
+    "regex": "net\\.neoforged\\.neoforge\\.event\\.level\\.block\\.BreakBlockEvent",
+    "to": "net.neoforged.neoforge.event.level.BlockEvent.BreakEvent",
+    "when": "<1.21.2"
+  },
+  {
+    "from": "BreakBlockEvent",
+    "to": "BreakEvent",
+    "when": "<1.21.2"
+  },
+  {
+    "regex": "Retrofit\\.onLoad\\(level, e\\.getChunk\\(\\), e\\.isNewChunk\\(\\)\\)",
+    "to": "{ if (e.getChunk() instanceof net.minecraft.world.level.chunk.LevelChunk lc) Retrofit.onLoad(level, lc, e.isNewChunk()); }",
+    "when": "<1.21.2",
+    "files": "^NeoForgeEntry\\.java$"
+  },
+  {
+    "regex": "net\\.fabricmc\\.fabric\\.api\\.entity\\.FakePlayer\\.get\\(level\\)",
+    "to": "new net.minecraft.server.level.ServerPlayer(level.getServer(), level, new com.mojang.authlib.GameProfile(java.util.UUID.nameUUIDFromBytes(\"countryroads:test\".getBytes()), \"[CR test]\"), net.minecraft.server.level.ClientInformation.createDefault())",
+    "when": "<26.1",
+    "files": "^StakeTest\\.java$"
+  },
+  {
+    "regex": "net\\.minecraft\\.world\\.level\\.chunk\\.status\\.ChunkStatus\\b",
+    "to": "net.minecraft.world.level.chunk.ChunkStatus",
+    "when": "<1.21"
+  },
+  {
+    "regex": "\\bMath\\.clamp\\(",
+    "to": "net.minecraft.util.Mth.clamp(",
+    "when": "<1.21"
+  },
+  {
+    "regex": "import net\\.minecraft\\.client\\.DeltaTracker;\\n",
+    "to": "",
+    "when": "<1.21"
+  },
+  {
+    "regex": "\\bDeltaTracker\\b",
+    "to": "float",
+    "when": "<1.21"
+  },
+  {
+    "regex": "rc\\.setLootTable\\(ResourceKey\\.create\\(Registries\\.LOOT_TABLE, ResourceLocation\\.parse\\((.*?)\\)\\), ",
+    "to": "rc.setLootTable(new ResourceLocation($1), ",
+    "when": "<1.21",
+    "groups": "1"
+  },
+  {
+    "regex": "((?:net\\.minecraft\\.resources\\.)?)ResourceLocation\\.(?:fromNamespaceAndPath|withDefaultNamespace)\\(",
+    "to": "new $1ResourceLocation(",
+    "when": "<1.21",
+    "groups": "1"
+  },
+  {
+    "regex": "((?:net\\.minecraft\\.resources\\.)?)ResourceLocation\\.parse\\(",
+    "to": "new $1ResourceLocation(",
+    "when": "<1.21",
+    "groups": "1"
+  },
+  {
+    "regex": "net\\.minecraft\\.world\\.RandomizableContainer;",
+    "to": "net.minecraft.world.level.block.entity.RandomizableContainerBlockEntity;",
+    "when": "<1.21"
+  },
+  {
+    "regex": "\\bRandomizableContainer\\b",
+    "to": "RandomizableContainerBlockEntity",
+    "when": "<1.21"
+  },
+  {
+    "regex": "rc\\.getLootTable\\(\\) != null",
+    "to": "rc.saveWithoutMetadata().contains(\"LootTable\")",
+    "when": "<1.21"
+  },
+  {
+    "regex": "screens\\.options\\.OptionsSubScreen",
+    "to": "screens.OptionsSubScreen",
+    "when": "<1.21"
+  },
+  {
+    "regex": "(\\b[\\w.]+)\\.getFirst\\(\\)",
+    "to": "$1.get(0)",
+    "when": "<1.21",
+    "groups": "1"
+  },
+  {
+    "regex": "(\\b[\\w.]+)\\.getLast\\(\\)",
+    "to": "$1.get($1.size() - 1)",
+    "when": "<1.21",
+    "groups": "1"
+  },
+  {
+    "regex": "(\\b[\\w.]+)\\.removeLast\\(\\)",
+    "to": "$1.remove($1.size() - 1)",
+    "when": "<1.21",
+    "groups": "1"
+  },
+  {
+    "regex": "(\\b[\\w.]+)\\.removeFirst\\(\\)",
+    "to": "$1.remove(0)",
+    "when": "<1.21",
+    "groups": "1"
+  },
+  {
+    "regex": "registryOrThrow\\((net\\.minecraft\\.core\\.registries\\.Registries\\.STRUCTURE)\\)\\.getHolder\\(v\\.structure\\(\\)\\)",
+    "to": "registryOrThrow($1).getHolder(net.minecraft.resources.ResourceKey.create($1, v.structure()))",
+    "when": "<1.21",
+    "groups": "1"
+  },
+  {
+    "regex": "\\bregistry\\.getHolder\\((id|p\\.camp)\\)",
+    "to": "registry.getHolder(net.minecraft.resources.ResourceKey.create(net.minecraft.core.registries.Registries.STRUCTURE, $1))",
+    "when": "<1.21",
+    "groups": "1"
+  },
+  {
+    "regex": "\\.getTickTimesNanos\\(\\)",
+    "to": ".tickTimes",
+    "when": "<1.21"
+  },
+  {
+    "regex": ", net\\.minecraft\\.server\\.level\\.ClientInformation\\.createDefault\\(\\)\\)",
+    "to": ")",
+    "when": "<1.21"
+  },
+  {
+    "regex": "Blocks\\.SHORT_GRASS\\b",
+    "to": "Blocks.GRASS",
+    "when": "<1.21"
+  },
+  {
+    "regex": "NbtIo\\.readCompressed\\(in, NbtAccounter\\.unlimitedHeap\\(\\)\\)",
+    "to": "NbtIo.readCompressed(in)",
+    "when": "<1.21"
+  },
+  {
+    "regex": "Thread\\.ofVirtual\\(\\)\\.name\\((.*?)\\)\\.start\\(this\\);",
+    "to": "{ Thread t = new Thread(this, $1); t.setDaemon(true); t.start(); }",
+    "when": "<1.21",
+    "groups": "1"
+  },
+  {
+    "regex": "provider\\.createSerializationContext\\(net\\.minecraft\\.nbt\\.NbtOps\\.INSTANCE\\)",
+    "to": "net.minecraft.nbt.NbtOps.INSTANCE",
+    "when": "<1.21"
+  },
+  {
+    "regex": "save\\(net\\.minecraft\\.nbt\\.CompoundTag tag, net\\.minecraft\\.core\\.HolderLookup\\.Provider provider\\)",
+    "to": "save(net.minecraft.nbt.CompoundTag tag)",
+    "when": "<1.21"
+  },
+  {
+    "regex": "SavedDataCompat\\.save\\(CODEC, this, tag, provider\\)",
+    "to": "SavedDataCompat.save(CODEC, this, tag, null)",
+    "when": "<1.21"
+  },
+  {
+    "regex": "protected VoxelShape getShape\\(",
+    "to": "public VoxelShape getShape(",
+    "when": "<1.21"
+  },
+  {
+    "regex": "\\.lenientOptionalFieldOf\\(",
+    "to": ".optionalFieldOf(",
+    "when": "<1.21"
+  },
+  {
+    "regex": "ResourceLocation key = ResourceLocation\\.tryParse\\(id\\);",
+    "to": "ResourceLocation key = ResourceLocation.tryParse(id.equals(\"minecraft:short_grass\") ? \"minecraft:grass\" : id);",
+    "when": "<1.21"
+  }
+]

@@ -15,7 +15,6 @@ import net.minecraft.world.level.biome.Climate;
 import net.minecraft.world.level.chunk.ChunkAccess;
 import net.minecraft.world.level.chunk.ChunkGenerator;
 import net.minecraft.world.level.chunk.ChunkGeneratorStructureState;
-import net.minecraft.world.level.levelgen.densityfunction.SamplerContext;
 import net.minecraft.world.level.levelgen.structure.BoundingBox;
 import net.minecraft.world.level.levelgen.structure.Structure;
 import net.minecraft.world.level.levelgen.structure.StructurePiece;
@@ -51,7 +50,7 @@ public final class Camps {
         this.campSet = set;
         if (set != null) for (var e : set.value().structures()) variants.add(e.structure());
         var rs = level.getChunkSource().randomState();
-        this.sampler = ThreadLocal.withInitial(() -> rs.createClimateSampler(SamplerContext.builder().enableCaches().build()));
+        this.sampler = ThreadLocal.withInitial(() -> io.github.profetgit.countryroads.world.GenCompat.sampler(rs));
     }
 
     public boolean available() {
@@ -113,8 +112,7 @@ public final class Camps {
     }
 
     private List<BoundingBox> pieces(Holder<Structure> variant, ChunkPos c) {
-        var ctx = new Structure.GenerationContext(level.registryAccess(), generator, generator.getBiomeSource(), sampler.get(),
-            level.getChunkSource().randomState(), level.getStructureTemplateManager(), state.getLevelSeed(), c, level, b -> true);
+        var ctx = io.github.profetgit.countryroads.world.GenCompat.context(level, generator, sampler.get(), level.getChunkSource().randomState(), state.getLevelSeed(), c, b -> true);
         List<BoundingBox> out = new ArrayList<>();
         var built = io.github.profetgit.countryroads.world.VillageOracle.jigsaw(
             () -> variant.value().findValidGenerationPoint(ctx).map(stub -> stub.getPiecesBuilder().build().pieces()).orElse(List.of()));
@@ -130,8 +128,7 @@ public final class Camps {
         if (holder == null) return;
         StructureStart existing = chunk.getStartForStructure(holder.value());
         if (existing != null && existing.isValid()) return;
-        StructureStart start = holder.value().generate(holder, level.dimension(), level.registryAccess(), generator, generator.getBiomeSource(),
-            sampler.get(), level.getChunkSource().randomState(), level.getStructureTemplateManager(), state.getLevelSeed(), chunk.getPos(), 0, chunk, b -> true);
+        StructureStart start = io.github.profetgit.countryroads.world.GenCompat.generate(level, holder, generator, sampler.get(), level.getChunkSource().randomState(), state.getLevelSeed(), chunk, b -> true);
         if (start.isValid()) chunk.setStartForStructure(holder.value(), start);
     }
 }

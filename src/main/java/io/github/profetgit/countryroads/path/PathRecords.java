@@ -2,19 +2,15 @@ package io.github.profetgit.countryroads.path;
 
 import com.mojang.serialization.Codec;
 import com.mojang.serialization.codecs.RecordCodecBuilder;
-import io.github.profetgit.countryroads.CountryRoads;
+import io.github.profetgit.countryroads.world.SavedDataCompat;
 import it.unimi.dsi.fastutil.longs.Long2LongOpenHashMap;
 import it.unimi.dsi.fastutil.longs.LongArrayList;
 import java.util.HashMap;
 import java.util.List;
 import java.util.Map;
-import java.util.concurrent.ConcurrentHashMap;
 import net.minecraft.core.BlockPos;
-import net.minecraft.resources.Identifier;
 import net.minecraft.server.level.ServerLevel;
-import net.minecraft.util.datafix.DataFixTypes;
 import net.minecraft.world.level.saveddata.SavedData;
-import net.minecraft.world.level.saveddata.SavedDataType;
 
 /**
  * Per dimension: the paths started from a door or fence gate (their PathData, keyed by the door's position) and the
@@ -35,7 +31,6 @@ public final class PathRecords extends SavedData {
         Door.CODEC.listOf().optionalFieldOf("doors", List.of()).forGetter(r -> r.doors.entrySet().stream().map(e -> new Door(e.getKey(), e.getValue())).toList()),
         Built.CODEC.listOf().optionalFieldOf("built", List.of()).forGetter(r -> r.built.long2LongEntrySet().stream().map(e -> new Built(e.getLongKey(), e.getLongValue())).toList())
     ).apply(i, PathRecords::new));
-    private static final Map<String, SavedDataType<PathRecords>> TYPES = new ConcurrentHashMap<>();
 
     private final Map<Long, PathData> doors = new HashMap<>();
     private final Long2LongOpenHashMap built = new Long2LongOpenHashMap();
@@ -50,15 +45,16 @@ public final class PathRecords extends SavedData {
         for (Built b : builtList) built.put(b.pos, b.at);
     }
 
-    private static SavedDataType<PathRecords> type(ServerLevel level) {
-        String dim = level.dimension().identifier().toString().replace(':', '_').replace('/', '_');
-        return TYPES.computeIfAbsent(dim, d -> new SavedDataType<>(Identifier.fromNamespaceAndPath(CountryRoads.ID, "path_records_" + d), PathRecords::new, CODEC,
-            DataFixTypes.SAVED_DATA_COMMAND_STORAGE));
+    public static PathRecords of(ServerLevel level) {
+        return SavedDataCompat.of(level, "path_records_", CODEC, PathRecords::new);
     }
 
-    public static PathRecords of(ServerLevel level) {
-        return level.getDataStorage().computeIfAbsent(type(level));
+    //? if <26.1 {
+    /*@Override
+    public net.minecraft.nbt.CompoundTag save(net.minecraft.nbt.CompoundTag tag, net.minecraft.core.HolderLookup.Provider provider) {
+        return SavedDataCompat.save(CODEC, this, tag, provider);
     }
+    *///?}
 
     PathData door(BlockPos anchor) {
         return doors.get(anchor.asLong());

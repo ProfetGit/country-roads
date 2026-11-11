@@ -25,10 +25,23 @@ public final class Stake {
 
     public static void register(CountryRoads.Registrar r) {
         ResourceKey<Block> bk = ResourceKey.create(Registries.BLOCK, ID);
+        //? if >=26.3 {
+        PushReaction reaction = PushReaction.POPPED;
+        //?} else {
+        /*PushReaction reaction = PushReaction.DESTROY;
+        *///?}
         BLOCK = r.add(Registries.BLOCK, bk, new StakeBlock(BlockBehaviour.Properties.of().setId(bk)
-            .strength(0.3f).sound(SoundType.WOOD).noOcclusion().pushReaction(PushReaction.POPPED)));
+            .strength(0.3f).sound(SoundType.WOOD).noOcclusion().pushReaction(reaction)));
         ResourceKey<Item> ik = ResourceKey.create(Registries.ITEM, ID);
         ITEM = r.add(Registries.ITEM, ik, new StakeItem(BLOCK, new Item.Properties().setId(ik).useBlockDescriptionPrefix()));
-        ENTITY = r.add(Registries.BLOCK_ENTITY_TYPE, ResourceKey.create(Registries.BLOCK_ENTITY_TYPE, ID), new BlockEntityType<>(StakeBlockEntity::new, Set.of(BLOCK)));
+        ENTITY = r.add(Registries.BLOCK_ENTITY_TYPE, ResourceKey.create(Registries.BLOCK_ENTITY_TYPE, ID), blockEntity());
+    }
+
+    private static BlockEntityType<StakeBlockEntity> blockEntity() {
+        //? if >=26.1 {
+        return new BlockEntityType<>(StakeBlockEntity::new, Set.of(BLOCK));
+        //?} else {
+        /*return BlockEntityType.Builder.of(StakeBlockEntity::new, BLOCK).build(null);
+        *///?}
     }
 }

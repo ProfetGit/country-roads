@@ -63,7 +63,11 @@ final class TreeCheck {
     private float beard(int x, int y, int z) {
         var b = beards.computeIfAbsent(net.minecraft.world.level.ChunkPos.pack(x >> 4, z >> 4),
             k -> net.minecraft.world.level.levelgen.Beardifier.forStructuresInChunk(level.structureManager(), new net.minecraft.world.level.ChunkPos(x >> 4, z >> 4)));
+        //? if >=26.3 {
         return b.sampleValue(null, x, y, z);
+        //?} else {
+        /*return (float) b.compute(new net.minecraft.world.level.levelgen.DensityFunction.SinglePointContext(x, y, z));
+        *///?}
     }
 
     /** Where the painter puts a cut bank's top (RoadPainter.shoulder): the hillside face it leaves, not natural caves under it. */

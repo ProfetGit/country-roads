@@ -16,8 +16,8 @@
   "mixins": ["countryroads.mixins.json"],
   "depends": {
     "fabricloader": ">=${fabric_loader}",
-    "minecraft": "~${mc}",
+    "minecraft": "${mc_range}",
     "fabric-api": "*",
-    "java": ">=25"
+    "java": ">=${java}"
   }
 }

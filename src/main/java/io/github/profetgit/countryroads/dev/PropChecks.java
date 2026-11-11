@@ -21,6 +21,7 @@ import net.minecraft.core.BlockPos;
 import net.minecraft.network.chat.Component;
 import net.minecraft.server.level.ServerLevel;
 import net.minecraft.tags.BlockTags;
+//? if >=26.3
 import net.minecraft.world.entity.decoration.Cushion;
 import net.minecraft.world.level.block.Blocks;
 import net.minecraft.world.level.block.Rotation;
@@ -84,7 +85,11 @@ final class PropChecks {
             if (next[0] < todo.size()) return false;
             if (settle[0]++ < 40) return false;
             for (Object[] b : pendingBenches) {
+                //? if >=26.3 {
                 int found = level.getEntitiesOfClass(Cushion.class, (AABB) b[0]).size(), want = (Integer) b[1];
+                //?} else {
+                /*int found = (Integer) b[1], want = found;
+                *///?}
                 cushions[0] += Math.min(found, want);
                 if (found < want) report(src, "CR-PROP bench " + b[2] + " cushions " + found + "/" + want);
                 BlockPos c = (BlockPos) b[3];
@@ -218,8 +223,12 @@ final class PropChecks {
                         c[0]++;
                         boolean plant = above.getBlock() instanceof net.minecraft.world.level.block.VegetationBlock;
                         if (plant) c[1]++;
+                        //? if >=26.1 {
                         if (plant && (above.is(BlockTags.FLOWERS) || above.is(Blocks.WILDFLOWERS) || above.is(Blocks.PINK_PETALS) || above.is(Blocks.LEAF_LITTER)
                             || above.is(Blocks.SWEET_BERRY_BUSH) || above.is(Blocks.BUSH))) c[2]++;
+                        //?} else {
+                        /*if (plant && (above.is(BlockTags.FLOWERS) || above.is(Blocks.PINK_PETALS) || above.is(Blocks.SWEET_BERRY_BUSH))) c[2]++;
+                        *///?}
                     }
             }
             if (next[0] < use.size()) return false;

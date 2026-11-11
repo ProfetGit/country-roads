@@ -1,6 +1,7 @@
 package io.github.profetgit.countryroads.path;
 
 import io.github.profetgit.countryroads.CountryRoads;
+import io.github.profetgit.countryroads.world.NbtCompat;
 import java.io.InputStream;
 import java.util.Optional;
 import net.minecraft.core.BlockPos;
@@ -46,16 +47,16 @@ public final class BridgeKit {
         int sx = 0, sy = 0, sz = 0;
         try (InputStream in = BridgeKit.class.getResourceAsStream("/data/countryroads/bridges/medieval_bridge.litematic")) {
             CompoundTag root = NbtIo.readCompressed(in, NbtAccounter.unlimitedHeap());
-            CompoundTag regions = root.getCompoundOrEmpty("Regions");
-            CompoundTag r = regions.getCompoundOrEmpty(regions.keySet().iterator().next());
-            CompoundTag size = r.getCompoundOrEmpty("Size");
-            sx = Math.abs(size.getIntOr("x", 0));
-            sy = Math.abs(size.getIntOr("y", 0));
-            sz = Math.abs(size.getIntOr("z", 0));
-            ListTag pal = r.getListOrEmpty("BlockStatePalette");
+            CompoundTag regions = NbtCompat.compound(root, "Regions");
+            CompoundTag r = NbtCompat.compound(regions, NbtCompat.keys(regions).iterator().next());
+            CompoundTag size = NbtCompat.compound(r, "Size");
+            sx = Math.abs(NbtCompat.intOr(size, "x", 0));
+            sy = Math.abs(NbtCompat.intOr(size, "y", 0));
+            sz = Math.abs(NbtCompat.intOr(size, "z", 0));
+            ListTag pal = NbtCompat.list(r, "BlockStatePalette");
             BlockState[] palette = new BlockState[pal.size()];
-            for (int i = 0; i < palette.length; i++) palette[i] = state(pal.getCompoundOrEmpty(i));
-            long[] packed = r.getLongArray("BlockStates").orElse(new long[0]);
+            for (int i = 0; i < palette.length; i++) palette[i] = state(NbtCompat.compound(pal, i));
+            long[] packed = NbtCompat.longs(r, "BlockStates");
             int bits = Math.max(2, 32 - Integer.numberOfLeadingZeros(palette.length - 1));
             cells = new BlockState[sx][sy][sz];
             for (int i = 0; i < sx * sy * sz; i++) {
@@ -161,7 +162,11 @@ public final class BridgeKit {
                     else if (s.is(BlockTags.LOGS)) halfPlanks += 8;
                     else if (s.is(BlockTags.WOODEN_SLABS)) halfPlanks += 1;
                     else if (s.is(BlockTags.WOODEN_STAIRS)) halfPlanks += 3;
+                    //? if >=26.1 {
                     else if (s.is(BlockTags.WOODEN_TRAPDOORS) || s.is(BlockTags.WOODEN_SHELVES)) halfPlanks += 6;
+                    //?} else {
+                    /*else if (s.is(BlockTags.WOODEN_TRAPDOORS)) halfPlanks += 6;
+                    *///?}
                     else if (s.is(BlockTags.FENCE_GATES)) halfPlanks += 8;
                     else if (s.is(BlockTags.WOODEN_FENCES) || s.is(BlockTags.WOODEN_PRESSURE_PLATES)) halfPlanks += 4;
                     else if (s.is(BlockTags.PLANKS)) halfPlanks += 2;
@@ -179,7 +184,9 @@ public final class BridgeKit {
         if (forced != null && forced.contains(",")) return forced.split(",", 2);
         if (b.is(net.minecraft.world.level.biome.Biomes.MANGROVE_SWAMP)) return new String[]{"mangrove", "dark_oak"};
         if (b.is(net.minecraft.world.level.biome.Biomes.CHERRY_GROVE)) return new String[]{"cherry", "dark_oak"};
+        //? if >=26.1 {
         if (b.is(net.minecraft.world.level.biome.Biomes.PALE_GARDEN)) return new String[]{"pale_oak", "dark_oak"};
+        //?}
         if (b.is(net.minecraft.world.level.biome.Biomes.DARK_FOREST)) return new String[]{"dark_oak", "spruce"};
         if (b.is(BiomeTags.IS_JUNGLE)) return new String[]{"jungle", "dark_oak"};
         if (b.is(BiomeTags.IS_SAVANNA)) return new String[]{"acacia", "dark_oak"};
@@ -242,17 +249,17 @@ public final class BridgeKit {
     }
 
     private static BlockState state(CompoundTag tag) {
-        String name = tag.getString("id").orElseGet(() -> tag.getStringOr("Name", "minecraft:air"));
+        String name = NbtCompat.string(tag, "id").orElseGet(() -> NbtCompat.stringOr(tag, "Name", "minecraft:air"));
         Identifier id = Identifier.tryParse(name);
         if (id == null || !BuiltInRegistries.BLOCK.containsKey(id)) return Blocks.AIR.defaultBlockState();
         Block block = BuiltInRegistries.BLOCK.getValue(id);
         BlockState state = block.defaultBlockState();
-        Optional<CompoundTag> props = tag.getCompound("properties").or(() -> tag.getCompound("Properties"));
+        Optional<CompoundTag> props = NbtCompat.optCompound(tag, "properties").or(() -> NbtCompat.optCompound(tag, "Properties"));
         if (props.isPresent()) {
             StateDefinition<Block, BlockState> def = block.getStateDefinition();
-            for (String key : props.get().keySet()) {
+            for (String key : NbtCompat.keys(props.get())) {
                 Property<?> p = def.getProperty(key);
-                if (p != null) state = with(state, p, props.get().getStringOr(key, ""));
+                if (p != null) state = with(state, p, NbtCompat.stringOr(props.get(), key, ""));
             }
         }
         return state;

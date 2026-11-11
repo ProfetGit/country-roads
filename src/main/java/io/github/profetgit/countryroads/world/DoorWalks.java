@@ -35,7 +35,7 @@ public final class DoorWalks {
         List<Direction> facing = new ArrayList<>();
         for (PoolElementStructurePiece pe : pieces) {
             if (!(pe.getElement() instanceof SinglePoolElement single)) continue;
-            StructureTemplate template = templates.get(single.getTemplateLocation()).orElse(null);
+            StructureTemplate template = GenCompat.template(templates, single);
             if (template == null) continue;
             List<StructureTemplate.Palette> palettes = ((StructureTemplateAccessor) template).countryroads$palettes();
             if (palettes.isEmpty()) continue;

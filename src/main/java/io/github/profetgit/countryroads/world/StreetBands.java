@@ -76,7 +76,7 @@ public final class StreetBands {
         LongOpenHashSet paint = new LongOpenHashSet();
         for (PoolElementStructurePiece pe : pieces) {
             if (!(pe.getElement() instanceof SinglePoolElement single)) continue;
-            StructureTemplate template = templates.get(single.getTemplateLocation()).orElse(null);
+            StructureTemplate template = GenCompat.template(templates, single);
             if (template == null) continue;
             StructurePlaceSettings settings = new StructurePlaceSettings().setRotation(pe.getRotation());
             int before = paint.size();

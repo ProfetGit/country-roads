@@ -7,7 +7,6 @@ import net.minecraft.server.level.ServerLevel;
 import net.minecraft.tags.BiomeTags;
 import net.minecraft.world.level.NoiseColumn;
 import net.minecraft.world.level.biome.Biome;
-import net.minecraft.world.level.biome.BiomeResolver;
 import net.minecraft.world.level.block.state.BlockState;
 import net.minecraft.world.level.chunk.ChunkGenerator;
 import net.minecraft.world.level.levelgen.RandomState;
@@ -33,14 +32,14 @@ public final class TerrainSampler {
     private final ServerLevel level;
     private final ChunkGenerator generator;
     private final RandomState randomState;
-    private final ThreadLocal<BiomeResolver> biomes;
+    private final ThreadLocal<GenCompat.Biomes> biomes;
     private final ConcurrentHashMap<Long, Sample> cache = new ConcurrentHashMap<>();
 
     public TerrainSampler(ServerLevel level) {
         this.level = level;
         this.generator = level.getChunkSource().getGenerator();
         this.randomState = level.getChunkSource().randomState();
-        this.biomes = ThreadLocal.withInitial(() -> generator.getBiomeSource().createCachingResolver(randomState));
+        this.biomes = ThreadLocal.withInitial(() -> GenCompat.biomes(generator, randomState));
     }
 
     public int minY() {
@@ -66,7 +65,7 @@ public final class TerrainSampler {
     }
 
     public Holder<Biome> biome(int x, int y, int z) {
-        return biomes.get().getNoiseBiome(QuartPos.fromBlock(x), QuartPos.fromBlock(y), QuartPos.fromBlock(z));
+        return biomes.get().at(QuartPos.fromBlock(x), QuartPos.fromBlock(y), QuartPos.fromBlock(z));
     }
 
     private Sample compute(int x, int z) {

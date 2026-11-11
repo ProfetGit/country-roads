@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""Headless worldgen harness: boot a real 26.3 dedicated server (Fabric + Fabric API by default, --loader quilt|neoforge|forge) with Country Roads on a seed,
+"""Headless worldgen harness: boot a real dedicated server (26.3 by default, --mc for another version) (Fabric + Fabric API by default, --loader quilt|neoforge|forge) with Country Roads on a seed,
 run commands, print the CR-* result lines.
 
 wg.py --seed 123 [--keep] [--mods extra.jar ...] [--name run] -- "countryroads oraclecheck 1024" "countryroads sample 2000"
@@ -29,18 +29,19 @@ import slots  # noqa: E402
 MC = "26.3"
 
 
-def mod_jar(loader: str = "fabric") -> Path:
+def mod_jar(loader: str = "fabric", mc: str = MC) -> Path:
     """The build's jar for a loader (Quilt runs the Fabric jar)."""
     target = "fabric" if loader == "quilt" else loader
     version = re.search(r"^mod\.version=(.+)$", (ROOT / "gradle.properties").read_text(), re.M).group(1).strip()
-    jar = ROOT / f"versions/{MC}-{target}/build/libs" / f"countryroads-{version}+{MC}-{target}.jar"
+    jar = ROOT / f"versions/{mc}-{target}/build/libs" / f"countryroads-{version}+{mc}-{target}.jar"
     if not jar.is_file():
-        sys.exit(f"no {jar.name}: run ./gradlew :{MC}-{target}:build first")
+        sys.exit(f"no {jar.name}: run ./gradlew :{mc}-{target}:build first")
     return jar
 
 
 def main() -> int:
     ap = argparse.ArgumentParser()
+    ap.add_argument("--mc", default=MC, help="Minecraft version of the server and the jar (default 26.3)")
     ap.add_argument("--seed", default="0")
     ap.add_argument("--name", default="wg")
     ap.add_argument("--keep", action="store_true", help="keep the world from the last run of this name")
@@ -71,10 +72,10 @@ def main() -> int:
         f"online-mode=false\nserver-ip=127.0.0.1\nserver-port={a.port}\nlevel-seed={a.seed}\n"
         "generate-structures=true\nview-distance=4\nsimulation-distance=4\nspawn-protection=0\ndifficulty=peaceful\n"
         "max-tick-time=-1\npause-when-empty-seconds=-1\nsync-chunk-writes=false\nenable-query=false\nenable-rcon=false\n")
-    fapi = [ms.fabric_api(MC)] if a.loader in ("fabric", "quilt") else []
-    for j in [*([] if a.no_mod else [Path(a.jar) if a.jar else mod_jar(a.loader)]), *fapi, *map(Path, a.mods)]:
+    fapi = [ms.fabric_api(a.mc)] if a.loader in ("fabric", "quilt") else []
+    for j in [*([] if a.no_mod else [Path(a.jar) if a.jar else mod_jar(a.loader, a.mc)]), *fapi, *map(Path, a.mods)]:
         shutil.copy(j, work / "mods")
-    cmd = ms.command(MC, a.loader, work)
+    cmd = ms.command(a.mc, a.loader, work)
     cmd = [c.replace("-Xmx2G", f"-Xmx{a.xmx}") for c in cmd]
     cmd = cmd[:1] + a.jvm + cmd[1:]
     log = work / "server.log"

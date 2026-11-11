@@ -6,10 +6,13 @@
   "mixins": [
     "ChunkStatusTasksMixin",
     "ChunkStatusTasksStartsMixin",
+    "ConfiguredFeatureMixin",
     "FeaturePlacerMixin",
     "MapItemMixin",
+    "NaturalSpawnerInvoker",
     "NaturalSpawnerMixin",
     "SignBlockEntityAccessor",
+    "StructureManagerAccessor",
     "SinglePoolElementAccessor",
     "StructureTemplateAccessor",
     "WorldGenRegionMixin"

@@ -11,7 +11,6 @@ import net.minecraft.client.Minecraft;
 import net.minecraft.client.gui.Font;
 import net.minecraft.client.gui.GuiGraphicsExtractor;
 import net.minecraft.network.chat.Component;
-import net.minecraft.util.ARGB;
 import net.minecraft.world.phys.BlockHitResult;
 import net.minecraft.world.phys.HitResult;
 
@@ -186,11 +185,11 @@ final class PathHud {
     private static Glyph glyph(KeyMapping m) {
         int[] buttons = {InputConstants.MOUSE_BUTTON_LEFT, InputConstants.MOUSE_BUTTON_RIGHT, InputConstants.MOUSE_BUTTON_MIDDLE};
         for (int i = 0; i < buttons.length; i++) {
-            if (m.matches(InputConstants.Type.MOUSE.getOrCreate(buttons[i]))) return new Glyph(i + 1, "");
+            if (HudCompat.mouseBound(m, buttons[i])) return new Glyph(i + 1, "");
         }
         if (m.isUnbound()) return new Glyph(0, "-");
         for (int b = InputConstants.MOUSE_BUTTON_4; b <= InputConstants.MOUSE_BUTTON_8; b++) {
-            if (m.matches(InputConstants.Type.MOUSE.getOrCreate(b))) return new Glyph(0, "M" + (b + 1));
+            if (HudCompat.mouseBound(m, b)) return new Glyph(0, "M" + (b + 1));
         }
         String t = m.getTranslatedKeyMessage().getString();
         t = t.replace("Left ", "").replace("Right ", "R ").replace("Control", "Ctrl").replace("Escape", "Esc");
@@ -228,7 +227,7 @@ final class PathHud {
     }
 
     private static void sprite(GuiGraphicsExtractor g, net.minecraft.resources.Identifier t, int x, int y, int w, int h, float alpha) {
-        g.blit(net.minecraft.client.renderer.RenderPipelines.GUI_TEXTURED, t, x, y, 0, 0, w, h, 16, 16, 16, 16, ARGB.color(alpha, 0xFFFFFF));
+        HudCompat.blit(g, t, x, y, w, h, 0, 0, 16, 16, alpha);
     }
 
     /** The shipped 16 x 16 mouse (2 empty columns each side) with the bound button lit; 12 of its columns are drawn. */
@@ -246,10 +245,10 @@ final class PathHud {
         for (int j = 0; j < 3; j++) {
             for (int i = 0; i < 3; i++) {
                 if (dw[i] <= 0 || dh[j] <= 0) continue;
-                g.blit(net.minecraft.client.renderer.RenderPipelines.GUI_TEXTURED, KEYCAP, dx[i], dy[j], sx[i], sy[j], dw[i], dh[j], sw[i], sh[j], 16, 16, ARGB.color(alpha, 0xFFFFFF));
+                HudCompat.blit(g, KEYCAP, dx[i], dy[j], dw[i], dh[j], sx[i], sy[j], sw[i], sh[j], alpha);
             }
         }
-        g.text(font, label, x + 4, y + 1, ARGB.color(alpha, 0x1B1220), false);
+        HudCompat.text(g, font, label, x + 4, y + 1, HudCompat.color(alpha, 0x1B1220));
     }
 
     /**
@@ -272,32 +271,30 @@ final class PathHud {
         float sw = cw * s, sh = ch * s;
         int ax = Math.round(Math.max(2, w - sw - 6));
         int ay = Math.round(Math.max(2, Math.min(h - sh - 2, (h - sh) / 2f)));
-        g.pose().pushMatrix();
-        g.pose().translate(ax, ay);
-        g.pose().scale(s, s);
+        HudCompat.push(g, ax, ay, s);
         card(g, 0, 0, cw, ch, alpha, accent);
         int y = padY;
-        g.text(font, head, padX, y + 1, ARGB.color(alpha, CREAM), false);
-        g.fill(padX, y + 11, padX + 10, y + 12, ARGB.color(alpha, accent));
+        HudCompat.text(g, font, head, padX, y + 1, HudCompat.color(alpha, CREAM));
+        g.fill(padX, y + 11, padX + 10, y + 12, HudCompat.color(alpha, accent));
         y += headH + 3;
         for (Chip c : chips) {
             int x = padX + keyW - glyphsW(font, glyphs(c.gesture()));
             for (Glyph gl : glyphs(c.gesture())) {
                 if (gl.mouse() > 0) mouse(g, x, y - 2, gl.mouse(), alpha);
-                else if (gl == Glyph.PLUS) g.text(font, "+", x, y + 2, ARGB.color(alpha, DIM), false);
+                else if (gl == Glyph.PLUS) HudCompat.text(g, font, "+", x, y + 2, HudCompat.color(alpha, DIM));
                 else keycap(g, font, x, y, gl.label(), alpha);
                 x += glyphW(font, gl) + GAP;
             }
-            g.text(font, c.action(), padX + keyW + 5, y + 2, ARGB.color(alpha, CREAM), false);
+            HudCompat.text(g, font, c.action(), padX + keyW + 5, y + 2, HudCompat.color(alpha, CREAM));
             y += rowH;
         }
-        if (hint != null) g.text(font, hint, padX, y - 1, ARGB.color(alpha, DIM), false);
-        g.pose().popMatrix();
+        if (hint != null) HudCompat.text(g, font, hint, padX, y - 1, HudCompat.color(alpha, DIM));
+        HudCompat.pop(g);
     }
 
     /** A tooltip-like card: plum plate, one pixel border in the accent colour, corners stepped by one pixel. */
     private static void card(GuiGraphicsExtractor g, int x, int y, int w, int h, float alpha, int accent) {
-        int edge = ARGB.color(alpha * 0.8f, accent), fill = ARGB.color(alpha * 0.92f, PLUM), inner = ARGB.color(alpha * 0.35f, APRICOT);
+        int edge = HudCompat.color(alpha * 0.8f, accent), fill = HudCompat.color(alpha * 0.92f, PLUM), inner = HudCompat.color(alpha * 0.35f, APRICOT);
         g.fill(x + 1, y, x + w - 1, y + h, fill);
         g.fill(x, y + 1, x + w, y + h - 1, fill);
         g.fill(x + 1, y, x + w - 1, y + 1, edge);

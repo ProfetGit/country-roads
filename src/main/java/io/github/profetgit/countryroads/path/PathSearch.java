@@ -27,7 +27,7 @@ import net.minecraft.resources.Identifier;
 import net.minecraft.resources.ResourceKey;
 import net.minecraft.server.level.ServerLevel;
 import net.minecraft.server.level.ServerPlayer;
-import net.minecraft.server.level.TicketType;
+import io.github.profetgit.countryroads.world.TicketCompat;
 import net.minecraft.world.level.ChunkPos;
 import net.minecraft.world.level.chunk.LevelChunk;
 
@@ -47,8 +47,6 @@ final class PathSearch implements RouteSolver.Host, Runnable {
     static final int MAX_CANDIDATES = 4, PENALTY = 15, EST = 20;
     /** Coarse planning when more chunks than this on the line to the nearest road are not loaded; corridor half-widths in 8-block cells. */
     static final int COARSE_ABOVE = 6, CORRIDOR = 3, CORRIDOR_WIDE = 8, COARSE_ROUTES = 3;
-    /** Keeps fetched chunks loaded while a survey runs; not saved with the world, expires if a survey forgets it. */
-    static TicketType TICKET;
     /** Workers allowed to compute at once (a waiting worker gives its turn away). */
     private static final Semaphore COMPUTE = new Semaphore(Runtime.getRuntime().availableProcessors() >= 8 ? 2 : 1);
     private static final AtomicInteger IDS = new AtomicInteger();
@@ -57,8 +55,7 @@ final class PathSearch implements RouteSolver.Host, Runnable {
 
     /** Registers the ticket type (mod init, before the registries freeze). */
     public static void register(CountryRoads.Registrar r) {
-        TICKET = r.add(Registries.TICKET_TYPE, ResourceKey.create(Registries.TICKET_TYPE, Identifier.fromNamespaceAndPath(CountryRoads.ID, "survey")),
-            new TicketType(400L, TicketType.FLAG_LOADING));
+        TicketCompat.register(r);
     }
 
     final ServerLevel level;
@@ -181,7 +178,7 @@ final class PathSearch implements RouteSolver.Host, Runnable {
     }
 
     private void release() {
-        for (long ch : ticketed) level.getChunkSource().removeTicketWithRadius(TICKET, new ChunkPos(ChunkPos.getX(ch), ChunkPos.getZ(ch)), 0);
+        for (long ch : ticketed) TicketCompat.removeSurvey(level, new ChunkPos(ChunkPos.getX(ch), ChunkPos.getZ(ch)));
         held -= ticketed.size();
         ticketed.clear();
         pending.clear();
@@ -189,7 +186,7 @@ final class PathSearch implements RouteSolver.Host, Runnable {
     }
 
     private void ticket(long ch) {
-        level.getChunkSource().addTicketWithRadius(TICKET, new ChunkPos(ChunkPos.getX(ch), ChunkPos.getZ(ch)), 0);
+        TicketCompat.addSurvey(level, new ChunkPos(ChunkPos.getX(ch), ChunkPos.getZ(ch)));
     }
 
     private boolean loaded(long ch) {

@@ -1,5 +1,11 @@
 # Changelog
 
+## 1.0.0-beta.3
+
+- Now also for Minecraft 26.2, 1.21.1 and 1.20.1, on Fabric, Quilt, NeoForge and Forge (26.3 stays supported). The same seed gives the same roads on 26.3, 26.2 and 1.21.1; 1.20.1 has its own terrain, so its roads differ.
+- On 1.21.1 and 1.20.1 some newer roadside plants are replaced by older ones, and the cushion benches are only on 26.3.
+- A player without a network connection (some fake players from other mods) can no longer crash the server when it breaks a path block.
+
 ## 1.0.0-beta.2
 
 - Now on NeoForge and Forge as well as Fabric and Quilt (Quilt uses the Fabric jar). Same roads on every loader: a world generated with the same seed gets the same roads, bridges, signposts and house paths.

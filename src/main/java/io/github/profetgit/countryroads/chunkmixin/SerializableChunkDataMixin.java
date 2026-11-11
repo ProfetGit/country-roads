@@ -1,5 +1,6 @@
 package io.github.profetgit.countryroads.chunkmixin;
 
+//? if >=26.1 {
 import io.github.profetgit.countryroads.world.RoadColumns;
 import net.minecraft.nbt.CompoundTag;
 import net.minecraft.server.level.ServerLevel;
@@ -63,3 +64,65 @@ public abstract class SerializableChunkDataMixin implements RoadColumnsHolder {
         if (countryroads$cols != null) RoadColumns.store.set(cir.getReturnValue(), countryroads$cols);
     }
 }
+//?} else if >=1.21 {
+/*import io.github.profetgit.countryroads.world.RoadColumns;
+import net.minecraft.nbt.CompoundTag;
+import net.minecraft.server.level.ServerLevel;
+import net.minecraft.world.entity.ai.village.poi.PoiManager;
+import net.minecraft.world.level.ChunkPos;
+import net.minecraft.world.level.chunk.ChunkAccess;
+import net.minecraft.world.level.chunk.ProtoChunk;
+import net.minecraft.world.level.chunk.storage.ChunkSerializer;
+import net.minecraft.world.level.chunk.storage.RegionStorageInfo;
+import org.spongepowered.asm.mixin.Mixin;
+import org.spongepowered.asm.mixin.injection.At;
+import org.spongepowered.asm.mixin.injection.Inject;
+import org.spongepowered.asm.mixin.injection.callback.CallbackInfoReturnable;
+
+// Road columns in the chunk NBT under KEY: written with the chunk (write, server thread) and handed to the chunk on load (read).
+@Mixin(ChunkSerializer.class)
+public abstract class SerializableChunkDataMixin {
+    private static final String KEY = "countryroads:road_columns";
+
+    @Inject(method = "write", at = @At("RETURN"))
+    private static void countryroads$write(ServerLevel level, ChunkAccess chunk, CallbackInfoReturnable<CompoundTag> cir) {
+        RoadColumns cols = RoadColumns.get(chunk);
+        if (cols != null) cir.getReturnValue().putLongArray(KEY, cols.bits());
+    }
+
+    @Inject(method = "read", at = @At("RETURN"))
+    private static void countryroads$read(ServerLevel level, PoiManager poi, RegionStorageInfo info, ChunkPos pos, CompoundTag tag, CallbackInfoReturnable<ProtoChunk> cir) {
+        if (cir.getReturnValue() != null && tag.contains(KEY, 12)) RoadColumns.store.set(cir.getReturnValue(), new RoadColumns(tag.getLongArray(KEY)));
+    }
+}
+*///?} else {
+/*import io.github.profetgit.countryroads.world.RoadColumns;
+import net.minecraft.nbt.CompoundTag;
+import net.minecraft.server.level.ServerLevel;
+import net.minecraft.world.entity.ai.village.poi.PoiManager;
+import net.minecraft.world.level.ChunkPos;
+import net.minecraft.world.level.chunk.ChunkAccess;
+import net.minecraft.world.level.chunk.ProtoChunk;
+import net.minecraft.world.level.chunk.storage.ChunkSerializer;
+import org.spongepowered.asm.mixin.Mixin;
+import org.spongepowered.asm.mixin.injection.At;
+import org.spongepowered.asm.mixin.injection.Inject;
+import org.spongepowered.asm.mixin.injection.callback.CallbackInfoReturnable;
+
+// Road columns in the chunk NBT under KEY: written with the chunk (write) and handed to the chunk on load (read).
+@Mixin(ChunkSerializer.class)
+public abstract class SerializableChunkDataMixin {
+    private static final String KEY = "countryroads:road_columns";
+
+    @Inject(method = "write", at = @At("RETURN"))
+    private static void countryroads$write(ServerLevel level, ChunkAccess chunk, CallbackInfoReturnable<CompoundTag> cir) {
+        RoadColumns cols = RoadColumns.get(chunk);
+        if (cols != null) cir.getReturnValue().putLongArray(KEY, cols.bits());
+    }
+
+    @Inject(method = "read", at = @At("RETURN"))
+    private static void countryroads$read(ServerLevel level, PoiManager poi, ChunkPos pos, CompoundTag tag, CallbackInfoReturnable<ProtoChunk> cir) {
+        if (cir.getReturnValue() != null && tag.contains(KEY, 12)) RoadColumns.store.set(cir.getReturnValue(), new RoadColumns(tag.getLongArray(KEY)));
+    }
+}
+*///?}

@@ -15,7 +15,12 @@ import net.minecraft.world.entity.animal.equine.AbstractHorse;
 
 /** On a road players walk faster (+20% by default, like Speed I) and mounts (horses, donkeys, mules, camels...) +30%. */
 public final class RoadSpeed {
+    //? if >=1.21 {
     public static final Identifier ID = Identifier.fromNamespaceAndPath(CountryRoads.ID, "road_speed");
+    //?} else {
+    /*// 1.20.1 attribute modifiers are identified by a UUID
+    public static final java.util.UUID ID = java.util.UUID.nameUUIDFromBytes((CountryRoads.ID + ":road_speed").getBytes(java.nio.charset.StandardCharsets.UTF_8));
+    *///?}
 
     private RoadSpeed() {}
 
@@ -39,12 +44,22 @@ public final class RoadSpeed {
         if (speed == null) return;
         boolean want = amount > 0 && onRoad(level, e);
         AttributeModifier old = speed.getModifier(ID);
-        if (old != null && want && old.amount() != amount) {
+        //? if >=1.21 {
+        double oldAmount = old == null ? 0 : old.amount();
+        //?} else {
+        /*double oldAmount = old == null ? 0 : old.getAmount();
+        *///?}
+        if (old != null && want && oldAmount != amount) {
             speed.removeModifier(ID);
             old = null;
         }
         boolean has = old != null;
+        //? if >=1.21 {
         if (want && !has) speed.addTransientModifier(new AttributeModifier(ID, amount, AttributeModifier.Operation.ADD_MULTIPLIED_BASE));
+        //?} else {
+        /*if (want && !has) speed.addTransientModifier(new AttributeModifier(ID, "countryroads road speed", amount, AttributeModifier.Operation.MULTIPLY_BASE));
+        *///?}
+        
         else if (!want && has) speed.removeModifier(ID);
     }
 
