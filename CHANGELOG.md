@@ -1,5 +1,9 @@
 # Changelog
 
+## 1.0.0-beta.4
+
+- Works with C2ME on Forge 1.20.1 (also checked on Fabric 1.20.1 and 1.21.1, NeoForge 1.21.1): the server no longer fails to start because C2ME rewrites the feature placing code Country Roads hooks.
+
 ## 1.0.0-beta.3
 
 - Now also for Minecraft 26.2, 1.21.1 and 1.20.1, on Fabric, Quilt, NeoForge and Forge (26.3 stays supported). The same seed gives the same roads on 26.3, 26.2 and 1.21.1; 1.20.1 has its own terrain, so its roads differ.
