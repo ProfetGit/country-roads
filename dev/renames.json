@@ -82,6 +82,12 @@
     "groups": "1"
   },
   {
+    "regex": "getChunkPos\\(\\)\\.([xz])\\(\\)",
+    "to": "getChunkPos().$1",
+    "when": "<26.1",
+    "groups": "1"
+  },
+  {
     "regex": "\\.chunk\\(\\)\\.([xz])\\(\\)",
     "to": ".chunk().$1",
     "when": "<26.1",
@@ -92,7 +98,7 @@
     "to": "c.$1",
     "when": "<26.1",
     "groups": "1",
-    "files": "^(VillageOracle|RoadChecks)\\.java$"
+    "files": "^(VillageOracle|RoadChecks|StructureOracle)\\.java$"
   },
   {
     "from": "getMinY",

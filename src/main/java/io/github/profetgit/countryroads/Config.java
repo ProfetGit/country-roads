@@ -14,6 +14,9 @@ import net.minecraft.world.level.storage.LevelResource;
  * change halfway through a world would cut them off at the old chunks.
  */
 public final class Config {
+    /** The road generation revision new worlds get (see {@link Gen#revision}). */
+    public static final int REVISION = 1;
+
     /** World generation (fixed per world). */
     public static final class Gen {
         /** Village streets repainted in the road look. Off: vanilla streets, roads still dock onto them. */
@@ -26,6 +29,19 @@ public final class Config {
         public int roadsideProps = 100;
         /** Wheat fields beside plains roads, in percent of the normal rate (0 to 300). */
         public int wheatFields = 100;
+        /**
+         * Road generation revision the world was made with; a world's file without it is 0 (made before 1.0.0-beta.5).
+         * 0: roads may run through outposts, ruined portals and other structures. 1: they go around them. An existing
+         * world keeps its revision: newer routing there would not meet the roads already generated.
+         */
+        public int revision = REVISION;
+
+        /** Revision of a world file that has no "revision" field: made before the field existed. */
+        static Gen read(String json) {
+            Gen g = GSON.fromJson(json, Gen.class);
+            if (g != null && !com.google.gson.JsonParser.parseString(json).getAsJsonObject().has("revision")) g.revision = 0;
+            return g;
+        }
 
         Gen copy() {
             return GSON.fromJson(GSON.toJson(this), Gen.class);
@@ -79,6 +95,7 @@ public final class Config {
         }
         current = c == null ? new Config() : c;
         if (current.newWorlds == null) current.newWorlds = new Gen();
+        current.newWorlds.revision = REVISION;
         current.clamp();
         save();
     }
@@ -100,7 +117,7 @@ public final class Config {
         Path f = server.getWorldPath(LevelResource.ROOT).resolve(NAME);
         Gen g = null;
         try {
-            if (Files.isRegularFile(f)) g = GSON.fromJson(Files.readString(f), Gen.class);
+            if (Files.isRegularFile(f)) g = Gen.read(Files.readString(f));
         } catch (Exception e) {
             CountryRoads.LOG.warn("Country Roads: cannot read {}, using the defaults for new worlds ({})", f, e.toString());
         }

@@ -615,7 +615,7 @@ public final class RoadPainter {
             // the road's deck wood (spruce, oak, mangrove, dark oak, jungle) as a bridge pair when the crossing has none
             int pair = planned ? m.bridgeWood[i] : new int[]{2, 0, 6, 3, 4}[Math.clamp(m.wood[i], 0, 4)];
             timberBridge(x, z, top, half, rail, deck, outer, L, u, ds, planned, Palette.bridgeWood(pair, false), Palette.bridgeWood(pair, true),
-                along, out, level, ground, h);
+                along, out, level, ground, h, rail ? prevU(d, m, i) : Float.NaN, m.joint[i]);
         }
     }
 
@@ -839,13 +839,24 @@ public final class RoadPainter {
      * bents, log posts driven down to the river bed, ivy climbing the posts from the water, earth under the ends.
      */
     private void timberBridge(int x, int z, int top, boolean half, boolean rail, boolean deck, boolean outer, float L, float u, float ds, boolean planned,
-                              Palette.BridgeWood main, Palette.BridgeWood trim, Direction along, Direction out, int level, int ground, long h) {
+                              Palette.BridgeWood main, Palette.BridgeWood trim, Direction along, Direction out, int level, int ground, long h,
+                              float uPrev, boolean joint) {
         int bays = Math.max(1, Math.round((L - 1) / TIMBER_BAY));
         float step = (L - 1) / bays;
         int j = Math.clamp(Math.round((u - 0.5f) / step), 0, bays);
         float off = u - 0.5f - j * step;
         boolean bent = planned ? Math.abs(off) < ds / 2 : Math.abs(u - 5 * Math.round(u / 5)) < ds / 2;
         boolean end = planned && (u < ds || u > L - ds);
+        // as on stone bridges: where the road bends at a bridge end the outer rail columns all sit at the joint's u, and
+        // on a stair-stepped rail both blocks of a step fall in one bent's band; only the first takes the post (three
+        // posts and two lanterns stood clustered at one end of a timber bridge, none at the other rail's end)
+        if (rail && planned && bent) {
+            if (end && joint) bent = false;
+            else if (!Float.isNaN(uPrev) && uPrev >= 0) {
+                int jp = Math.clamp(Math.round((uPrev - 0.5f) / step), 0, bays);
+                if (jp == j && Math.abs(uPrev - 0.5f - jp * step) < ds / 2) bent = false;
+            }
+        }
         if (!rail && !deck) {
             // ivy on the outer face of a post, up from the water
             if (outer && planned && bent && clump(x * 3 + 5, z * 3 + 9) > 480) {

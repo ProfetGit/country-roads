@@ -40,7 +40,7 @@ final class FieldChecks {
         int farmland, wheat, water, lily, fence, hedge, missingCrop, onRoad, fenceNearRoad, squares;
         boolean scarecrow;
         final Set<Long> fences = new HashSet<>();
-        final List<float[]> road = new ArrayList<>();
+        final List<double[]> road = new ArrayList<>();
 
         Stats(Field f, List<EdgePlan> plans) {
             this.f = f;
@@ -50,11 +50,11 @@ final class FieldChecks {
             for (EdgePlan p : plans)
                 for (int i = 0; i < p.length(); i++)
                     if (Math.abs(p.x[i] - f.fx) < Field.REACH + 12 && Math.abs(p.z[i] - f.fz) < Field.REACH + 12 && p.kind[i] == EdgePlan.GROUND)
-                        road.add(new float[]{p.x[i], p.z[i], p.hw[i]});
+                        road.add(new double[]{p.x[i], p.z[i], p.hw[i]});
         }
 
         boolean nearRoad(int x, int z, double extra) {
-            for (float[] r : road) {
+            for (double[] r : road) {
                 double dx = r[0] - (x + 0.5), dz = r[1] - (z + 0.5), lim = r[2] + extra;
                 if (dx * dx + dz * dz < lim * lim) return true;
             }

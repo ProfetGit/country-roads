@@ -51,6 +51,8 @@ public final class RoadNetwork {
 
     public final ServerLevel level;
     public final VillageOracle oracle;
+    /** Other structures roads keep out of; null with -Dcountryroads.structures=false (the old behaviour). */
+    public final io.github.profetgit.countryroads.world.StructureOracle structures;
     public final TerrainSampler terrain;
     private final Planner planner;
     public final Camps camps;
@@ -70,6 +72,20 @@ public final class RoadNetwork {
         this.terrain = new TerrainSampler(level);
         this.camps = new Camps(level, terrain);
         this.planner = new Planner(terrain, oracle, camps);
+        this.structures = "false".equals(System.getProperty("countryroads.structures")) || io.github.profetgit.countryroads.Config.world().revision < 1 ? null
+            : new io.github.profetgit.countryroads.world.StructureOracle(level, Set.of());
+        this.planner.structures = structures;
+    }
+
+    /** Piece boxes of predicted structures that reach into this chunk (3 blocks around it). */
+    public List<net.minecraft.world.level.levelgen.structure.BoundingBox> structureBoxes(int cx, int cz) {
+        if (structures == null) return List.of();
+        List<net.minecraft.world.level.levelgen.structure.BoundingBox> out = new ArrayList<>();
+        int x0 = (cx << 4) - 3, z0 = (cz << 4) - 3, x1 = (cx << 4) + 18, z1 = (cz << 4) + 18;
+        for (var s : structures.find(cx - 6, cz - 6, cx + 6, cz + 6, false))
+            for (var b : s.boxes())
+                if (b.maxX() >= x0 && b.minX() <= x1 && b.maxZ() >= z0 && b.minZ() <= z1) out.add(b);
+        return out;
     }
 
     /** null outside the overworld or when the world has no villages. */
@@ -517,7 +533,7 @@ public final class RoadNetwork {
         else {
             List<VillageOracle.Footprint> villages = new ArrayList<>();
             for (var v : oracle.find(cx - 12, cz - 12, cx + 12, cz + 12)) villages.add(oracle.footprint(v));
-            m = ChunkMask.build(cx, cz, ready, villages, near, fields);
+            m = ChunkMask.build(cx, cz, ready, villages, near, fields, structureBoxes(cx, cz));
             if (!m.any()) m = ChunkMask.EMPTY;
         }
         if (masks.size() > 50_000) masks.clear();

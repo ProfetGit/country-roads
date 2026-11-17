@@ -145,8 +145,11 @@ public final class ChunkMask {
         return out;
     }
 
+    /** Columns kept clear around another structure's piece boxes. */
+    static final int STRUCT_MARGIN = 2;
+
     public static ChunkMask build(int cx, int cz, List<EdgePlan> plans, List<VillageOracle.Footprint> villages, List<EdgePlan> near,
-                                 List<Field> fields) {
+                                 List<Field> fields, List<net.minecraft.world.level.levelgen.structure.BoundingBox> structures) {
         ChunkMask m = new ChunkMask(cx, cz);
         m.fields = fields;
         if (!fields.isEmpty()) m.any = true;
@@ -159,16 +162,17 @@ public final class ChunkMask {
                 // a stretch shared with an earlier road is that road's to paint: two plans of one crossing tied column by
                 // column, so the posts on its two rails came from different bridges and did not line up
                 if (p.shared != null && p.shared[i] && p.shared[i + 1]) continue;
-                float x0 = p.x[i], z0 = p.z[i], x1 = p.x[i + 1], z1 = p.z[i + 1];
+                double x0 = p.x[i], z0 = p.z[i], x1 = p.x[i + 1], z1 = p.z[i + 1];
                 float r = Math.max(p.hw[i], p.hw[i + 1]) + EdgePlan.REACH;
                 int lx0 = Math.max(0, (int) Math.floor(Math.min(x0, x1) - r) - bx), lx1 = Math.min(15, (int) Math.ceil(Math.max(x0, x1) + r) - bx);
                 int lz0 = Math.max(0, (int) Math.floor(Math.min(z0, z1) - r) - bz), lz1 = Math.min(15, (int) Math.ceil(Math.max(z0, z1) + r) - bz);
-                float dx = x1 - x0, dz = z1 - z0, len2 = dx * dx + dz * dz;
+                float dx = (float) (x1 - x0), dz = (float) (z1 - z0), len2 = dx * dx + dz * dz;
                 for (int lx = lx0; lx <= lx1; lx++) {
                     for (int lz = lz0; lz <= lz1; lz++) {
-                        float px = bx + lx + 0.5f, pz = bz + lz + 0.5f;
-                        float raw = len2 == 0 ? 0 : ((px - x0) * dx + (pz - z0) * dz) / len2, t = Math.clamp(raw, 0f, 1f);
-                        float qx = x0 + t * dx - px, qz = z0 + t * dz - pz;
+                        double px = bx + lx + 0.5, pz = bz + lz + 0.5;
+                        double raw = len2 == 0 ? 0 : ((px - x0) * dx + (pz - z0) * dz) / len2;
+                        float t = (float) Math.clamp(raw, 0.0, 1.0);
+                        double qx = x0 + t * dx - px, qz = z0 + t * dz - pz;
                         float dist = (float) Math.sqrt(qx * qx + qz * qz);
                         float hw = p.hw[i] + t * (p.hw[i + 1] - p.hw[i]);
                         float v = hw - dist;
@@ -197,16 +201,16 @@ public final class ChunkMask {
                             m.ds[c] = sl > 1e-3f ? 1f / sl : 1f;
                             m.joint[c] = raw < 0 || raw > 1;
                             m.earth[c] = p.earth == null ? 99 : p.earth[k];
-                            float cross = dx * (pz - z0) - dz * (px - x0);
+                            float cross = (float) (dx * (pz - z0) - dz * (px - x0));
                             m.side[c] = (byte) (cross > 0 ? 1 : -1);
                             m.run[c] = -1;
                             for (EdgePlan.Run run : p.runs)
                                 if (i >= run.s0() && i <= run.s1() && (run.side() == 0 || run.side() == m.side[c])) m.run[c] = run.type();
                             m.s[c] = i + t;
                             m.plan[c] = p;
-                            m.slant[c] = dist > 1e-4f ? (Math.abs(qx) + Math.abs(qz)) / dist : 1f;
-                            m.ox[c] = dist > 1e-4f ? -qx / dist : 0;
-                            m.oz[c] = dist > 1e-4f ? -qz / dist : 0;
+                            m.slant[c] = dist > 1e-4f ? (float) ((Math.abs(qx) + Math.abs(qz)) / dist) : 1f;
+                            m.ox[c] = dist > 1e-4f ? (float) (-qx / dist) : 0;
+                            m.oz[c] = dist > 1e-4f ? (float) (-qz / dist) : 0;
                             m.any = true;
                         }
                     }
@@ -237,6 +241,24 @@ public final class ChunkMask {
                                 m.in[idx(lx, lz)] = Float.NEGATIVE_INFINITY;
                                 m.nofield[idx(lx, lz)] = true;
                             }
+            // other structures (outposts, ruined portals, temples, mineshafts): the road stops short of their pieces
+            // where it runs at their height (the painter clears up to the highest solid block, so it cut through them)
+            for (net.minecraft.world.level.levelgen.structure.BoundingBox b : structures)
+                for (int lx = 0; lx < 16; lx++)
+                    for (int lz = 0; lz < 16; lz++) {
+                        int x = bx + lx, z = bz + lz, c = idx(lx, lz);
+                        if (x < b.minX() - STRUCT_MARGIN || x > b.maxX() + STRUCT_MARGIN || z < b.minZ() - STRUCT_MARGIN || z > b.maxZ() + STRUCT_MARGIN) continue;
+                        float top = m.in[c] == Float.NEGATIVE_INFINITY ? Float.NaN : (float) m.surface(c);
+                        if (!Float.isNaN(top) && (top < b.minY() - 4 || top > b.maxY() + 3)) continue;
+                        m.in[c] = Float.NEGATIVE_INFINITY;
+                        m.nofield[c] = true;
+                    }
+            if (!structures.isEmpty())
+                m.decor.removeIf(d -> {
+                    for (net.minecraft.world.level.levelgen.structure.BoundingBox b : structures)
+                        if (d.x() >= b.minX() - STRUCT_MARGIN - 1 && d.x() <= b.maxX() + STRUCT_MARGIN + 1 && d.z() >= b.minZ() - STRUCT_MARGIN - 1 && d.z() <= b.maxZ() + STRUCT_MARGIN + 1) return true;
+                    return false;
+                });
             for (VillageOracle.Footprint f : villages)
                 for (int lx = 0; lx < 16; lx++)
                     for (int lz = 0; lz < 16; lz++) {

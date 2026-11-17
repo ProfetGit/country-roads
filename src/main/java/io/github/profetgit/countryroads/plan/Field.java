@@ -36,10 +36,11 @@ public final class Field {
     public final int sx, sz, armX, armZ, faceX, faceZ;
     private final double[] phase = new double[8];
     private final int pocketX, pocketZ;
-    private final float[] roadX, roadZ, roadHw;
+    private final double[] roadX, roadZ;
+    private final float[] roadHw;
     private volatile Rim rim;
 
-    public Field(double fx, double fz, double tx, double tz, int y, long seed, int[] scarecrow, float[] roadX, float[] roadZ, float[] roadHw) {
+    public Field(double fx, double fz, double tx, double tz, int y, long seed, int[] scarecrow, double[] roadX, double[] roadZ, float[] roadHw) {
         this.fx = fx;
         this.fz = fz;
         this.tx = tx;

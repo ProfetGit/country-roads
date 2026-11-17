@@ -169,7 +169,7 @@ final class StreetChecks {
     }
 
     /** Whether the point lies on a connector of another plan (roads that share a trunk leave the village over its connector). */
-    private static boolean sharesConnector(RoadNetwork n, io.github.profetgit.countryroads.plan.EdgePlan self, float x, float z) {
+    private static boolean sharesConnector(RoadNetwork n, io.github.profetgit.countryroads.plan.EdgePlan self, double x, double z) {
         for (var q : n.readyPlans()) {
             if (q == self) continue;
             for (int i = 0; i < q.length(); i++) {

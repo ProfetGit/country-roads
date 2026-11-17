@@ -181,12 +181,13 @@ public final class HousePaths {
         return pos;
     }
 
-    /** Open ground: the top block of the column is not built, a log, a stake or fluid, and not air (the void). */
+    /** Open ground: the top block of the column is not built, a log, a stake or fluid, and not air (the void); no build in the column. */
     private static boolean open(ServerLevel level, int x, int z, int floorY) {
         int top = level.getHeight(Heightmap.Types.MOTION_BLOCKING_NO_LEAVES, x, z) - 1;
         if (Math.abs(top - floorY) > 4) return false;
         BlockState s = level.getBlockState(new BlockPos(x, top, z));
-        return !s.isAir() && !Retrofit.isCrafted(s) && !s.is(BlockTags.LOGS) && !s.is(BlockTags.LEAVES) && s.getFluidState().isEmpty() && !s.is(Stake.BLOCK);
+        return !s.isAir() && !Retrofit.isCrafted(s) && !s.is(BlockTags.LOGS) && !s.is(BlockTags.LEAVES) && s.getFluidState().isEmpty() && !s.is(Stake.BLOCK)
+            && !ColumnSnapshot.build(level, new BlockPos.MutableBlockPos(), x, top, z, level.getMinY());
     }
 
     /**
@@ -357,13 +358,18 @@ public final class HousePaths {
                 if (c != null) snap.chunks.put(ChunkPos.pack(cx, cz), ColumnSnapshot.capture(c, level.getMinY()));
             }
         ColumnSnapshot.View view = new ColumnSnapshot.View(snap, x, z, r + 2, List.of());
-        int cols = 0, badGround = 0, badTree = 0;
+        int cols = 0, badGround = 0, badTree = 0, builds = 0;
         StringBuilder ex = new StringBuilder();
         for (int qx = x - r; qx <= x + r; qx++)
             for (int qz = z - r; qz <= z + r; qz++) {
                 if (snap.get(qx >> 4, qz >> 4) == null) continue;
                 cols++;
                 int live = liveGround(level, qx, qz), g = view.ground(qx, qz);
+                if (view.built(qx, qz) && builds++ < 40) {
+                    int top = level.getHeight(Heightmap.Types.MOTION_BLOCKING_NO_LEAVES, qx, qz) - 1;
+                    String why = ColumnSnapshot.why(level, new BlockPos.MutableBlockPos(), qx, top, qz, level.getMinY(), null, null);
+                    if (why != null) io.github.profetgit.countryroads.CountryRoads.LOG.info("CR-BUILDCOL " + qx + " " + top + " " + qz + " " + why);
+                }
                 if (live != g) {
                     if (badGround++ < 4) ex.append(" ground ").append(qx).append(',').append(qz).append(" live=").append(live).append(" snap=").append(g);
                     continue;
@@ -389,7 +395,7 @@ public final class HousePaths {
                     }
                 }
             }
-        return "CR-SNAPCHECK " + (badGround == 0 && badTree == 0 ? "PASS" : "FAIL") + " columns=" + cols + " ground=" + badGround + " tree=" + badTree + ex;
+        return "CR-SNAPCHECK " + (badGround == 0 && badTree == 0 ? "PASS" : "FAIL") + " columns=" + cols + " ground=" + badGround + " tree=" + badTree + " builds=" + builds + ex;
     }
 
     /** The old survey's ground rule, read live (PathSearch.passable before the snapshot). */
@@ -405,7 +411,9 @@ public final class HousePaths {
             while (below > level.getMinY() && level.getBlockState(new BlockPos(x, below, z)).is(Blocks.WATER) && top - below < 6) below--;
             return top - below >= 6 ? Terrain.DEEP + top : top + Terrain.WET;
         }
-        if (!s.getFluidState().isEmpty() || s.is(BlockTags.LOGS) || (Retrofit.isCrafted(s) && !RoadColumns.isRoad(level, x, z))) return Terrain.CLOSED;
+        if (!s.getFluidState().isEmpty() || s.is(BlockTags.LOGS)) return Terrain.CLOSED;
+        if (!RoadColumns.isRoad(level, x, z) && (Retrofit.isCrafted(s) || ColumnSnapshot.build(level, new BlockPos.MutableBlockPos(), x, top, z, level.getMinY())))
+            return Terrain.CLOSED;
         return top;
     }
 

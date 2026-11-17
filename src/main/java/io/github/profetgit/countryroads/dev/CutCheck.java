@@ -108,7 +108,7 @@ final class CutCheck {
                 for (int q = Math.max(0, i - 10); q <= Math.min(p.length() - 1, i + 10); q++) nearDeck |= p.kind[q] != EdgePlan.GROUND;
                 if (nearDeck) continue;
                 int a = Math.max(0, i - 2), b = Math.min(p.length() - 1, i + 2);
-                float tx = p.x[b] - p.x[a], tz = p.z[b] - p.z[a], len = (float) Math.hypot(tx, tz);
+                float tx = (float) (p.x[b] - p.x[a]), tz = (float) (p.z[b] - p.z[a]), len = (float) Math.hypot(tx, tz);
                 if (len < 1e-3f) continue;
                 float nx = -tz / len, nz = tx / len;
                 int roadY = Math.round(p.y[i]);

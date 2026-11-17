@@ -31,6 +31,10 @@ public final class Planner {
     private final VillageOracle oracle;
     private final Router router;
     private final Camps camps;
+    /** Other structures the router steers around (null: none). */
+    public io.github.profetgit.countryroads.world.StructureOracle structures;
+    /** Blocks kept between a structure's pieces and the coarse cells the router avoids. */
+    static final int AVOID_MARGIN = 4;
 
     public Planner(TerrainSampler terrain, VillageOracle oracle) {
         this.terrain = terrain;
@@ -44,6 +48,23 @@ public final class Planner {
         this.oracle = oracle;
         this.router = new Router(terrain);
         this.camps = camps;
+    }
+
+    /** Coarse router cells within the route's ellipse that a predicted surface structure (plus AVOID_MARGIN) reaches into. */
+    private it.unimi.dsi.fastutil.longs.LongOpenHashSet avoidCells(int[] ja, int[] jb, double ellipse) {
+        var out = new it.unimi.dsi.fastutil.longs.LongOpenHashSet();
+        if (structures == null) return out;
+        double mx = (ja[0] + jb[0]) / 2.0, mz = (ja[1] + jb[1]) / 2.0;
+        double half = (Math.hypot(jb[0] - ja[0], jb[1] - ja[1]) * ellipse + 4 * Router.CELL) / 2 + Router.CELL;
+        int c0x = (int) Math.floor((mx - half) / 16), c0z = (int) Math.floor((mz - half) / 16), c1x = (int) Math.floor((mx + half) / 16), c1z = (int) Math.floor((mz + half) / 16);
+        for (var s : structures.find(c0x - 2, c0z - 2, c1x + 2, c1z + 2, true)) {
+            if (!s.route()) continue;
+            for (BoundingBox b : s.boxes())
+                for (int i = Math.floorDiv(b.minX() - AVOID_MARGIN, Router.CELL); i <= Math.floorDiv(b.maxX() + AVOID_MARGIN, Router.CELL); i++)
+                    for (int j = Math.floorDiv(b.minZ() - AVOID_MARGIN, Router.CELL); j <= Math.floorDiv(b.maxZ() + AVOID_MARGIN, Router.CELL); j++)
+                        out.add(Router.cellKey(i, j));
+        }
+        return out;
     }
 
     /** null when the pair gets no road (no land route, or far too costly). */
@@ -129,7 +150,8 @@ public final class Planner {
         for (Trunk t : trunks)
             for (int i = 0; i < t.p.length(); i += 4)
                 trunkCells.add(Router.cellKey(Math.floorDiv((int) t.p.x[i], Router.CELL), Math.floorDiv((int) t.p.z[i], Router.CELL)));
-        Router.Result r = router.route(ja[0], ja[1], jb[0], jb[1], ellipse(e.length()), trunkCells::contains);
+        it.unimi.dsi.fastutil.longs.LongOpenHashSet avoid = avoidCells(ja, jb, ellipse(e.length()));
+        Router.Result r = router.route(ja[0], ja[1], jb[0], jb[1], ellipse(e.length()), trunkCells::contains, avoid::contains);
         if (r == null) return noPlan(e, "no route " + ja[0] + "," + ja[1] + " -> " + jb[0] + "," + jb[1]);
         double straight = Math.hypot(jb[0] - ja[0], jb[1] - ja[1]);
         if (r.cost() > straight * 10 * 14) return noPlan(e, "route cost " + r.cost() + " over " + Math.round(straight * 140));
@@ -290,7 +312,8 @@ public final class Planner {
         int n = end - start + 1;
         if (n < 8) return noPlan(e, "only " + n + " samples outside the villages");
 
-        float[] x = new float[n], z = new float[n], ground = new float[n], water = new float[n], hw = new float[n], pin = new float[n];
+        double[] x = new double[n], z = new double[n];
+        float[] ground = new float[n], water = new float[n], hw = new float[n], pin = new float[n];
         boolean[] shared = new boolean[n];
         byte[] kindPin = new byte[n];
         boolean[] river = new boolean[n];
@@ -312,7 +335,8 @@ public final class Planner {
         // still runs on into the road's bend (water continuing past the straightened part): the straight part grows
         // each round straightens the original line, with the crossings found on the previous round's line (a crossing
         // that grows into the bend is straightened further), until the crossings stop changing
-        float[] x0 = x.clone(), z0 = z.clone(), ground0 = ground.clone(), water0 = water.clone();
+        double[] x0 = x.clone(), z0 = z.clone();
+        float[] ground0 = ground.clone(), water0 = water.clone();
         boolean[] river0 = river.clone();
         profile(ground, water, river, kind, pin, kindPin, connA, connB);
         // crossings only grow from round to round (a crossing that flipped between two extents never settled)
@@ -445,7 +469,7 @@ public final class Planner {
         return plan;
     }
 
-    private void sampleAt(int i, float[] x, float[] z, float[] ground, float[] water, boolean[] river) {
+    private void sampleAt(int i, double[] x, double[] z, float[] ground, float[] water, boolean[] river) {
         TerrainSampler.Sample s = terrain.sample((int) Math.floor(x[i]), (int) Math.floor(z[i]));
         ground[i] = s.ground();
         water[i] = s.water();
@@ -478,10 +502,10 @@ public final class Planner {
      * line. Sample count stays the same (samples on the bridge sit a little closer than a block).
      */
     /** One straight line per crossing: samples a0..b0 lie on it, lo..a0 and b0..hi ease from the old line onto it. */
-    record Line(int a, int b, int a0, int b0, int lo, int hi, float ox, float oz, float dx, float dz) {}
+    record Line(int a, int b, int a0, int b0, int lo, int hi, double ox, double oz, float dx, float dz) {}
 
-    static boolean[] straighten(float[] x, float[] z, byte[] kind, float[] water, float[] ground, float[] pin,
-                                java.util.function.BiPredicate<Float, Float> blocked, java.util.function.BiPredicate<Float, Float> wetAt) {
+    static boolean[] straighten(double[] x, double[] z, byte[] kind, float[] water, float[] ground, float[] pin,
+                                java.util.function.BiPredicate<Double, Double> blocked, java.util.function.BiPredicate<Double, Double> wetAt) {
         int n = x.length;
         List<int[]> runs = new ArrayList<>();
         for (int i = 0; i < n; ) {
@@ -538,7 +562,7 @@ public final class Planner {
      * Moves the samples lo..hi onto the line (easing at both ends) unless a real move would cross a pinned sample or come
      * near a village building. Returns whether it moved them.
      */
-    private static boolean apply(Line l, float[] x, float[] z, float[] pin, java.util.function.BiPredicate<Float, Float> blocked, boolean[] moved) {
+    private static boolean apply(Line l, double[] x, double[] z, float[] pin, java.util.function.BiPredicate<Double, Double> blocked, boolean[] moved) {
         return apply(l, x, z, pin, blocked, moved, null, null);
     }
 
@@ -548,8 +572,8 @@ public final class Planner {
      * part may run on over water (profiled again it joins the crossing); a crossing whose eases cannot stay on land
      * falls back to its plain chord (straight, diagonal).
      */
-    private static boolean apply(Line l, float[] x, float[] z, float[] pin, java.util.function.BiPredicate<Float, Float> blocked, boolean[] moved,
-                                 boolean[] dry, java.util.function.BiPredicate<Float, Float> deepAt) {
+    private static boolean apply(Line l, double[] x, double[] z, float[] pin, java.util.function.BiPredicate<Double, Double> blocked, boolean[] moved,
+                                 boolean[] dry, java.util.function.BiPredicate<Double, Double> deepAt) {
         // a long ease that swings past a building (or onto a shared stretch, or into a kink) gets shorter on that side,
         // then the straight past the water gets shorter, before the crossing gives up
         for (Line t = l; ; ) {
@@ -571,14 +595,14 @@ public final class Planner {
     }
 
     /** Integer.MIN_VALUE when the line was applied, else the sample that stopped it. */
-    private static int applyOnce(Line l, float[] x, float[] z, float[] pin, java.util.function.BiPredicate<Float, Float> blocked, boolean[] moved,
-                                 boolean[] dry, java.util.function.BiPredicate<Float, Float> deepAt) {
-        float[] nx = new float[l.hi() - l.lo() + 1], nz = new float[nx.length];
+    private static int applyOnce(Line l, double[] x, double[] z, float[] pin, java.util.function.BiPredicate<Double, Double> blocked, boolean[] moved,
+                                 boolean[] dry, java.util.function.BiPredicate<Double, Double> deepAt) {
+        double[] nx = new double[l.hi() - l.lo() + 1], nz = new double[nx.length];
         for (int k = l.lo(); k <= l.hi(); k++) {
             float u = k < l.a0() ? (k - l.lo()) / (float) (l.a0() - l.lo()) : k > l.b0() ? (l.hi() - k) / (float) (l.hi() - l.b0()) : 1f;
             float w = u * u * (3 - 2 * u);
-            float px = x[k] + (l.ox() + l.dx() * k - x[k]) * w, pz = z[k] + (l.oz() + l.dz() * k - z[k]) * w;
-            float shift = Math.abs(px - x[k]) + Math.abs(pz - z[k]);
+            double px = x[k] + (l.ox() + l.dx() * k - x[k]) * w, pz = z[k] + (l.oz() + l.dz() * k - z[k]) * w;
+            double shift = Math.abs(px - x[k]) + Math.abs(pz - z[k]);
             // a snap of half a block at an anchored end is no risk; a real move must stay clear of buildings
             if (shift > 1e-4f && !Float.isNaN(pin[k]) || shift > 0.5f && blocked.test(px, pz)) {
                 if (TRACE_BRIDGES) io.github.profetgit.countryroads.CountryRoads.LOG.info("CR-STRAIGHT skip " + l.a() + ".." + l.b() + " at sample " + k + " ("
@@ -596,7 +620,7 @@ public final class Planner {
         // there before (a short ease left a kink whose two strands were side by side, 1.5 blocks apart in height)
         int n = x.length;
         for (int k = Math.max(2, l.lo() - 2); k <= Math.min(n - 3, l.hi() + 2); k++) {
-            float[] p0 = at(l, x, z, nx, nz, k - 2), p1 = at(l, x, z, nx, nz, k), p2 = at(l, x, z, nx, nz, k + 2);
+            double[] p0 = at(l, x, z, nx, nz, k - 2), p1 = at(l, x, z, nx, nz, k), p2 = at(l, x, z, nx, nz, k + 2);
             double now = turn(p0[0], p0[1], p1[0], p1[1], p2[0], p2[1]), was = turn(x[k - 2], z[k - 2], x[k], z[k], x[k + 2], z[k + 2]);
             if (now > KINK && now > was + 15) {
                 if (TRACE_BRIDGES) io.github.profetgit.countryroads.CountryRoads.LOG.info("CR-STRAIGHT skip " + l.a() + ".." + l.b() + " kink at sample " + k + " (" + Math.round(now) + " deg)");
@@ -612,21 +636,22 @@ public final class Planner {
         return Integer.MIN_VALUE;
     }
 
-    private static float[] at(Line l, float[] x, float[] z, float[] nx, float[] nz, int k) {
-        return k >= l.lo() && k <= l.hi() ? new float[]{nx[k - l.lo()], nz[k - l.lo()]} : new float[]{x[k], z[k]};
+    private static double[] at(Line l, double[] x, double[] z, double[] nx, double[] nz, int k) {
+        return k >= l.lo() && k <= l.hi() ? new double[]{nx[k - l.lo()], nz[k - l.lo()]} : new double[]{x[k], z[k]};
     }
 
     /** Degrees the line turns at (bx, bz) coming from a and going to c. */
-    private static double turn(float ax, float az, float bx, float bz, float cx, float cz) {
+    private static double turn(double ax, double az, double bx, double bz, double cx, double cz) {
         double ux = bx - ax, uz = bz - az, vx = cx - bx, vz = cz - bz, lu = Math.hypot(ux, uz), lv = Math.hypot(vx, vz);
         if (lu < 1e-3 || lv < 1e-3) return 180;
         return Math.toDegrees(Math.acos(Math.clamp((ux * vx + uz * vz) / (lu * lv), -1.0, 1.0)));
     }
 
     /** The straight line for the crossing a..b (see straighten). */
-    private static Line line(float[] x, float[] z, int a, int b, java.util.function.BiPredicate<Float, Float> wetAt) {
+    private static Line line(double[] x, double[] z, int a, int b, java.util.function.BiPredicate<Double, Double> wetAt) {
         int n = x.length;
-        float cx = x[b] - x[a], cz = z[b] - z[a], len = (float) Math.hypot(cx, cz);
+        double cx = x[b] - x[a], cz = z[b] - z[a];
+        float len = (float) Math.hypot(cx, cz);
         float turn = (float) Math.toDegrees(Math.atan2(Math.min(Math.abs(cx), Math.abs(cz)), Math.max(Math.abs(cx), Math.abs(cz))));
         int ease = BRIDGE_EASE + Math.round(BRIDGE_EASE_TURN * turn / 45f);
         boolean fixA = a - ease < 1, fixB = b + ease > n - 2;
@@ -635,18 +660,19 @@ public final class Planner {
         // the axis that crosses less water: laid along the nearer axis, a diagonal crossing of a river running the
         // other way ran along it (28 wet samples became an 85-block viaduct)
         if (!(fixA && fixB) && !OLD_DECK) {
-            float mx = (x[a] + x[b]) / 2, mz = (z[a] + z[b]) / 2;
+            double mx = (x[a] + x[b]) / 2, mz = (z[a] + z[b]) / 2;
             int near = alongX ? wetSpan(mx, mz, 1, 0, wetAt) : wetSpan(mx, mz, 0, 1, wetAt);
             int far = alongX ? wetSpan(mx, mz, 0, 1, wetAt) : wetSpan(mx, mz, 1, 0, wetAt);
             if (TRACE_BRIDGES) io.github.profetgit.countryroads.CountryRoads.LOG.info("CR-AXIS " + a + ".." + b + " at " + mx + "," + mz + " near=" + near + " far=" + far + (far < near * AXIS_SWAP ? " swap" : ""));
             if (far < near * AXIS_SWAP) alongX = !alongX;
         }
-        float ax = alongX ? Math.signum(cx) : 0, az = alongX ? 0 : Math.signum(cz);
+        float ax = alongX ? (float) Math.signum(cx) : 0, az = alongX ? 0 : (float) Math.signum(cz);
         // through the middle (free), from the anchored end (one end fixed), or the chord (both fixed)
-        float ox, oz, dx, dz;
+        double ox, oz;
+        float dx, dz;
         if (fixA && fixB) {
-            dx = cx / (b - a);
-            dz = cz / (b - a);
+            dx = (float) (cx / (b - a));
+            dz = (float) (cz / (b - a));
             ox = x[a] - dx * a;
             oz = z[a] - dz * a;
         } else {
@@ -654,8 +680,8 @@ public final class Planner {
             float mid = anchor >= 0 ? anchor : (a + b) / 2f;
             ox = anchor >= 0 ? x[anchor] : (x[a] + x[b]) / 2;
             oz = anchor >= 0 ? z[anchor] : (z[a] + z[b]) / 2;
-            if (alongX) oz = (float) Math.floor(oz) + 0.5f;
-            else ox = (float) Math.floor(ox) + 0.5f;
+            if (alongX) oz = Math.floor(oz) + 0.5;
+            else ox = Math.floor(ox) + 0.5;
             dx = ax * step;
             dz = az * step;
             ox -= dx * mid;
@@ -681,7 +707,7 @@ public final class Planner {
     static final int SPAN_MAX = 160;
 
     /** Blocks of water on the axis line through (x, z) both ways, to the first dry block each way. */
-    static int wetSpan(float x, float z, int ux, int uz, java.util.function.BiPredicate<Float, Float> wetAt) {
+    static int wetSpan(double x, double z, int ux, int uz, java.util.function.BiPredicate<Double, Double> wetAt) {
         int span = 0;
         for (int dir = -1; dir <= 1; dir += 2)
             for (int k = dir < 0 ? 1 : 0; k < SPAN_MAX && wetAt.test(x + ux * k * dir, z + uz * k * dir); k++) span++;
@@ -692,7 +718,7 @@ public final class Planner {
     static final double BEND_MAX = 8;
 
     /** Sharpest turn on samples a..b (degrees between the headings over 3 samples before and after). */
-    static double bend(float[] x, float[] z, int a, int b) {
+    static double bend(double[] x, double[] z, int a, int b) {
         double most = 0;
         for (int k = a + 3; k + 3 <= b; k++) {
             double h1 = Math.atan2(z[k] - z[k - 3], x[k] - x[k - 3]), h2 = Math.atan2(z[k + 3] - z[k], x[k + 3] - x[k]);
@@ -706,7 +732,7 @@ public final class Planner {
      * straightened part, or the chord pass was refused) is laid on the chord between its own ends. The ends stay, so the
      * road either side and every height are unchanged. Returns the moved samples.
      */
-    static boolean[] straightDecks(float[] x, float[] z, byte[] kind, float[] pin, java.util.function.BiPredicate<Float, Float> blocked) {
+    static boolean[] straightDecks(double[] x, double[] z, byte[] kind, float[] pin, java.util.function.BiPredicate<Double, Double> blocked) {
         int n = x.length;
         boolean[] moved = new boolean[n];
         for (int i = 0; i < n; ) {
@@ -715,7 +741,7 @@ public final class Planner {
             int a = i, b = j;
             i = j + 1;
             if (kind[a] != EdgePlan.BRIDGE || b - a < 6 || bend(x, z, a, b) <= BEND_MAX) continue;
-            float cx = x[b] - x[a], cz = z[b] - z[a];
+            double cx = x[b] - x[a], cz = z[b] - z[a];
             boolean ok = true;
             for (int k = a + 1; k < b && ok; k++) {
                 float t = (k - a) / (float) (b - a);
@@ -736,15 +762,15 @@ public final class Planner {
     /** Water at least this deep under an ease sample that stood on dry ground stops the chord pass's ease (see apply). */
     static final int EASE_DEEP = Integer.getInteger("countryroads.easeDeep", 1);
 
-    private boolean deepAt(float px, float pz) {
+    private boolean deepAt(double px, double pz) {
         TerrainSampler.Sample smp = terrain.sample((int) Math.floor(px), (int) Math.floor(pz));
         return smp.wet() && smp.depth() >= EASE_DEEP;
     }
 
     /** Wet bridge runs more than half a block off the straight line between their ends, put on that line. */
-    static boolean[] chordBridges(float[] x, float[] z, byte[] kind, float[] water, float[] ground, float[] pin,
-                                  java.util.function.BiPredicate<Float, Float> blocked, java.util.function.BiPredicate<Float, Float> wetAt,
-                                  java.util.function.BiPredicate<Float, Float> deepAt) {
+    static boolean[] chordBridges(double[] x, double[] z, byte[] kind, float[] water, float[] ground, float[] pin,
+                                  java.util.function.BiPredicate<Double, Double> blocked, java.util.function.BiPredicate<Double, Double> wetAt,
+                                  java.util.function.BiPredicate<Double, Double> deepAt) {
         int n = x.length;
         boolean[] moved = new boolean[n];
         boolean[] dry = new boolean[n];
@@ -758,9 +784,10 @@ public final class Planner {
             if (kind[a] != EdgePlan.BRIDGE || b - a < 2) continue;
             boolean wet = false;
             for (int k = a; k <= b; k++) wet |= water[k] > ground[k];
-            float cx = x[b] - x[a], cz = z[b] - z[a], len = (float) Math.hypot(cx, cz), dev = 0;
+            double cx = x[b] - x[a], cz = z[b] - z[a];
+            float len = (float) Math.hypot(cx, cz), dev = 0;
             if (!wet && b - a < 3 || len < 1) continue;
-            for (int k = a; k <= b; k++) dev = Math.max(dev, Math.abs((x[k] - x[a]) * cz - (z[k] - z[a]) * cx) / len);
+            for (int k = a; k <= b; k++) dev = (float) Math.max(dev, Math.abs((x[k] - x[a]) * cz - (z[k] - z[a]) * cx) / len);
             if (dev <= 0.5f && (Math.abs(cx) < 0.05f * len || Math.abs(cz) < 0.05f * len)) continue;
             // the axis line first (the road either side eases, without a new profile: heights stay, the painter fills),
             // the plain chord between the run's own ends only where that would come near a building
@@ -787,10 +814,10 @@ public final class Planner {
      * Whether (x, z) is within TRUNK_CLEAR of an earlier road's centreline: a straightened line moved next to another road
      * met it at a different height (the planner does not match heights where roads cross).
      */
-    private static boolean nearTrunk(List<Trunk> trunks, float x, float z) {
+    private static boolean nearTrunk(List<Trunk> trunks, double x, double z) {
         for (Trunk t : trunks)
             for (int k = 0; k < t.p.length(); k++) {
-                float dx = t.p.x[k] - x, dz = t.p.z[k] - z;
+                double dx = t.p.x[k] - x, dz = t.p.z[k] - z;
                 if (dx * dx + dz * dz < TRUNK_CLEAR * TRUNK_CLEAR) return true;
             }
         return false;
@@ -805,12 +832,13 @@ public final class Planner {
     static final int PIN_EASE = 6;
 
     /** Degrees between the axis (ax, az), pointed away from the bridge, and the old line's heading over 12 samples from k. */
-    private static float turnFrom(float[] x, float[] z, int k, int dir, float ax, float az) {
+    private static float turnFrom(double[] x, double[] z, int k, int dir, double ax, double az) {
         int e = Math.clamp(k + 12 * dir, 0, x.length - 1);
-        float vx = x[e] - x[k], vz = z[e] - z[k], len = (float) Math.hypot(vx, vz);
+        double vx = x[e] - x[k], vz = z[e] - z[k];
+        float len = (float) Math.hypot(vx, vz);
         if (len < 1e-3f) return 0;
-        float cos = (vx * ax * dir + vz * az * dir) / len;
-        return (float) Math.toDegrees(Math.acos(Math.clamp(cos, -1f, 1f)));
+        double cos = (vx * ax * dir + vz * az * dir) / len;
+        return (float) Math.toDegrees(Math.acos(Math.clamp(cos, -1.0, 1.0)));
     }
 
     /** Style, wood pair and arch rise per bridge run, decided once per crossing so the whole bridge matches. */
@@ -916,11 +944,11 @@ public final class Planner {
         }
     }
 
-    private static int nearestSample(EdgePlan p, float x, float z) {
+    private static int nearestSample(EdgePlan p, double x, double z) {
         int best = 0;
-        float bd = Float.MAX_VALUE;
+        double bd = Double.MAX_VALUE;
         for (int i = 0; i < p.length(); i += 2) {
-            float d = (p.x[i] - x) * (p.x[i] - x) + (p.z[i] - z) * (p.z[i] - z);
+            double d = (p.x[i] - x) * (p.x[i] - x) + (p.z[i] - z) * (p.z[i] - z);
             if (d < bd) {
                 bd = d;
                 best = i;
@@ -964,7 +992,7 @@ public final class Planner {
             if (i < 3 || i >= p.length() - 3 || p.kind[i] != EdgePlan.GROUND) continue;
             int a = i - 3, b = i + 3;
             if (Math.abs(p.y[b] - p.y[a]) > 3.2f) continue;
-            float tx = (p.x[b] - p.x[a]) * dir, tz = (p.z[b] - p.z[a]) * dir;
+            float tx = (float) ((p.x[b] - p.x[a]) * dir), tz = (float) ((p.z[b] - p.z[a]) * dir);
             float len = (float) Math.hypot(tx, tz);
             tx /= len;
             tz /= len;
@@ -1430,7 +1458,7 @@ public final class Planner {
      * the heights of different samples: a 1.5-block step between neighbouring columns. Their heights are brought within
      * FOLD_STEP of each other (the lower one raised, then the grade passes again, raise only).
      */
-    static void foldBends(float[] x, float[] z, float[] y, byte[] kind, float[] pin, int connA, int connB) {
+    static void foldBends(double[] x, double[] z, float[] y, byte[] kind, float[] pin, int connA, int connB) {
         int n = y.length;
         for (int round = 0; round < 8; round++) {
             boolean changed = false;
@@ -1440,7 +1468,7 @@ public final class Planner {
                     float d = (float) Math.hypot(x[j] - x[i], z[j] - z[i]);
                     // touching only across a sharp turn: the road's direction at the two samples differs by over 60 deg
                     if (d > FOLD_REACH || i + 1 >= n || j + 1 >= n) continue;
-                    float ax = x[i + 1] - x[i], az = z[i + 1] - z[i], bx = x[j + 1] - x[j], bz = z[j + 1] - z[j];
+                    double ax = x[i + 1] - x[i], az = z[i + 1] - z[i], bx = x[j + 1] - x[j], bz = z[j + 1] - z[j];
                     float la = (float) Math.hypot(ax, az), lb = (float) Math.hypot(bx, bz);
                     if (la < 1e-3f || lb < 1e-3f || (ax * bx + az * bz) / (la * lb) > FOLD_COS) continue;
                     int lo = y[i] < y[j] ? i : j, hi = lo == i ? j : i;

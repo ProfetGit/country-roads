@@ -57,6 +57,14 @@ public final class Router {
 
     /** trunk: coarse cells an existing road runs through; travelling along them is cheap (the road is already built). */
     public Result route(int ax, int az, int bx, int bz, double ellipseFactor, java.util.function.LongPredicate trunk) {
+        return route(ax, az, bx, bz, ellipseFactor, trunk, k -> false);
+    }
+
+    /** Extra cost of entering a coarse cell another structure stands in: roads go round outposts, portals and temples. */
+    public static final int AVOID = Integer.getInteger("countryroads.structCost", 3000);
+
+    /** avoid: coarse cells a structure stands in; entering one costs AVOID on top. */
+    public Result route(int ax, int az, int bx, int bz, double ellipseFactor, java.util.function.LongPredicate trunk, java.util.function.LongPredicate avoid) {
         int ai = Math.floorDiv(ax, CELL), aj = Math.floorDiv(az, CELL);
         int bi = Math.floorDiv(bx, CELL), bj = Math.floorDiv(bz, CELL);
         double d = Math.hypot(bi - ai, bj - aj);
@@ -105,6 +113,7 @@ public final class Router {
                     }
                 }
                 if (step < 0) continue;
+                if (avoid.test(cellKey(ni, nj))) step += AVOID;
                 long g = n.g + step;
                 long ns = state(ni, nj, nh);
                 if (g >= best.get(ns)) continue;

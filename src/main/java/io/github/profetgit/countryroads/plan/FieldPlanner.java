@@ -44,13 +44,13 @@ final class FieldPlanner {
         tz /= l;
         double fx = p.x[i], fz = p.z[i], nx = -tz, nz = tx;
         long fseed = Field.mix(seed ^ (k * 0x9E3779B97F4A7C15L));
-        Field probe = new Field(fx, fz, tx, tz, Math.round(p.y[i]), fseed, null, new float[0], new float[0], new float[0]);
+        Field probe = new Field(fx, fz, tx, tz, Math.round(p.y[i]), fseed, null, new double[0], new double[0], new float[0]);
         // every road sample under the blob (and a margin) is plain ground; no village decor stands in it
-        java.util.List<float[]> road = new java.util.ArrayList<>();
+        java.util.List<double[]> road = new java.util.ArrayList<>();
         for (int j = 0; j < p.length(); j++) {
             if (!probe.covers(p.x[j], p.z[j], 12)) continue;
             if (p.kind[j] != EdgePlan.GROUND) return null;
-            road.add(new float[]{p.x[j], p.z[j], p.hw[j]});
+            road.add(new double[]{p.x[j], p.z[j], p.hw[j]});
         }
         for (EdgePlan.Decor d : p.decor)
             if (d.type() != EdgePlan.PROP && Math.hypot(d.x() - fx, d.z() - fz) < 50) return null;
@@ -67,11 +67,12 @@ final class FieldPlanner {
             max = Math.max(max, s.ground());
         }
         if (max - min > 6) return null;
-        float[] rx = new float[road.size()], rz = new float[road.size()], rh = new float[road.size()];
+        double[] rx = new double[road.size()], rz = new double[road.size()];
+        float[] rh = new float[road.size()];
         for (int j = 0; j < rx.length; j++) {
             rx[j] = road.get(j)[0];
             rz[j] = road.get(j)[1];
-            rh[j] = road.get(j)[2];
+            rh[j] = (float) road.get(j)[2];
         }
         int[] scare = Field.u(fseed, 4, 0, 0) < 0.8 ? scarecrow(p, terrain, probe, fx, fz, tx, tz, nx, nz, fseed, road) : null;
         return new Field(fx, fz, tx, tz, Math.round(p.y[i]), fseed, scare, rx, rz, rh);
@@ -79,7 +80,7 @@ final class FieldPlanner {
 
     /** A pole column 8-14 blocks off the road inside the field with its two arm columns level and in one chunk; null when none fits. */
     private static int[] scarecrow(EdgePlan p, TerrainSampler terrain, Field f, double fx, double fz, double tx, double tz, double nx, double nz, long seed,
-                                   java.util.List<float[]> road) {
+                                   java.util.List<double[]> road) {
         int side = Field.u(seed, 5, 0, 0) < 0.5 ? 1 : -1;
         int ax = Math.abs(tx) >= Math.abs(tz) ? 1 : 0, az = 1 - ax;
         for (int attempt = 0; attempt < 14; attempt++) {
@@ -96,7 +97,7 @@ final class FieldPlanner {
                 g = s.ground();
             }
             if (!ok) continue;
-            for (float[] r : road) if (Math.hypot(r[0] - (px + 0.5), r[1] - (pz + 0.5)) < r[2] + 7) ok = false;
+            for (double[] r : road) if (Math.hypot(r[0] - (px + 0.5), r[1] - (pz + 0.5)) < r[2] + 7) ok = false;
             if (!ok) continue;
             double toward = ax == 1 ? -nz * side : -nx * side;
             int fdx = ax == 1 ? 0 : (toward >= 0 ? 1 : -1), fdz = ax == 1 ? (toward >= 0 ? 1 : -1) : 0;

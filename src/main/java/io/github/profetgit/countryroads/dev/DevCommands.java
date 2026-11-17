@@ -36,8 +36,29 @@ public final class DevCommands {
         if (task != null && task.getAsBoolean()) TASKS.poll();
     }
 
+    private static java.util.List<java.util.function.BooleanSupplier> capture;
+
     public static void queue(java.util.function.BooleanSupplier task) {
-        TASKS.add(task);
+        if (capture != null) capture.add(task);
+        else TASKS.add(task);
+    }
+
+    /** Runs a command body now and returns the tasks it queued as one task, to run in its caller's turn instead of last. */
+    static java.util.function.BooleanSupplier inline(Runnable body) {
+        var mine = new java.util.ArrayList<java.util.function.BooleanSupplier>();
+        capture = mine;
+        try {
+            body.run();
+        } finally {
+            capture = null;
+        }
+        return () -> {
+            while (!mine.isEmpty()) {
+                if (!mine.getFirst().getAsBoolean()) return false;
+                mine.removeFirst();
+            }
+            return true;
+        };
     }
 
     public static boolean busy() {
@@ -88,6 +109,8 @@ public final class DevCommands {
                 .then(Commands.argument("radius", IntegerArgumentType.integer(16, 4000)).executes(c -> RoadChecks.pregen(c.getSource(), IntegerArgumentType.getInteger(c, "radius")))))
             .then(Commands.literal("check")
                 .then(Commands.argument("radius", IntegerArgumentType.integer(16, 4000)).executes(c -> RoadChecks.check(c.getSource(), IntegerArgumentType.getInteger(c, "radius")))))
+            .then(Commands.literal("structcheck")
+                .then(Commands.argument("radius", IntegerArgumentType.integer(16, 4000)).executes(c -> StructCheck.run(c.getSource(), IntegerArgumentType.getInteger(c, "radius")))))
             .then(Commands.literal("roads")
                 .then(Commands.argument("radius", IntegerArgumentType.integer(16, 8000)).executes(c -> RoadChecks.roads(c.getSource(), IntegerArgumentType.getInteger(c, "radius")))))
             .then(Commands.literal("savedbamboo")
@@ -214,6 +237,10 @@ public final class DevCommands {
                         CountryRoads.LOG.info(sb.toString());
                         return 1;
                     }))))
+            .then(Commands.literal("testtown").executes(c -> TestTown.run(c.getSource(), 5))
+                .then(Commands.literal("check").executes(c -> TestTown.check(c.getSource())))
+                .then(Commands.literal("stake").then(Commands.argument("i", IntegerArgumentType.integer(0)).executes(c -> TestTown.stake(c.getSource(), IntegerArgumentType.getInteger(c, "i")))))
+                .then(Commands.argument("half", IntegerArgumentType.integer(1, 8)).executes(c -> TestTown.run(c.getSource(), IntegerArgumentType.getInteger(c, "half")))))
             .then(Commands.literal("staketest")
                 .then(Commands.argument("x", IntegerArgumentType.integer()).then(Commands.argument("z", IntegerArgumentType.integer())
                     .executes(c -> StakeTest.run(c.getSource(), IntegerArgumentType.getInteger(c, "x"), IntegerArgumentType.getInteger(c, "z"), false))

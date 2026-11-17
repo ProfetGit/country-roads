@@ -70,7 +70,7 @@ public final class Camps {
             if (!gentle(p, i)) continue;
             int side = ((h >>> (tries + 3)) & 1) == 0 ? 1 : -1;
             int a = i - 3, b = i + 3;
-            float tx = p.x[b] - p.x[a], tz = p.z[b] - p.z[a];
+            float tx = (float) (p.x[b] - p.x[a]), tz = (float) (p.z[b] - p.z[a]);
             float len = (float) Math.hypot(tx, tz);
             float rx = -tz / len * side, rz = tx / len * side;
             int sx = (int) Math.floor(p.x[i] + rx * 20), sz = (int) Math.floor(p.z[i] + rz * 20);

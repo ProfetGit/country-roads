@@ -201,7 +201,7 @@ final class PropChecks {
                 int[] s = use.get(next[0]++);
                 EdgePlan p = plans.get(s[0]);
                 int i = s[1];
-                float tx = p.x[i + 3] - p.x[i - 3], tz = p.z[i + 3] - p.z[i - 3], l = (float) Math.hypot(tx, tz);
+                float tx = (float) (p.x[i + 3] - p.x[i - 3]), tz = (float) (p.z[i + 3] - p.z[i - 3]), l = (float) Math.hypot(tx, tz);
                 if (l < 1e-3f) continue;
                 tx /= l;
                 tz /= l;

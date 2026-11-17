@@ -18,7 +18,8 @@ public final class EdgePlan {
     public static final float REACH = 9f;
 
     public final Edge edge;
-    public final float[] x, z, y, hw;
+    public final double[] x, z;
+    public final float[] y, hw;
     public final byte[] kind;
     /** Length of the run of equal kind this sample is in, and distance (samples) to the nearer end of that run. */
     public final short[] runLen, runPos;
@@ -75,7 +76,7 @@ public final class EdgePlan {
     public final java.util.List<Field> fields = new java.util.ArrayList<>();
     private final Long2ObjectOpenHashMap<int[]> bins = new Long2ObjectOpenHashMap<>();
 
-    public EdgePlan(Edge edge, float[] x, float[] z, float[] y, float[] hw, byte[] kind, byte[] wood, long routeNanos) {
+    public EdgePlan(Edge edge, double[] x, double[] z, float[] y, float[] hw, byte[] kind, byte[] wood, long routeNanos) {
         this.edge = edge;
         this.x = x;
         this.z = z;

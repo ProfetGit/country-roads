@@ -262,7 +262,7 @@ final class RoadChecks {
             if (pick[k] == null || best[k] < 0) continue;
             EdgePlan p = plans.get(pick[k][0]);
             int i = pick[k][1];
-            float tx = p.x[i + 6] - p.x[i - 6], tz = p.z[i + 6] - p.z[i - 6];
+            float tx = (float) (p.x[i + 6] - p.x[i - 6]), tz = (float) (p.z[i + 6] - p.z[i - 6]);
             float len = (float) Math.hypot(tx, tz);
             tx /= len;
             tz /= len;
@@ -301,7 +301,7 @@ final class RoadChecks {
                     shot(src, junction.x() - 14.5, junction.y() + 22, junction.z() - 14.5, junction.x() + 4, junction.y(), junction.z() + 4, "junction");
                 for (EdgePlan q : plans) {
                     if (Math.abs(q.x[0] - at.getX()) > radius || Math.abs(q.z[0] - at.getZ()) > radius || q.length() < 40) continue;
-                    float ux = q.x[0] - q.x[30], uz = q.z[0] - q.z[30];
+                    float ux = (float) (q.x[0] - q.x[30]), uz = (float) (q.z[0] - q.z[30]);
                     float ul = (float) Math.hypot(ux, uz);
                     shot(src, q.x[30] - ux / ul * 6 + 3, q.y[30] + 10, q.z[30] - uz / ul * 6 + 3, q.x[0], q.y[0] + 1, q.z[0], "villagejoin");
                     break;
@@ -461,7 +461,7 @@ final class RoadChecks {
                         }
                     }
                     for (int i = r.s0() + 1; i < r.s1() - 1; i += 2) {
-                        float tx = p.x[i + 1] - p.x[i - 1], tz = p.z[i + 1] - p.z[i - 1], len = (float) Math.hypot(tx, tz);
+                        float tx = (float) (p.x[i + 1] - p.x[i - 1]), tz = (float) (p.z[i + 1] - p.z[i - 1]), len = (float) Math.hypot(tx, tz);
                         for (int side = -1; side <= 1; side += 2) {
                             if (r.side() != 0 && r.side() != side) continue;
                             float off = p.hw[i] + 1.5f;
@@ -550,7 +550,7 @@ final class RoadChecks {
     private static String profileText(EdgePlan p, int from, int to) {
         StringBuilder sb = new StringBuilder();
         for (int k = Math.max(0, from); k <= Math.min(p.length() - 1, to); k++)
-            sb.append(p.wet != null && !p.wet[k] ? Character.toLowerCase("GCBWT".charAt(p.kind[k])) : "GCBWT".charAt(p.kind[k])).append(Math.round(p.y[k])).append(System.getProperty("crxz") != null ? "@" + Math.round(p.x[k] * 10) / 10f + "," + Math.round(p.z[k] * 10) / 10f : "").append(' ');
+            sb.append(p.wet != null && !p.wet[k] ? Character.toLowerCase("GCBWT".charAt(p.kind[k])) : "GCBWT".charAt(p.kind[k])).append(Math.round(p.y[k])).append(System.getProperty("crxz") != null ? "@" + Math.round(p.x[k] * 10) / 10.0 + "," + Math.round(p.z[k] * 10) / 10.0 : "").append(' ');
         return sb.toString().trim();
     }
 
@@ -673,8 +673,9 @@ final class RoadChecks {
                         }
                         if (p.kind[i] != EdgePlan.BRIDGE) continue;
                         int mid = i + p.runLen[i] / 2, e2 = i + p.runLen[i] - 1;
-                        float dev = 0, cx = p.x[e2] - p.x[i], cz = p.z[e2] - p.z[i], cl = (float) Math.hypot(cx, cz);
-                        for (int k = i; k <= e2 && cl > 0; k++) dev = Math.max(dev, Math.abs((p.x[k] - p.x[i]) * cz - (p.z[k] - p.z[i]) * cx) / cl);
+                        double cx = p.x[e2] - p.x[i], cz = p.z[e2] - p.z[i];
+                        float dev = 0, cl = (float) Math.hypot(cx, cz);
+                        for (int k = i; k <= e2 && cl > 0; k++) dev = (float) Math.max(dev, Math.abs((p.x[k] - p.x[i]) * cz - (p.z[k] - p.z[i]) * cx) / cl);
                         report(src, "CR-BRIDGE at " + (int) p.x[mid] + " " + Math.round(p.y[mid]) + " " + (int) p.z[mid] + " len=" + p.runLen[i]
                             + " style=" + (p.bridge[i] == EdgePlan.STONE ? "stone" : "timber") + " rise=" + p.bridgeRise[i] + " woods=" + p.bridgeWood[i] + " dev=" + Math.round(dev * 10) / 10f + " from=" + i + "/" + p.length() + " conn=" + p.connA + "/" + p.connB + (p.runLen[i] > 20 ? " ys=" + profileText(p, i - 8, e2 + 8) : "")
                             + " dir=" + Math.round(Math.toDegrees(Math.atan2(p.z[i + p.runLen[i] - 1] - p.z[i], p.x[i + p.runLen[i] - 1] - p.x[i]))));

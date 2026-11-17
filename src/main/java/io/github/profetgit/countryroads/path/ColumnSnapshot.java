@@ -9,6 +9,7 @@ import java.util.Map;
 import java.util.concurrent.ConcurrentHashMap;
 import net.minecraft.core.BlockPos;
 import net.minecraft.tags.BlockTags;
+import net.minecraft.world.level.BlockGetter;
 import net.minecraft.world.level.ChunkPos;
 import net.minecraft.world.level.block.Blocks;
 import net.minecraft.world.level.block.state.BlockState;
@@ -49,7 +50,7 @@ final class ColumnSnapshot {
             return road != null && (road[i >> 6] & (1L << (i & 63))) != 0;
         }
 
-        /** The top block of the column is something a player (or a village) built, and the column is not a road. */
+        /** The column is part of something a player (or a village) built (see build), and it is not a road. */
         boolean built(int i) {
             return (built[i >> 6] & (1L << (i & 63))) != 0;
         }
@@ -69,17 +70,22 @@ final class ColumnSnapshot {
         live.put(key, c);
     }
 
-    private static final byte LOG = 1, LEAF = 2, WATER = 4, FLUID = 8, CRAFTED = 16, STAKE = 32, KNOWN = 64;
+    private static final int LOG = 1, LEAF = 2, WATER = 4, FLUID = 8, CRAFTED = 16, STAKE = 32, KNOWN = 64, OPEN = 128;
+    /** rock() answers per state (a holder class: a hot swap leaves new static fields of a loaded class null). */
+    private static final class Rocks {
+        static final it.unimi.dsi.fastutil.objects.Reference2IntOpenHashMap<BlockState> MAP = new it.unimi.dsi.fastutil.objects.Reference2IntOpenHashMap<>();
+    }
     /** What a block state is, worked out once per state (tag lookups are the dear part of a capture). Server thread only. */
     private static final Reference2ByteOpenHashMap<BlockState> KINDS = new Reference2ByteOpenHashMap<>();
 
     /** Tags can change on a data pack reload. */
     static void forgetKinds() {
         KINDS.clear();
+        Rocks.MAP.clear();
     }
 
     private static int kind(BlockState s) {
-        byte k = KINDS.getByte(s);
+        int k = KINDS.getByte(s) & 0xFF;
         if (k != 0) return k;
         k = KNOWN;
         if (s.is(BlockTags.LOGS)) k |= LOG;
@@ -88,8 +94,79 @@ final class ColumnSnapshot {
         if (!s.getFluidState().isEmpty()) k |= FLUID;
         if (Retrofit.isCrafted(s)) k |= CRAFTED;
         if (s.is(Stake.BLOCK)) k |= STAKE;
-        KINDS.put(s, k);
+        if (!Heightmap.Types.MOTION_BLOCKING.isOpaque().test(s)) k |= OPEN;
+        KINDS.put(s, (byte) k);
         return k;
+    }
+
+    /** Natural rock and soil: what cave crusts, cliff lips and overhangs are made of (terracotta is not: a house wall). */
+    private static boolean rock(BlockState s) {
+        int r = Rocks.MAP.getInt(s);
+        if (r != 0) return r > 0;
+        boolean v = s.is(BlockTags.BASE_STONE_OVERWORLD) || s.is(BlockTags.DIRT) || s.is(Blocks.GRASS_BLOCK) || s.is(Blocks.PODZOL) || s.is(Blocks.MYCELIUM)
+            || s.is(Blocks.MUD) || s.is(Blocks.MOSS_BLOCK) || s.is(Blocks.MUDDY_MANGROVE_ROOTS) || s.is(BlockTags.SAND) || s.is(Blocks.GRAVEL) || s.is(Blocks.CLAY)
+            || s.is(Blocks.SANDSTONE) || s.is(Blocks.RED_SANDSTONE) || s.is(Blocks.CALCITE) || s.is(Blocks.DRIPSTONE_BLOCK) || s.is(Blocks.SNOW_BLOCK)
+            || s.is(BlockTags.ICE) || s.is(Blocks.MUSHROOM_STEM) || s.is(Blocks.BROWN_MUSHROOM_BLOCK) || s.is(Blocks.RED_MUSHROOM_BLOCK)
+            || s.is(Blocks.SMOOTH_BASALT) || s.is(Blocks.AMETHYST_BLOCK) || s.is(BlockTags.IRON_ORES) || s.is(BlockTags.COPPER_ORES) || s.is(BlockTags.GOLD_ORES) || s.is(Blocks.COAL_ORE);
+        Rocks.MAP.put(s, v ? 1 : -1);
+        return v;
+    }
+
+    /** How far under a column's top a build is looked for. */
+    static final int BUILD_SPAN = 8;
+    /** A room's roof is at most this thick, and the room at most ROOM_MAX tall: a storey, not a cave. */
+    static final int ROOF_MAX = 2, ROOM_MAX = 6;
+
+    /**
+     * The column is part of a build, told by its shape rather than its blocks: under its top there is a room (two or
+     * more blocks a player could stand in, over a floor), or anything only a builder places (a door, a window pane, a
+     * torch...) sits anywhere in it. A room is a storey: a roof at most ROOF_MAX thick that is not natural rock or soil,
+     * over two to ROOM_MAX open blocks and a floor. A terracotta or concrete-less stone-brick house has rooms like any
+     * other (user 2026-11-17: a path graded a white terracotta house into a stepped mound, its roof read as a hill);
+     * cave crusts and cliff lips are rock or soil, so mountain tunnels and overhang routes stay as they were. Server
+     * thread (the kind cache).
+     */
+    static boolean build(BlockGetter g, BlockPos.MutableBlockPos p, int x, int top, int z, int minY) {
+        return why(g, p, x, top, z, minY, null, null) != null;
+    }
+
+    /**
+     * Why the column is part of a build (null: it is not). With a chunk and its per-section memo, a column topped by
+     * rock or soil (no room possible) whose sections hold no builder block anywhere in their palettes is answered
+     * without reading it: most natural columns cost one read.
+     */
+    static String why(BlockGetter g, BlockPos.MutableBlockPos p, int x, int top, int z, int minY, LevelChunk c, byte[] may) {
+        if (c != null && rock(g.getBlockState(p.set(x, top, z))) && !mayCraft(c, may, top) && !mayCraft(c, may, top - BUILD_SPAN)) return null;
+        int open = 0, roof = 0;
+        boolean natural = false;
+        BlockState roofTop = null;
+        for (int q = 0; q <= BUILD_SPAN && top - q > minY; q++) {
+            BlockState s = g.getBlockState(p.set(x, top - q, z));
+            int k = kind(s);
+            if ((k & CRAFTED) != 0) return "builder " + s.getBlock().getDescriptionId().replace("block.minecraft.", "") + " at -" + q;
+            if ((k & OPEN) != 0) {
+                if (roof == 0) continue;
+                open++;
+            } else if (open == 0) {
+                if (roofTop == null) roofTop = s;
+                if (++roof > ROOF_MAX || rock(s)) natural = true;
+            } else {
+                if (!natural && open >= 2 && open <= ROOM_MAX)
+                    return "room under " + roofTop.getBlock().getDescriptionId().replace("block.minecraft.", "") + " roof " + roof + " high " + open;
+                // below the first room: only builder blocks count from here
+                natural = true;
+                open = 0;
+            }
+        }
+        return null;
+    }
+
+    /** Whether the chunk section holding y may hold a builder block (its palette, memoised: 0 unknown, 1 yes, 2 no). */
+    private static boolean mayCraft(LevelChunk c, byte[] may, int y) {
+        int i = c.getSectionIndex(y);
+        if (i < 0 || i >= may.length) return false;
+        if (may[i] == 0) may[i] = c.getSection(i).maybeHas(s -> (kind(s) & CRAFTED) != 0) ? (byte) 1 : (byte) 2;
+        return may[i] == 1;
     }
 
     Chunk get(int cx, int cz) {
@@ -107,6 +184,7 @@ final class ColumnSnapshot {
         long[] built = new long[4];
         int bx = c.getPos().getMinBlockX(), bz = c.getPos().getMinBlockZ();
         BlockPos.MutableBlockPos p = new BlockPos.MutableBlockPos();
+        byte[] may = new byte[c.getSectionsCount()];
         for (int lz = 0; lz < 16; lz++)
             for (int lx = 0; lx < 16; lx++) {
                 int i = (lz << 4) | lx, x = bx + lx, z = bz + lz;
@@ -134,9 +212,12 @@ final class ColumnSnapshot {
                     int below = top;
                     while (below > minY && (kind(c.getBlockState(p.set(x, below, z))) & WATER) != 0 && top - below < 6) below--;
                     g = top - below >= 6 ? Terrain.DEEP + top : top + Terrain.WET;
-                } else if ((k & (FLUID | LOG)) != 0 || ((k & CRAFTED) != 0 && !(road != null && rc.road(lx, lz)))) {
+                } else if ((k & (FLUID | LOG)) != 0) {
                     g = Terrain.CLOSED;
                     if ((k & CRAFTED) != 0) built[i >> 6] |= 1L << (i & 63);
+                } else if (!(road != null && rc.road(lx, lz)) && ((k & CRAFTED) != 0 || why(c, p, x, top, z, minY, c, may) != null)) {
+                    g = Terrain.CLOSED;
+                    built[i >> 6] |= 1L << (i & 63);
                 } else g = top;
                 ground[i] = g;
                 // leaves above the ground raise MOTION_BLOCKING over MOTION_BLOCKING_NO_LEAVES: without that, none to look for

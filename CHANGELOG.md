@@ -1,5 +1,12 @@
 # Changelog
 
+## 1.0.0-beta.5
+
+- Roads no longer cut through structures: pillager outposts, ruined portals, desert and jungle temples, witch huts, igloos, trail ruins and badlands mineshafts are seen when a road is planned. The road steers around them, and where it must pass close it stops short of the structure instead of carving into it. This applies to new worlds; worlds created before this version keep their roads exactly as planned, so no seams appear at old chunks.
+- House paths from the Surveyor's Stake no longer dig into player builds made of natural-looking blocks (terracotta, stone, dirt). A build is now recognised by its shape: a room under a roof, or doors, windows, torches and other placed blocks anywhere in its walls. Many more building blocks also count (concrete, coloured terracotta, polished and cut stone, copper, panes, rails, workstations and more), both for house paths and for roads added to old chunks.
+- Roads and bridges millions of blocks from the world centre no longer get doubled parapet walls, posts or wobbly edges.
+- Timber bridges no longer stack two or three posts and lanterns where the road bends onto the bridge.
+
 ## 1.0.0-beta.4
 
 - Works with C2ME on Forge 1.20.1 (also checked on Fabric 1.20.1 and 1.21.1, NeoForge 1.21.1): the server no longer fails to start because C2ME rewrites the feature placing code Country Roads hooks.

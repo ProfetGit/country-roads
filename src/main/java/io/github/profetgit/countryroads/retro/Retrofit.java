@@ -113,10 +113,11 @@ public final class Retrofit {
     static boolean crafted(ServerLevel level, ChunkMask m) {
         BlockPos.MutableBlockPos p = new BlockPos.MutableBlockPos();
         for (int i = 0; i < 256; i++) {
-            if (m.in[i] < -2.5f) continue;
+            // the painter shapes out to CUT_REACH (cut slopes, banks): anything built that far out would be cut
+            if (m.in[i] < -io.github.profetgit.countryroads.paint.RoadPainter.CUT_REACH - 0.5f) continue;
             int x = (m.cx << 4) + (i & 15), z = (m.cz << 4) + (i >> 4);
             int top = (int) Math.floor(m.surface(i));
-            for (int y = top - 2; y <= top + 6; y++)
+            for (int y = top - 3; y <= top + 10; y++)
                 if (isCrafted(level.getBlockState(p.set(x, y, z)))) {
                     craftedSeen.merge(level.getBlockState(p).getBlock().getDescriptionId().replace("block.minecraft.", ""), 1, Integer::sum);
                     return true;
@@ -134,6 +135,23 @@ public final class Retrofit {
             || s.is(BlockTags.FENCES) || s.is(Blocks.FARMLAND) || s.is(BlockTags.STAIRS) || s.is(BlockTags.SLABS) || s.is(Blocks.COBBLESTONE)
             || s.is(Blocks.STONE_BRICKS) || s.is(BlockTags.SIGNS) || s.is(Blocks.LANTERN)
             || s.is(BlockTags.WALLS) || s.is(BlockTags.FENCE_GATES) || s.is(BlockTags.TRAPDOORS) || s.is(BlockTags.IMPERMEABLE) || s.is(Blocks.BRICKS)
-            || s.is(BlockTags.BANNERS) || s.is(BlockTags.CAMPFIRES) || s.is(Blocks.BOOKSHELF);
+            || s.is(BlockTags.BANNERS) || s.is(BlockTags.CAMPFIRES) || s.is(Blocks.BOOKSHELF) || BUILT.computeIfAbsent(s.getBlock(), Retrofit::builtByName);
+    }
+
+    private static final java.util.Map<net.minecraft.world.level.block.Block, Boolean> BUILT = new java.util.concurrent.ConcurrentHashMap<>();
+    private static final java.util.regex.Pattern BUILT_NAME = java.util.regex.Pattern.compile(
+        "concrete|glazed_terracotta|polished_|^smooth_|^cut_|^chiseled_|bricks|tiles|quartz|copper|purpur|_pane|bars|carpet|rail|ladder|chain|lantern|candle"
+            + "|^stripped_|barrel|anvil|shulker_box|chest|_table|loom|smoker|stonecutter|grindstone|lectern|composter|cauldron|bell|brewing_stand|beacon"
+            + "|jukebox|note_block|hopper|dispenser|dropper|observer|piston|redstone|repeater|comparator|lever|button|pressure_plate|tripwire|daylight"
+            + "|target|glowstone|froglight|_bulb|grate|flower_pot|decorated_pot|scaffolding|hay_block|honeycomb_block|_head$|skull|golem_statue"
+            + "|^(iron|gold|diamond|emerald|lapis|netherite|coal)_block$");
+    /** Natural look-alikes the name rule would catch: badlands terracotta, geode/basalt, ore veins, moss, shelf fungus, our own roadside stones. */
+    private static final java.util.regex.Pattern NATURAL_NAME = java.util.regex.Pattern.compile(
+        "^raw_|smooth_basalt|moss_carpet|shelf_mushroom|redstone_ore|copper_ore|quartz_ore");
+
+    /** Blocks a player builds with that the tag list above misses (concrete, polished stone, panes, rails, workstations...). */
+    private static boolean builtByName(net.minecraft.world.level.block.Block b) {
+        String id = net.minecraft.core.registries.BuiltInRegistries.BLOCK.getKey(b).getPath();
+        return BUILT_NAME.matcher(id).find() && !NATURAL_NAME.matcher(id).find();
     }
 }
