@@ -63,6 +63,7 @@ public final class FabricEntry implements ModInitializer {
         /*RoadColumns.store = new io.github.profetgit.countryroads.world.MixinStore();
         *///?}
         CountryRoads.init("fabric", FabricLoader.getInstance().getConfigDir());
+        CountryRoads.modLoaded = FabricLoader.getInstance()::isModLoaded;
         CountryRoads.register(new CountryRoads.Registrar() {
             @Override
             public <B, T extends B> T add(ResourceKey<? extends Registry<B>> registry, ResourceKey<B> key, T value) {

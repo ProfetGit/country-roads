@@ -41,6 +41,7 @@ public final class NeoForgeEntry {
     public NeoForgeEntry(IEventBus modBus) {
         RoadColumns.store = new MixinStore();
         CountryRoads.init("neoforge", FMLPaths.CONFIGDIR.get());
+        CountryRoads.modLoaded = id -> net.neoforged.fml.ModList.get().isLoaded(id);
         modBus.addListener(NeoForgeEntry::register);
         modBus.addListener(NeoForgeEntry::tabs);
         modBus.addListener(RegisterPayloadHandlersEvent.class, NeoForgeEntry::payloads);

@@ -33,6 +33,8 @@ public final class Planner {
     private final Camps camps;
     /** Other structures the router steers around (null: none). */
     public io.github.profetgit.countryroads.world.StructureOracle structures;
+    /** The world's road generation revision (Config.Gen.revision): changes that move plans apply from their revision on. */
+    public int revision = io.github.profetgit.countryroads.Config.REVISION;
     /** Blocks kept between a structure's pieces and the coarse cells the router avoids. */
     static final int AVOID_MARGIN = 4;
 
@@ -299,6 +301,10 @@ public final class Planner {
             }
         }
 
+        // revision 2: the stretch easing into or out of a shared one overlaps the other road before it is on it, and takes
+        // its height there like a short crossing does (a road met another at a Y junction 1.5 blocks below it)
+        if (revision >= 2 && !Boolean.getBoolean("countryroads.noOverlapPin"))
+            for (Trunk t : trunks) pinOverlap(line, pinY, pinKind, t.p, connA, connB);
         if (!Boolean.getBoolean("countryroads.noNudge")) nudgeOffFlanks(line, pinY, connA, connB, trunks);
         int start = 0, end = line.size() - 1;
         if (ca == null) {
@@ -338,6 +344,21 @@ public final class Planner {
         double[] x0 = x.clone(), z0 = z.clone();
         float[] ground0 = ground.clone(), water0 = water.clone();
         boolean[] river0 = river.clone();
+        String tr = System.getProperty("countryroads.traceY");
+        TRACE_Y.remove();
+        if (tr != null) {
+            double tx = Double.parseDouble(tr.split(",")[0]), tz = Double.parseDouble(tr.split(",")[1]);
+            int lo = -1, hi = -1;
+            for (int i = 0; i < n; i++)
+                if (Math.hypot(x[i] - tx, z[i] - tz) < 12) {
+                    if (lo < 0) lo = i;
+                    hi = i;
+                }
+            if (lo >= 0) {
+                TRACE_Y.set(new int[]{lo, hi});
+                io.github.profetgit.countryroads.CountryRoads.LOG.info("CR-TRACEY plan " + e.a().pos().toShortString() + "->" + e.b().pos().toShortString() + " n=" + n + " range " + lo + ".." + hi);
+            }
+        }
         profile(ground, water, river, kind, pin, kindPin, connA, connB);
         // crossings only grow from round to round (a crossing that flipped between two extents never settled)
         boolean[] crossing = new boolean[n];
@@ -409,7 +430,10 @@ public final class Planner {
             });
             for (int i = 0; i < n; i++) if (laid[i]) sampleAt(i, x, z, ground, water, river);
         }
-        foldBends(x, z, y, kind, pin, connA, connB);
+        traceY("final-profile", y, pin, kind);
+        foldBends(x, z, y, kind, pin, connA, connB, revision >= 2);
+        traceY("foldBends", y, pin, kind);
+        TRACE_Y.remove();
         // inside a village the road is never a tunnel or a trestle: it climbs the slope on the ground like the street
         for (int i = 0; i < n; i++)
             if ((i < connA || i >= n - connB) && water[i] <= ground[i] && (kind[i] == EdgePlan.TUNNEL || kind[i] == EdgePlan.BRIDGE)) kind[i] = EdgePlan.GROUND;
@@ -1166,8 +1190,10 @@ public final class Planner {
             if (y[i] < ground[i] - 9) kind[i] = EdgePlan.TUNNEL;
             else if (y[i] > ground[i] + 5) kind[i] = EdgePlan.BRIDGE;
         }
+        traceY("passes", y, pin, kind);
         dropShortRuns(kind, EdgePlan.TUNNEL, 16);
         if (!Boolean.getBoolean("countryroads.noCutCap")) capCuts(y, ground, water, kind, pin, connA, connB);
+        traceY("capCuts", y, pin, kind);
         // trestle samples that joined a crossing above (the climb to a raised stone deck) are part of the bridge: the
         // whole crossing is level and the climb moves onto the ground before it. Until nothing changes: new trestle
         // samples from the last round joined two runs at different deck heights (a 3-block step inside one bridge)
@@ -1242,6 +1268,7 @@ public final class Planner {
             }
             i = j + 1;
         }
+        traceY("trestle", y, pin, kind);
         // a dry trestle shorter than MIN_TRESTLE samples is no bridge (a lone post over a dip): it is filled ground
         for (int i = 0; i < n; ) {
             int j = i;
@@ -1295,6 +1322,7 @@ public final class Planner {
                 for (int i = n - 2; i >= 0; i--)
                     if (kind[i] == EdgePlan.GROUND && Float.isNaN(pin[i])) y[i] = Math.max(y[i], y[i + 1] - (pinNear[i] || i < connA || i >= n - connB ? CONN_GRADE : MAX_GRADE));
             }
+        traceY("end", y, pin, kind);
         return y;
     }
 
@@ -1459,12 +1487,30 @@ public final class Planner {
      * FOLD_STEP of each other (the lower one raised, then the grade passes again, raise only).
      */
     static void foldBends(double[] x, double[] z, float[] y, byte[] kind, float[] pin, int connA, int connB) {
+        foldBends(x, z, y, kind, pin, connA, connB, false);
+    }
+
+    /**
+     * bridgeEnds (revision 2): the higher sample may be a deck (a road turning 90 deg straight off a bridge end left the
+     * ground beside the deck 1.5 lower); only ground is raised. The re-grade then uses profile's own limits (CONN_GRADE
+     * beside pins and connectors, 0.5 near the ends): at MAX_GRADE everywhere, one fold anywhere on a road lifted the
+     * steeper ramp beside a pinned stretch 1000 samples away into a 2-block step.
+     */
+    static void foldBends(double[] x, double[] z, float[] y, byte[] kind, float[] pin, int connA, int connB, boolean bridgeEnds) {
         int n = y.length;
+        float[] grade = new float[n];
+        java.util.Arrays.fill(grade, MAX_GRADE);
+        if (bridgeEnds) {
+            for (int i = 0; i < n; i++) grade[i] = i < 24 || i > n - 25 ? 0.5f : MAX_GRADE;
+            for (int i = 1; i < n - 1; i++)
+                if (!Float.isNaN(pin[i])) for (int k = Math.max(0, i - PIN_EASE); k <= Math.min(n - 1, i + PIN_EASE); k++) grade[k] = CONN_GRADE;
+        }
         for (int round = 0; round < 8; round++) {
             boolean changed = false;
             for (int i = 0; i < n; i++) {
                 for (int j = i + 3; j < Math.min(n, i + 16); j++) {
-                    if (kind[i] != EdgePlan.GROUND || kind[j] != EdgePlan.GROUND) continue;
+                    if (bridgeEnds ? kind[i] != EdgePlan.GROUND && kind[j] != EdgePlan.GROUND || kind[i] == EdgePlan.TUNNEL || kind[j] == EdgePlan.TUNNEL
+                        : kind[i] != EdgePlan.GROUND || kind[j] != EdgePlan.GROUND) continue;
                     float d = (float) Math.hypot(x[j] - x[i], z[j] - z[i]);
                     // touching only across a sharp turn: the road's direction at the two samples differs by over 60 deg
                     if (d > FOLD_REACH || i + 1 >= n || j + 1 >= n) continue;
@@ -1472,20 +1518,56 @@ public final class Planner {
                     float la = (float) Math.hypot(ax, az), lb = (float) Math.hypot(bx, bz);
                     if (la < 1e-3f || lb < 1e-3f || (ax * bx + az * bz) / (la * lb) > FOLD_COS) continue;
                     int lo = y[i] < y[j] ? i : j, hi = lo == i ? j : i;
-                    if (y[hi] - y[lo] <= FOLD_STEP || !Float.isNaN(pin[lo]) || lo < connA || lo >= n - connB) continue;
+                    if (y[hi] - y[lo] <= FOLD_STEP || kind[lo] != EdgePlan.GROUND || !Float.isNaN(pin[lo]) || lo < connA || lo >= n - connB) continue;
                     y[lo] = y[hi] - FOLD_STEP;
                     changed = true;
                 }
             }
             if (!changed) break;
             for (int i = 1; i < n; i++)
-                if (kind[i] == EdgePlan.GROUND && Float.isNaN(pin[i]) && i >= connA && i < n - connB) y[i] = Math.max(y[i], y[i - 1] - MAX_GRADE);
+                if (kind[i] == EdgePlan.GROUND && Float.isNaN(pin[i]) && i >= connA && i < n - connB) y[i] = Math.max(y[i], y[i - 1] - grade[i]);
             for (int i = n - 2; i >= 0; i--)
-                if (kind[i] == EdgePlan.GROUND && Float.isNaN(pin[i]) && i >= connA && i < n - connB) y[i] = Math.max(y[i], y[i + 1] - MAX_GRADE);
+                if (kind[i] == EdgePlan.GROUND && Float.isNaN(pin[i]) && i >= connA && i < n - connB) y[i] = Math.max(y[i], y[i + 1] - grade[i]);
         }
     }
 
     static final float FOLD_REACH = 3.5f, FOLD_STEP = 0.6f, FOLD_COS = 0.5f;
+
+    /** Dev: -Dcountryroads.traceY=X,Z prints the heights of samples within 12 blocks of X,Z at each grading stage. */
+    static final ThreadLocal<int[]> TRACE_Y = new ThreadLocal<>();
+
+    static void traceY(String stage, float[] y, float[] pin, byte[] kind) {
+        int[] r = TRACE_Y.get();
+        if (r == null) return;
+        StringBuilder sb = new StringBuilder("CR-TRACEY " + stage + " :");
+        for (int k = r[0]; k <= Math.min(r[1], y.length - 1); k++)
+            sb.append(' ').append(k).append('=').append(Math.round(y[k] * 100) / 100f).append("GCBWT".charAt(kind[k])).append(Float.isNaN(pin[k]) ? "" : "p");
+        io.github.profetgit.countryroads.CountryRoads.LOG.info(sb.toString());
+    }
+
+    /**
+     * Samples of this road (outside its connectors) within OVERLAP of another road's ground take that road's height at
+     * its nearest sample, as a short crossing's do (run after the snapping and its ease moved the line).
+     */
+    static void pinOverlap(List<double[]> line, float[] pinY, byte[] pinKind, EdgePlan t, int connA, int connB) {
+        int L = line.size();
+        for (int k = Math.max(1, connA); k < Math.min(L - 1, L - connB); k++) {
+            if (!Float.isNaN(pinY[k])) continue;
+            double[] q = line.get(k);
+            double bd = OVERLAP * OVERLAP;
+            int best = -1;
+            for (int j = 0; j < t.length(); j++) {
+                double dx = t.x[j] - q[0], dz = t.z[j] - q[1], d2 = dx * dx + dz * dz;
+                if (d2 < bd) {
+                    bd = d2;
+                    best = j;
+                }
+            }
+            if (best < 0 || t.kind[best] != EdgePlan.GROUND) continue;
+            pinY[k] = t.y[best];
+            pinKind[k] = EdgePlan.GROUND;
+        }
+    }
 
     static void capCuts(float[] y, float[] ground, float[] water, byte[] kind, float[] pin, int connA, int connB) {
         int n = y.length;

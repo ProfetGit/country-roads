@@ -62,6 +62,35 @@ final class RoadChecks {
         return 1;
     }
 
+    private static boolean streamGap(ChunkAccess chunk, ServerLevel level, BlockPos.MutableBlockPos pos, int x, int top, int z) {
+        boolean wet = false;
+        for (int y = top; y >= top - 3 && !wet; y--) wet = !chunk.getBlockState(pos.set(x, y, z)).getFluidState().isEmpty();
+        if (!wet) return false;
+        return bridgeNear(level, pos, x, top, z);
+    }
+
+    /** A stream bridge's planks within 4 columns and a block of this height. */
+    static boolean bridgeNear(net.minecraft.world.level.LevelReader level, BlockPos.MutableBlockPos pos, int x, int top, int z) {
+        for (int dx = -4; dx <= 4; dx++)
+            for (int dz = -4; dz <= 4; dz++)
+                for (int y = top - 1; y <= top + 1; y++)
+                    if (level.getBlockState(pos.set(x + dx, y, z + dz)).is(BlockTags.PLANKS)) return true;
+        return false;
+    }
+
+    /** A walkway piece within 3 columns and a block of y (RoadPainter.walkway). */
+    static boolean walkwayNear(net.minecraft.world.level.LevelReader level, BlockPos.MutableBlockPos pos, int x, int y, int z) {
+        for (int dx = -3; dx <= 3; dx++)
+            for (int dz = -3; dz <= 3; dz++)
+                for (int yy = y - 1; yy <= y + 1; yy++)
+                    if (walkwayPiece(level.getBlockState(pos.set(x + dx, yy, z + dz)))) return true;
+        return false;
+    }
+
+    static boolean walkwayPiece(BlockState s) {
+        return s.is(Blocks.SPRUCE_SLAB) || s.is(Blocks.SPRUCE_TRAPDOOR) || s.is(Blocks.CAMPFIRE);
+    }
+
     private static boolean isSurface(BlockState s) {
         return s.is(Blocks.DIRT_PATH) || io.github.profetgit.countryroads.paint.PaintRules.solid(s);
     }
@@ -156,6 +185,39 @@ final class RoadChecks {
                         BlockState above = chunk.getBlockState(pos.set(x, top + 1, z));
                         boolean ok = isSurface(surf) && (above.getBlock() instanceof SlabBlock || above.isAir() || above.is(Blocks.STONE_BUTTON))
                             && chunk.getBlockState(pos.set(x, top + 2, z)).isAir();
+                        // a ford through another mod's stream (RoadPainter.streamCrossing): its water on the road, a bed under it
+                        if (!ok && io.github.profetgit.countryroads.compat.StreamsReflowing.ON && !surf.getFluidState().isEmpty() && above.isAir()
+                            && isSurface(chunk.getBlockState(pos.set(x, top - 1, z)))) ok = true;
+                        // beside a crossing laid square on a diagonal road (RoadPainter.square) the road's own columns keep the
+                        // stream open: air or water on the road over stream water, the bridge's planks within 4
+                        if (!ok && io.github.profetgit.countryroads.compat.StreamsReflowing.ON && (surf.isAir() || !surf.getFluidState().isEmpty())
+                            && streamGap(chunk, level, pos, x, top, z)) ok = true;
+                        // a long ford or a crossing near a boardwalk: the boardwalk's walkway pieces on the stream's water or on
+                        // the road block, a block over the road (RoadPainter.walkway)
+                        if (!ok && io.github.profetgit.countryroads.compat.StreamsReflowing.ON && walkwayPiece(above)
+                            && (!surf.getFluidState().isEmpty() || isSurface(surf)) && chunk.getBlockState(pos.set(x, top + 2, z)).isAir()) ok = true;
+                        if (!ok && io.github.profetgit.countryroads.compat.StreamsReflowing.ON && walkwayPiece(surf) && above.isAir()) ok = true;
+                        // ...or laid a block under this column's planned top (a dry row of a walkway, cut down to its layer)
+                        if (!ok && io.github.profetgit.countryroads.compat.StreamsReflowing.ON && surf.isAir() && above.isAir()
+                            && walkwayPiece(chunk.getBlockState(pos.set(x, top - 1, z)))) ok = true;
+                        // ...or a squared crossing's landing easing from the deck to the road, a block under this column's planned top
+                        if (!ok && io.github.profetgit.countryroads.compat.StreamsReflowing.ON && surf.isAir() && above.isAir()
+                            && isSurface(chunk.getBlockState(pos.set(x, top - 1, z))) && bridgeNear(level, pos, x, top - 1, z)) ok = true;
+                        // ...or the road climbing from a walkway to the bank half a block a row, a block under its planned top
+                        if (!ok && io.github.profetgit.countryroads.compat.StreamsReflowing.ON && surf.isAir() && above.isAir()
+                            && isSurface(chunk.getBlockState(pos.set(x, top - 1, z))) && walkwayNear(level, pos, x, top - 1, z)) ok = true;
+                        // a squared crossing's row takes the highest planned surface of its columns (RoadPainter.squareBridge): its
+                        // deck, rail or post can stand a block over this column's own planned top
+                        if (!ok && io.github.profetgit.countryroads.compat.StreamsReflowing.ON
+                            && (above.is(BlockTags.PLANKS) || above.is(BlockTags.WOODEN_SLABS) || above.is(BlockTags.LOGS))
+                            && bridgeNear(level, pos, x, top + 1, z)) ok = true;
+                        // ...and its landing on the axis past a deck end: road at the deck end's height
+                        if (!ok && io.github.profetgit.countryroads.compat.StreamsReflowing.ON && isSurface(above) && isSurface(surf)
+                            && (chunk.getBlockState(pos.set(x, top + 2, z)).isAir() || chunk.getBlockState(pos).getBlock() instanceof SlabBlock)
+                            && bridgeNear(level, pos, x, top + 1, z)) ok = true;
+                        // ...and a road column on that bridge's rail line carries its stringer and fence or post
+                        if (!ok && io.github.profetgit.countryroads.compat.StreamsReflowing.ON && surf.is(BlockTags.LOGS)
+                            && (above.is(BlockTags.FENCES) || above.is(BlockTags.LOGS)) && bridgeNear(level, pos, x, top, z)) ok = true;
                         if (!ok) {
                             bad[0]++;
                             if (examples.size() < 6) examples.add(x + "," + top + "," + z + "=" + surf.getBlock().getDescriptionId() + "/" + above.getBlock().getDescriptionId());
@@ -378,6 +440,7 @@ final class RoadChecks {
                     if (!resolved.contains(d) || d.type() == EdgePlan.PROP) continue;
                     if (Math.abs(d.x() - at.getX()) > radius || Math.abs(d.z() - at.getZ()) > radius) continue;
                     if (n.oracle.footprint(p.edge.a()).contains(d.x(), d.z(), 1) || n.oracle.footprint(p.edge.b()).contains(d.x(), d.z(), 1)) continue;
+                    if (ChunkMask.blockedByStructure(d, n.structureBoxes(d.x() >> 4, d.z() >> 4))) continue;
                     ChunkAccess chunk = level.getChunkSource().getChunk(d.x() >> 4, d.z() >> 4, ChunkStatus.FULL, true);
                     boolean found = false;
                     for (int k = 0; k < 13 * 5 && !found; k++) {
@@ -385,6 +448,11 @@ final class RoadChecks {
                         var nb = k / 13 == 0 ? net.minecraft.core.BlockPos.ZERO : net.minecraft.core.Direction.from2DDataValue(k / 13 - 1).getUnitVec3i();
                         BlockState st = chunk.getBlockState(pos.set(d.x() + nb.getX(), y, d.z() + nb.getZ()));
                         found = d.type() == EdgePlan.SIGN ? st.is(BlockTags.ALL_SIGNS) : d.type() == EdgePlan.ORCHARD ? st.is(Blocks.OAK_LOG) : st.is(Blocks.LANTERN);
+                    }
+                    // a post planned on another mod's stream or its bridge steps up to 6 along the road and 2 out (RoadPainter.decor)
+                    for (int k = 0; k < 15 * 15 * 13 && !found && d.type() != EdgePlan.ORCHARD && io.github.profetgit.countryroads.compat.StreamsReflowing.ON; k++) {
+                        BlockState st = level.getBlockState(pos.set(d.x() - 7 + k % 15, (int) d.y() - 5 + k / 225, d.z() - 7 + k / 15 % 15));
+                        found = d.type() == EdgePlan.SIGN ? st.is(BlockTags.ALL_SIGNS) : st.is(Blocks.LANTERN);
                     }
                     if (d.type() == EdgePlan.ORCHARD) {
                         orchards++;
@@ -397,6 +465,7 @@ final class RoadChecks {
                     } else {
                         lamps++;
                         if (found) lampsFound++;
+                        else report(src, "CR-MISSING lamp at " + d.x() + "," + (int) d.y() + "," + d.z());
                     }
                 }
                 if (p.campChunk != 0) {

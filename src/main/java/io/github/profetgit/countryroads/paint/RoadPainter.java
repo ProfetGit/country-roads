@@ -1,5 +1,7 @@
 package io.github.profetgit.countryroads.paint;
 
+import io.github.profetgit.countryroads.compat.StreamsReflowing;
+
 import io.github.profetgit.countryroads.gen.GenContext;
 import io.github.profetgit.countryroads.plan.ChunkMask;
 import io.github.profetgit.countryroads.plan.EdgePlan;
@@ -62,21 +64,21 @@ public final class RoadPainter {
 
     /** Worldgen: paints a generating chunk and records its road columns (empty too: "this chunk was handled"). */
     public static int paint(ChunkAccess chunk, ChunkMask m, java.util.List<io.github.profetgit.countryroads.world.StreetBands> streets,
-                            java.util.function.IntBinaryOperator neighbourTop) {
+                            java.util.function.IntBinaryOperator neighbourTop, Neighbours neighbours) {
         RoadColumns cols = RoadColumns.empty();
         if (NO_PAINT) {
             RoadColumns.store(chunk, cols);
             return 0;
         }
         Canvas canvas = Canvas.proto(chunk);
-        int painted = m.any() ? paint(canvas, m, cols, neighbourTop) : 0;
+        int painted = m.any() ? paint(canvas, m, cols, neighbourTop, neighbours) : 0;
         painted += StreetPainter.paint(canvas, streets, chunk.getPos().x(), chunk.getPos().z(), cols);
         RoadColumns.store(chunk, cols);
         return painted;
     }
 
     public static int paint(Canvas canvas, ChunkMask m, RoadColumns cols) {
-        return paint(canvas, m, cols, null);
+        return paint(canvas, m, cols, null, null);
     }
 
     /** NO_TOP from a neighbourTop function: that column of the next chunk is not a painted connector (or not painted yet). */
@@ -86,9 +88,10 @@ public final class RoadPainter {
      * neighbourTop(x, z): the surface of an already painted connector column in a neighbouring chunk, so the later of two
      * chunks can meet it (a connector laid on the ground can meet a 2-block cliff exactly on a chunk border).
      */
-    public static int paint(Canvas canvas, ChunkMask m, RoadColumns cols, java.util.function.IntBinaryOperator neighbourTop) {
+    public static int paint(Canvas canvas, ChunkMask m, RoadColumns cols, java.util.function.IntBinaryOperator neighbourTop, Neighbours neighbours) {
         if (!m.any()) return 0;
         RoadPainter p = new RoadPainter(canvas);
+        p.neighbours = neighbours;
         p.chunkX = m.cx;
         p.chunkZ = m.cz;
         p.neighbourTop = neighbourTop;
@@ -99,6 +102,7 @@ public final class RoadPainter {
         try {
             int[] ctop = new int[256];
             java.util.Arrays.fill(ctop, Integer.MIN_VALUE);
+            if (StreamsReflowing.ON) p.streamCrossings(m);
             // the road first, then banks and walls beside it (they read the finished road columns)
             for (int pass = 0; pass < 2; pass++) {
                 if (pass == 1) p.evenConnector(m, ctop);
@@ -142,6 +146,7 @@ public final class RoadPainter {
                     }
                 }
             }
+            if (StreamsReflowing.ON && !p.crossings.isEmpty()) p.walkLumps(m);
             // bushes and field stones last, once every column of the chunk is shaped (they reach a neighbour column)
             for (int lz = 0; lz < 16; lz++)
                 for (int lx = 0; lx < 16; lx++) {
@@ -224,8 +229,64 @@ public final class RoadPainter {
         }
         int top = (int) Math.floor(Math.round(d.y() * 2) / 2.0);
         int x = d.x(), z = d.z();
+        if (StreamsReflowing.ON && (streamBlocked(m, x, z, top) || wetPost(x, z, top))) {
+            // planned on a stream another mod carved (or its bridge's rail): the post steps up to 6 along the road to the nearest dry bank in this chunk
+            Direction side = d.toRoad().getClockWise();
+            boolean moved = false;
+            // first a spot whose arm is clear of a bridge rail, else one whose arm reaches over it (hung a block higher)
+            for (int k = 1; k <= 24 && !moved; k++) {
+                int step = ((k - 1) % 12 + 2) / 2 * (k % 2 == 1 ? 1 : -1);
+                int nx = x + side.getStepX() * step, nz = z + side.getStepZ() * step;
+                int ax = nx + d.toRoad().getStepX(), az = nz + d.toRoad().getStepZ();
+                if (!inChunk(nx, nz) || !inChunk(ax, az) || m.in[ChunkMask.idx(nx & 15, nz & 15)] >= 0) continue;
+                if (streamBlocked(m, nx, nz, top) || wetPost(nx, nz, top) || k <= 12 && streamBlocked(m, ax, az, top)) continue;
+                x = nx;
+                z = nz;
+                moved = true;
+            }
+            // else a step or two away from the road, behind the bridge's rail (a junction post on a crossing's landing)
+            for (int o = 1; o <= 2 && !moved; o++) {
+                int nx = d.x() - d.toRoad().getStepX() * o, nz = d.z() - d.toRoad().getStepZ() * o;
+                int ax = nx + d.toRoad().getStepX(), az = nz + d.toRoad().getStepZ();
+                if (!inChunk(nx, nz) || !inChunk(ax, az) || m.in[ChunkMask.idx(nx & 15, nz & 15)] >= 0 || streamBlocked(m, nx, nz, top) || wetPost(nx, nz, top)
+                    || streamBlocked(m, ax, az, top) && m.in[ChunkMask.idx(ax & 15, az & 15)] < 0) continue;
+                x = nx;
+                z = nz;
+                moved = true;
+            }
+            int standOn = Integer.MIN_VALUE;
+            if (!moved) {
+                // nowhere dry within reach (a stream running along the road): the post stands in the stream on a log
+                // driven into its bed, like a bridge post
+                int wy = StreamsReflowing.anyWater(chunk, streamPos, d.x(), d.z(), top - 12, top + 3), bed = wy;
+                while (wy != StreamsReflowing.NONE && bed > top - 8 && !get(d.x(), bed, d.z()).getFluidState().isEmpty()) bed--;
+                if (wy == StreamsReflowing.NONE || wy > top || !PaintRules.solid(get(d.x(), bed, d.z())) || !get(d.x(), bed, d.z()).getFluidState().isEmpty()) return;
+                Palette.Wood pw = Palette.wood(m.wood[i]);
+                for (int y = bed + 1; y <= top; y++) set(d.x(), y, d.z(), pw.log().defaultBlockState());
+                standOn = top;
+            }
+            if (standOn != Integer.MIN_VALUE) {
+                gallows(d, m, i, x, z, standOn, top);
+                return;
+            }
+        }
         int g = groundAt(x, z, top);
         if (Math.abs(g - top) > 4 || !PaintRules.terrain(get(x, g, z)) || woody(x, g + 1, g + 5, z)) return;
+        gallows(d, m, i, x, z, g, top);
+    }
+
+    /**
+     * With Streams Reflowing, a post spot over water too deep for a post to stand in (its ground more than 4 under the
+     * road): a river the noise column knows, which that mod carved deeper than vanilla, so it is no stream of its own
+     * (streamWater) and the post was dropped.
+     */
+    private boolean wetPost(int x, int z, int top) {
+        int g = groundAt(x, z, top);
+        return top - g > 4 && !get(x, g + 1, z).getFluidState().isEmpty();
+    }
+
+    /** The gallows post of a signpost or lamp standing on y = g (its foot one above). */
+    private void gallows(EdgePlan.Decor d, ChunkMask m, int i, int x, int z, int g, int top) {
         Palette.Wood wood = Palette.wood(m.in[i] == Float.NEGATIVE_INFINITY ? 0 : m.wood[i]);
         long h = hash(x, z);
         int ax = x + d.toRoad().getStepX(), az = z + d.toRoad().getStepZ();
@@ -240,10 +301,21 @@ public final class RoadPainter {
         exact(x, g + 3, z, fence);
         exact(x, g + 4, z, fence.setValue(net.minecraft.world.level.block.CrossCollisionBlock.PROPERTY_BY_DIRECTION.get(toRoad), true));
         BlockState arm = get(ax, g + 4, az), under = get(ax, g + 3, az);
+        int up = 0;
+        if (StreamsReflowing.ON && !((arm.isAir() || arm.canBeReplaced()) && (under.isAir() || under.canBeReplaced()))
+            && (get(ax, g + 5, az).isAir() || get(ax, g + 5, az).canBeReplaced()) && (get(ax, g + 4, az).isAir() || get(ax, g + 4, az).canBeReplaced())
+            && (get(x, g + 5, z).isAir() || get(x, g + 5, z).canBeReplaced())) {
+            // the arm reaches over a stream bridge's rail fence: the post goes a block higher and the sign hangs above the rail
+            up = 1;
+            exact(x, g + 4, z, fence);
+            exact(x, g + 5, z, fence.setValue(net.minecraft.world.level.block.CrossCollisionBlock.PROPERTY_BY_DIRECTION.get(toRoad), true));
+            arm = get(ax, g + 5, az);
+            under = get(ax, g + 4, az);
+        }
         if ((arm.isAir() || arm.canBeReplaced()) && (under.isAir() || under.canBeReplaced())) {
-            exact(ax, g + 4, az, fence.setValue(net.minecraft.world.level.block.CrossCollisionBlock.PROPERTY_BY_DIRECTION.get(toRoad.getOpposite()), true));
-            if (d.type() == EdgePlan.SIGN) hangingSign(wood, ax, g + 3, az, d);
-            else lantern(ax, g + 3, az, Blocks.LANTERN.defaultBlockState().setValue(LanternBlock.HANGING, true), true);
+            exact(ax, g + 4 + up, az, fence.setValue(net.minecraft.world.level.block.CrossCollisionBlock.PROPERTY_BY_DIRECTION.get(toRoad.getOpposite()), true));
+            if (d.type() == EdgePlan.SIGN) hangingSign(wood, ax, g + 3 + up, az, d);
+            else lantern(ax, g + 3 + up, az, Blocks.LANTERN.defaultBlockState().setValue(LanternBlock.HANGING, true), true);
         }
     }
 
@@ -526,6 +598,7 @@ public final class RoadPainter {
     private void road(int x, int z, int top, boolean half, float in, ChunkMask m, int i) {
         boolean dbg = io.github.profetgit.countryroads.gen.GenContext.debug(x, z);
         if (dbg) io.github.profetgit.countryroads.CountryRoads.LOG.info("CR-TRACE before " + x + "," + z + " top=" + top + " ground=" + groundAt(x, z, top) + dump(x, z, top));
+        if (dbg) io.github.profetgit.countryroads.CountryRoads.LOG.info("CR-TRACE stream " + x + "," + z + " kind=" + m.kind[i] + " wy=" + streamWater(x, z, top) + " " + StreamsReflowing.describe(chunk, x, z));
         road0(x, z, top, half, in, m, i);
         if (dbg) io.github.profetgit.countryroads.CountryRoads.LOG.info("CR-TRACE after" + dump(x, z, top));
     }
@@ -555,6 +628,80 @@ public final class RoadPainter {
                 if (m.runPos[i] <= 1 && ground > top + 7) set(x, top + 5, z, Palette.masonry(h));
             }
             default -> {
+                int wy = m.kind[i] == EdgePlan.GROUND ? streamWater(x, z, top) : StreamsReflowing.NONE;
+                float[] cr = crossing(m, i);
+                if (m.kind[i] == EdgePlan.GROUND && !crossings.isEmpty()) {
+                    float[] sq = squareAt(x, z);
+                    if (sq != null) {
+                        squareBridge(x, z, top, m, i, sq, wy);
+                        return;
+                    }
+                }
+                if (cr != null && cr[3] >= 0) {
+                    // a squared crossing's rows beside its deck: the stream stays open, dry ground is verge (the road
+                    // ran on beside the rail a block below the deck; it reaches the deck over the landing on the axis)
+                    if (wy != StreamsReflowing.NONE && wy <= top) return;
+                    int al = cr[3] == 0 ? x : z;
+                    if (al < cr[4] || al > cr[5]) {
+                        squareLanding(x, z, m, i, cr, StreamsReflowing.NONE, al);
+                        return;
+                    }
+                    BlockState natural = get(x, ground, z);
+                    if (ground > top) clear(x, top + 1, ground + 2, z);
+                    else fillBelow(x, z, ground, top);
+                    if (!PaintRules.solid(get(x, top - 1, z))) set(x, top - 1, z, Blocks.DIRT.defaultBlockState());
+                    set(x, top, z, PaintRules.surfaceOf(natural));
+                    clear(x, top + 1, top + 3, z);
+                    return;
+                } else {
+                    if (cr == null && wy != StreamsReflowing.NONE && wy < top) cr = new float[]{m.s[i] - STREAM_LANDING, m.s[i] + STREAM_LANDING, 0, -1, 0, 0, 0, 0, 0};
+                    if (cr != null && ((int) cr[2] & 4) != 0) {
+                        // the boardwalk's pieces lie on the water like the boardwalk's own, one layer at one height: a block
+                        // over the crossing's highest water (on a ford row a block over the road, the stream running on
+                        // under them; at the road's height they were drowned in its water)
+                        int lv = walkLevel(cr, top, wy);
+                        if (wy != StreamsReflowing.NONE && wy < lv) {
+                            walkway(x, z, lv, -in, m, i);
+                            return;
+                        }
+                        if (wy == StreamsReflowing.NONE) {
+                            // a dry row: the walkway runs on at its height over the ground, filled up or cut down to it (a
+                            // piece on a road block stood up as a lump, and a road block between pieces read as one); toward
+                            // a bank the road climbs from it half a block per row to its own height (a block's step onto
+                            // the bank, critic 2026-11-18)
+                            double feet = walkFeet(cr, lv, m.s[i], Math.max(0.5f, m.ds[i]), m.surface(i) + 1);
+                            BlockState natural = get(x, ground, z);
+                            // (a road no higher than the walkway's layer just carries its pieces: a ramp block there stood up
+                            // between the walkway and a boardwalk)
+                            if (feet <= lv + 0.5 || m.surface(i) < lv + 0.5) {
+                                if (ground >= lv) {
+                                    clear(x, lv, ground + 2, z);
+                                    set(x, lv - 1, z, PaintRules.surfaceOf(natural));
+                                } else fillBelow(x, z, ground, lv);
+                                walkway(x, z, lv, -in, m, i);
+                                return;
+                            }
+                            int t = (int) Math.floor(feet - 1);
+                            if (ground > t) clear(x, t + 1, ground + 2, z);
+                            else fillBelow(x, z, ground, t);
+                            if (!PaintRules.solid(get(x, t - 1, z))) set(x, t - 1, z, Blocks.DIRT.defaultBlockState());
+                            Palette.Surface wp = pal(x, t, z);
+                            set(x, t, z, Palette.surface(wp, in, h, natural, ground == t));
+                            clear(x, t + 1, t + 3, z);
+                            if (feet - 1 - t >= 0.5) set(x, t + 1, z, wp.step().setValue(SlabBlock.TYPE, SlabType.BOTTOM));
+                            return;
+                        }
+                        cr = null;
+                    }
+                    if (cr != null) {
+                        streamBridge(x, z, top, half, deckD(m, i), m, i, ground, cr, wy);
+                        return;
+                    }
+                }
+                if (wy == top && PaintRules.solid(get(x, top - 1, z)) && get(x, top - 1, z).getFluidState().isEmpty()) {
+                    ford(x, z, top, ground);
+                    return;
+                }
                 BlockState natural = get(x, ground, z);
                 fillBelow(x, z, ground, top);
                 Palette.Surface pal = pal(x, top, z);
@@ -574,6 +721,702 @@ public final class RoadPainter {
             }
         }
     }
+
+    private final BlockPos.MutableBlockPos streamPos = new BlockPos.MutableBlockPos();
+
+    /** Y of stream water (Streams Reflowing) in this column, at most 3 over the road surface, else NONE. */
+    private int streamWater(int x, int z, int top) {
+        return StreamsReflowing.ON ? StreamsReflowing.water(chunk, streamPos, x, z, top - 12, top + 3) : StreamsReflowing.NONE;
+    }
+
+    /**
+     * A ground road over a stream that was carved after the plan was made (the planner reads the noise column, which has
+     * no such stream) crosses it on the road's own timber bridge at its planned height, the stream running on under it
+     * (see streamCrossings). Outside a crossing, a column whose water is at the road block over a bed one deep is a ford:
+     * the water stays on the road (decking it would dam the stream).
+     */
+    private void ford(int x, int z, int top, int ground) {
+        clear(x, top + 1, Math.max(top + 3, ground + 2), z);
+    }
+
+    /** The plank laid over water that reaches under a finished road later (GenContext.guardWrite): the bridge deck's planks. */
+    public static BlockState streamDeck(ChunkMask m, int i) {
+        return Palette.bridgeWood(streamPair(m, i), false).planks();
+    }
+
+    /** The bridge wood pair of a stream crossing: the road's deck wood, like a trestle the painter adds. */
+    private static int streamPair(ChunkMask m, int i) {
+        return new int[]{2, 0, 6, 3, 4}[Math.clamp(m.wood[i], 0, 4)];
+    }
+
+    /** Neighbouring chunks a generating chunk can read: a chunk is returned once it is painted, else null. */
+    public interface Neighbours {
+        ChunkAccess painted(int cx, int cz);
+    }
+
+    private Neighbours neighbours;
+
+    /** Stream crossings of this chunk per plan: {s0, s1} in samples, an end the next chunk finishes is infinite. */
+    private final java.util.Map<EdgePlan, java.util.List<float[]>> crossings = new java.util.IdentityHashMap<>();
+
+    private static final int SIDE_CLOSED = 0, SIDE_OPEN = 1, SIDE_DECK = 2, SIDE_PLAIN = 3, SIDE_WALK = 4;
+
+    /**
+     * Collected before anything is painted. A crossing spans the road's whole width, square across it, from 1.5 blocks
+     * before the first row whose road or first verge column has stream water under the road surface to 1.5 after the
+     * last; rows with water at the road block (fords) and dry stretches up to STREAM_GAP join two such rows into one
+     * crossing. Where the road runs on into the next chunk, that chunk's water is often not there yet: a crossing near
+     * that border stays open toward it, and the next chunk, painted later, finds the deck at the border and finishes it
+     * (else a crossing on a chunk border ended at the border with a dirt island before the next deck).
+     */
+    private void streamCrossings(ChunkMask m) {
+        final boolean TRACE_CROSSINGS = Boolean.getBoolean("countryroads.traceCrossings") || !DEBUG.isEmpty() && java.util.Arrays.stream(DEBUG.split(";")).anyMatch(xz -> {
+            String[] a = xz.split(",");
+            return a.length == 2 && (Integer.parseInt(a[0].trim()) >> 4) == m.cx && (Integer.parseInt(a[1].trim()) >> 4) == m.cz;
+        });
+        java.util.Map<EdgePlan, java.util.List<float[]>> pts = new java.util.IdentityHashMap<>();
+        java.util.Map<EdgePlan, float[]> range = new java.util.IdentityHashMap<>();
+        for (int lz = 0; lz < 16; lz++)
+            for (int lx = 0; lx < 16; lx++) {
+                int i = ChunkMask.idx(lx, lz);
+                EdgePlan p = m.plan[i];
+                if (p == null || !(m.in[i] > -1.5f) || m.kind[i] != EdgePlan.GROUND) continue;
+                float[] r = range.computeIfAbsent(p, k -> new float[]{Float.MAX_VALUE, -Float.MAX_VALUE, 0.5f});
+                r[0] = Math.min(r[0], m.s[i]);
+                r[1] = Math.max(r[1], m.s[i]);
+                r[2] = Math.max(r[2], m.ds[i]);
+                int top = (int) Math.floor(m.surface(i));
+                int wy = streamWater((m.cx << 4) + lx, (m.cz << 4) + lz, top);
+                if (wy == StreamsReflowing.NONE || wy > top) continue;
+                pts.computeIfAbsent(p, k -> new java.util.ArrayList<>()).add(new float[]{m.s[i], wy < top ? 1 : 0, wy});
+            }
+        for (var e : range.entrySet()) {
+            EdgePlan p = e.getKey();
+            float lo = e.getValue()[0], hi = e.getValue()[1], per = e.getValue()[2];
+            java.util.List<float[]> list = pts.getOrDefault(p, new java.util.ArrayList<>());
+            int loSide = SIDE_CLOSED, hiSide = SIDE_CLOSED;
+            if (!list.isEmpty() || neighbours != null) {
+                loSide = side(p, lo, -1, m);
+                hiSide = side(p, hi, 1, m);
+            }
+            if (loSide == SIDE_DECK || loSide == SIDE_WALK) list.add(new float[]{lo - 0.5f, 2});
+            if (hiSide == SIDE_DECK || hiSide == SIDE_WALK) list.add(new float[]{hi + 0.5f, 3});
+            if (list.isEmpty()) continue;
+            list.sort((a, b) -> Float.compare(a[0], b[0]));
+            java.util.List<float[]> out = new java.util.ArrayList<>();
+            float gap = STREAM_GAP * per, land = STREAM_LANDING * per;
+            int from = 0;
+            for (int k = 1; k <= list.size(); k++) {
+                if (k < list.size() && list.get(k)[0] - list.get(k - 1)[0] <= gap) continue;
+                // one cluster of wet rows: a crossing if any row has water under the road surface
+                float d0 = Float.NaN, d1 = Float.NaN;
+                boolean openLo = false, openHi = false;
+                // a walkway over these rows lies a block over their highest water, like a planned boardwalk
+                int level = Integer.MIN_VALUE;
+                for (int q = from; q < k; q++) if (list.get(q).length > 2) level = Math.max(level, (int) list.get(q)[2] + 1);
+                for (int q = from; q < k; q++) {
+                    float[] pt = list.get(q);
+                    if (pt[1] == 0) continue;
+                    if (Float.isNaN(d0)) d0 = pt[0];
+                    d1 = pt[0];
+                    openLo |= pt[1] == 2;
+                    openHi |= pt[1] == 3;
+                }
+                float w0 = list.get(from)[0], w1 = list.get(k - 1)[0];
+                from = k;
+                // only fords: a creek of a row or two keeps its water on the road; a longer stretch of the road under the
+                // stream's water (a swamp stream running along it) gets the boardwalk's walkway laid on the water
+                boolean walkFord = Float.isNaN(d0) && (w1 - w0 >= STREAM_FORD_MAX * per || nearKind(p, w0, w1, lo, hi, EdgePlan.BOARDWALK, STREAM_NEAR_WALK));
+                if (walkFord) {
+                    d0 = w0;
+                    d1 = w1;
+                }
+                if (Float.isNaN(d0)) continue;
+                // ford rows running on from a deck to one of the road's boardwalks are walkway: the boardwalk's pieces from
+                // the deck's end to the boardwalk (as fords they left road blocks scattered in the water beside it)
+                if (!walkFord && w1 - d1 > land && nearKind(p, w1, w1, lo, hi, EdgePlan.BOARDWALK, STREAM_NEAR_WALK))
+                    out.add(new float[]{d1 + land + 0.25f, Math.min(w1 + land, hi + 0.25f), 4, -1, 0, 0, 0, 0, 2, level, d1 + land, w1, SQUARE_LANDING, SQUARE_LANDING});
+                if (!walkFord && d0 - w0 > land && nearKind(p, w0, w0, lo, hi, EdgePlan.BOARDWALK, STREAM_NEAR_WALK))
+                    out.add(new float[]{Math.max(w0 - land, lo - 0.25f), d0 - land - 0.25f, 4, -1, 0, 0, 0, 0, 2, level, w0, d0 - land, SQUARE_LANDING, SQUARE_LANDING});
+                // the style of the painted neighbour this crossing runs on from: 1 its timber deck, 2 its walkway
+                int inherit = openLo ? (loSide == SIDE_WALK ? 2 : 1) : openHi ? (hiSide == SIDE_WALK ? 2 : 1) : 0;
+                float s0 = d0 - land, s1 = d1 + land;
+                if (openLo || loSide == SIDE_OPEN && w0 - lo <= gap) s0 = Float.NEGATIVE_INFINITY;
+                else if (loSide != SIDE_OPEN) s0 = Math.max(s0, lo - 0.25f);
+                if (openHi || hiSide == SIDE_OPEN && hi - w1 <= gap) s1 = Float.POSITIVE_INFINITY;
+                else if (hiSide != SIDE_OPEN) s1 = Math.min(s1, hi + 0.25f);
+                out.add(new float[]{s0, s1, walkFord ? 4 : 0, -1, 0, 0, 0, 0, walkFord ? 2 : inherit, level, d0, d1, SQUARE_LANDING, SQUARE_LANDING});
+            }
+            out.sort((a, b) -> Float.compare(a[0], b[0]));
+            // crossings whose landings nearly touch are one bridge (two end posts stood back to back between them)
+            for (int k = out.size() - 1; k > 0; k--)
+                if (out.get(k)[0] - out.get(k - 1)[1] <= STREAM_JOIN * per && ((int) out.get(k)[2] & 4) == ((int) out.get(k - 1)[2] & 4)) {
+                    out.get(k - 1)[1] = out.get(k)[1];
+                    out.get(k - 1)[8] = Math.max(out.get(k - 1)[8], out.get(k)[8]);
+                    out.remove(k);
+                }
+            for (int k = 0; k < out.size(); k++) {
+                float[] c = out.get(k);
+                // running into one of the road's own bridges: the deck meets it without an end post of its own
+                int b0 = joinsBridge(p, c[0], -1), b1 = joinsBridge(p, c[1], 1);
+                if (b0 >= 0) {
+                    c[0] = b0 + 0.5f;
+                    c[2] = (int) c[2] | 1;
+                }
+                if (b1 >= 0) {
+                    c[1] = b1 - 0.5f;
+                    c[2] = (int) c[2] | 2;
+                }
+                // a landing reaching into a boardwalk or tunnel ends on the last ground row, so its end post stands there
+                int n = p.length();
+                if (b1 < 0 && !Float.isInfinite(c[1])) {
+                    int q = Math.min(n - 1, (int) Math.floor(c[1]));
+                    while (q > c[0] && p.kind[q] != EdgePlan.GROUND) q--;
+                    if (q < Math.floor(c[1])) c[1] = q + 0.5f;
+                }
+                if (b0 < 0 && !Float.isInfinite(c[0])) {
+                    int q = Math.max(0, (int) Math.ceil(c[0]));
+                    while (q < c[1] && p.kind[q] != EdgePlan.GROUND) q++;
+                    if (q > Math.ceil(c[0])) c[0] = q - 0.5f;
+                }
+                // near one of the road's boardwalks the stream is crossed with the boardwalk's own walkway pieces; a crossing
+                // running on from a painted neighbour keeps that neighbour's style (else a deck met a walkway mid-stream)
+                if (c[8] == 2 || c[8] == 0 && nearKind(p, c[0], c[1], lo, hi, EdgePlan.BOARDWALK, STREAM_NEAR_WALK)) c[2] = (int) c[2] | 4;
+                // a walkway runs on over the ground rows to a boardwalk within reach (road blocks and their step slabs were
+                // left between the two, critic 2026-11-18)
+                if (((int) c[2] & 4) != 0) {
+                    if (!Float.isInfinite(c[1]))
+                        for (int q = (int) Math.ceil(c[1]), k2 = 0; k2 <= STREAM_NEAR_WALK && q + k2 < n; k2++) {
+                            if (p.kind[q + k2] == EdgePlan.BOARDWALK) {
+                                c[1] = q + k2 - 0.5f;
+                                break;
+                            }
+                            if (p.kind[q + k2] != EdgePlan.GROUND) break;
+                        }
+                    if (!Float.isInfinite(c[0]))
+                        for (int q = (int) Math.floor(c[0]), k2 = 0; k2 <= STREAM_NEAR_WALK && q - k2 >= 0; k2++) {
+                            if (p.kind[q - k2] == EdgePlan.BOARDWALK) {
+                                c[0] = q - k2 + 0.5f;
+                                break;
+                            }
+                            if (p.kind[q - k2] != EdgePlan.GROUND) break;
+                        }
+                }
+                square(p, c, m);
+            }
+            if (TRACE_CROSSINGS && !out.isEmpty()) {
+                StringBuilder sb = new StringBuilder("CR-TRACE crossings chunk " + m.cx + "," + m.cz + " plan " + p.edge.a().pos().getX() + "," + p.edge.a().pos().getZ()
+                    + "->" + p.edge.b().pos().getX() + "," + p.edge.b().pos().getZ() + " lo=" + lo + " hi=" + hi + " sides=" + loSide + "/" + hiSide + " pts=" + list.size());
+                for (float[] c : out) sb.append(" [").append(c[0]).append("..").append(c[1]).append(" f=").append((int) c[2]).append(" sq=").append(c[3]).append(']');
+                io.github.profetgit.countryroads.CountryRoads.LOG.info(sb.toString());
+            }
+            if (!out.isEmpty()) crossings.put(p, out);
+        }
+    }
+
+    /**
+     * What lies past this chunk's last row of a plan (dir -1: before lo, +1: after hi): CLOSED (the road ends, or stays in
+     * this chunk), OPEN (the next chunk is not painted yet), DECK (painted, with a stream deck at the border) or PLAIN.
+     */
+    private int side(EdgePlan p, float s, int dir, ChunkMask m) {
+        float probe = s + dir * 2f;
+        int n = p.length();
+        if (probe < 0 || probe > n - 1) return SIDE_CLOSED;
+        // the road goes on as one of its own boardwalks, bridges or tunnels: the crossing ends here (it is not continued
+        // in the next chunk, and its end must be known to meet that piece: an open end skipped the walkway rule)
+        for (int q = (int) Math.floor(Math.min(s, probe)); q <= (int) Math.ceil(Math.max(s, probe)); q++)
+            if (q >= 0 && q < n && p.kind[q] != EdgePlan.GROUND) return SIDE_CLOSED;
+        int k = Math.min((int) Math.floor(probe), n - 2);
+        float t = probe - k;
+        int cx = (int) Math.floor(p.x[k] + t * (p.x[k + 1] - p.x[k])) >> 4, cz = (int) Math.floor(p.z[k] + t * (p.z[k + 1] - p.z[k])) >> 4;
+        if (cx == m.cx && cz == m.cz || Math.abs(cx - m.cx) > 1 || Math.abs(cz - m.cz) > 1 || neighbours == null) return SIDE_CLOSED;
+        try {
+            ChunkAccess nb = neighbours.painted(cx, cz);
+            if (nb == null) return SIDE_OPEN;
+            ChunkMask nm = io.github.profetgit.countryroads.gen.GenContext.mask(nb.getPos());
+            if (nm == null) return SIDE_PLAIN;
+            BlockPos.MutableBlockPos q = new BlockPos.MutableBlockPos();
+            for (int c = 0; c < 256; c++) {
+                if (nm.plan[c] != p || !(nm.in[c] >= 0) || nm.kind[c] != EdgePlan.GROUND || Math.abs(nm.s[c] - s) > 2.5f) continue;
+                int top = (int) Math.floor(nm.surface(c));
+                BlockState b = nb.getBlockState(q.set((cx << 4) + (c & 15), top, (cz << 4) + (c >> 4)));
+                if (b.is(BlockTags.PLANKS)) return SIDE_DECK;
+                if (walkwayPiece(b)) return SIDE_WALK;
+            }
+            return SIDE_PLAIN;
+        } catch (RuntimeException ex) {
+            return SIDE_CLOSED;
+        }
+    }
+
+    /** A boardwalk walkway piece (see walkway). */
+    private static boolean walkwayPiece(BlockState b) {
+        return b.is(Blocks.SPRUCE_SLAB) || b.is(Blocks.SPRUCE_TRAPDOOR) || b.is(Blocks.CAMPFIRE);
+    }
+
+    /** Samples a stream deck runs on over the ground to meet one of the road's own bridges (its approach eases sideways). */
+    static final int STREAM_JOIN_BRIDGE = 12;
+
+    /**
+     * The nearest sample past s (dir +-1) within STREAM_JOIN_BRIDGE that is one of the road's planned bridges, else -1.
+     * A boardwalk (the ragged slab walkway over still water) is never joined: the crossing stops short of it.
+     */
+    private static int joinsBridge(EdgePlan p, float s, int dir) {
+        if (Float.isInfinite(s)) return -1;
+        int n = p.length();
+        for (int k = 0; k <= STREAM_JOIN_BRIDGE; k++) {
+            int q = dir > 0 ? (int) Math.ceil(s) + k : (int) Math.floor(s) - k;
+            if (q < 0 || q >= n || p.kind[q] == EdgePlan.BOARDWALK || p.kind[q] == EdgePlan.TUNNEL) return -1;
+            if (p.kind[q] == EdgePlan.BRIDGE) return q;
+        }
+        return -1;
+    }
+
+    /** Samples from a boardwalk within which a stream crossing takes the boardwalk's walkway pieces. */
+    static final int STREAM_NEAR_WALK = 6;
+
+    /** Whether the plan has a sample of this kind within reach of either end of [s0, s1]. */
+    private static boolean nearKind(EdgePlan p, float s0, float s1, float lo, float hi, byte kind, int reach) {
+        // an open end is measured from this chunk's last row (the crossing goes on past it, so the piece is at least that
+        // close), never along the whole road
+        if (Float.isInfinite(s0)) s0 = lo;
+        if (Float.isInfinite(s1)) s1 = hi;
+        int n = p.length();
+        if (!Float.isInfinite(s0))
+            for (int q = Math.max(0, (int) Math.floor(s0) - reach); q <= Math.min(n - 1, (int) Math.floor(s0) + reach); q++) if (p.kind[q] == kind) return true;
+        if (!Float.isInfinite(s1))
+            for (int q = Math.max(0, (int) Math.ceil(s1) - reach); q <= Math.min(n - 1, (int) Math.ceil(s1) + reach); q++) if (p.kind[q] == kind) return true;
+        return false;
+    }
+
+    /** x, z, y and half width of a plan at s (clamped to the plan). */
+    private static double[] at(EdgePlan p, float s) {
+        int n = p.length();
+        float c = Math.clamp(s, 0f, n - 1f);
+        int k = Math.min((int) c, n - 2);
+        float t = c - k;
+        return new double[]{p.x[k] + t * (p.x[k + 1] - p.x[k]), p.z[k] + t * (p.z[k + 1] - p.z[k]), p.y[k] + t * (p.y[k + 1] - p.y[k]),
+            p.hw[k] + t * (p.hw[k + 1] - p.hw[k])};
+    }
+
+    /**
+     * A crossing on a diagonal stretch is laid square to the nearer axis, like the road's planned bridges: a straight deck
+     * as wide as the road, centred on the crossing's middle, from one end of the crossing to the other along that axis,
+     * straight rails either side (on the diagonal the deck followed the road's staircase of columns and its rails zigzagged:
+     * critic REJECT 2026-11-18). Only when both ends are known and the whole bridge lies in this chunk (another chunk
+     * could not paint its share the same way); the road's columns in those rows beside the deck keep the stream open.
+     * Fills c[3..7]: axis (0 x, 1 z), first and last column along it, middle column across it, deck half width.
+     */
+    private static void square(EdgePlan p, float[] c, ChunkMask m) {
+        if (Float.isInfinite(c[0]) || Float.isInfinite(c[1]) || (int) c[2] != 0) return;
+        double[] a = at(p, c[0]), b = at(p, c[1]), q = at(p, (c[0] + c[1]) / 2);
+        double tx = b[0] - a[0], tz = b[1] - a[1], len = Math.hypot(tx, tz);
+        if (len < 1 || Math.min(Math.abs(tx), Math.abs(tz)) / len < 0.3) return;
+        boolean xAxis = Math.abs(tx) >= Math.abs(tz);
+        int ia0 = (int) Math.floor(Math.min(xAxis ? a[0] : a[1], xAxis ? b[0] : b[1]));
+        int ia1 = (int) Math.floor(Math.max(xAxis ? a[0] : a[1], xAxis ? b[0] : b[1]));
+        int mid = (int) Math.floor(xAxis ? q[1] : q[0]);
+        int half = 1;
+        int alLo = xAxis ? m.cx << 4 : m.cz << 4, crLo = xAxis ? m.cz << 4 : m.cx << 4;
+        if (ia0 < alLo || ia1 > alLo + 15 || mid - half - 1 < crLo || mid + half + 1 > crLo + 15) return;
+        c[3] = xAxis ? 0 : 1;
+        c[4] = ia0;
+        c[5] = ia1;
+        c[6] = mid;
+        c[7] = half;
+        // each landing runs on along the axis until the road's own columns cover its whole width (a diagonal road reached
+        // the deck end beside a 2-block landing, with grass between them, critic 2026-11-18)
+        for (int sd = 0; sd < 2; sd++) {
+            int land = 0;
+            for (int dd = 1; dd <= SQUARE_LANDING_MAX; dd++) {
+                int a2 = sd == 0 ? ia0 - dd : ia1 + dd;
+                boolean inside = true, road = true;
+                for (int o = -half; o <= half; o++) {
+                    int rx = xAxis ? a2 : mid + o, rz = xAxis ? mid + o : a2;
+                    if (rx >> 4 != m.cx || rz >> 4 != m.cz) inside = false;
+                    else if (!(m.in[ChunkMask.idx(rx & 15, rz & 15)] >= 0)) road = false;
+                }
+                if (!inside) break;
+                land = dd;
+                if (road && dd >= SQUARE_LANDING) break;
+            }
+            c[12 + sd] = land;
+        }
+    }
+
+    /** 1: deck, 2: rail, 3: landing (road on the axis past an end) of the squared crossing c at this column, else 0. */
+    private static int squareRole(float[] c, int x, int z) {
+        if (c[3] < 0) return 0;
+        boolean xAxis = c[3] == 0;
+        int al = xAxis ? x : z, cr = xAxis ? z : x;
+        int off = Math.abs(cr - (int) c[6]);
+        if (al < c[4] || al > c[5]) {
+            float lo = c.length > 13 ? c[12] : SQUARE_LANDING, hi = c.length > 13 ? c[13] : SQUARE_LANDING;
+            return off <= c[7] && (al >= c[4] - lo && al < c[4] || al > c[5] && al <= c[5] + hi) ? 3 : 0;
+        }
+        return off <= c[7] ? 1 : off == c[7] + 1 ? 2 : 0;
+    }
+
+    /** Blocks of road laid on a squared crossing's axis past each end, so the road meets the deck end-on. */
+    static final int SQUARE_LANDING = 2, SQUARE_LANDING_MAX = 6;
+
+    /** A squared crossing whose end posts this column stands beside (2 out past a rail, a block either side of an end), or null. */
+    private float[] nearSquareEnd(int x, int z) {
+        for (java.util.List<float[]> l : crossings.values())
+            for (float[] c : l) {
+                if (c[3] < 0) continue;
+                boolean xAxis = c[3] == 0;
+                int al = xAxis ? x : z, off = Math.abs((xAxis ? z : x) - (int) c[6]);
+                if (off >= c[7] + 1 && off <= c[7] + 3 && (Math.abs(al - c[4]) <= 1 || Math.abs(al - c[5]) <= 1) && squareRole(c, x, z) == 0) return c;
+            }
+        return null;
+    }
+
+    /** The squared crossing whose deck or rail this column is, or null. */
+    private float[] squareAt(int x, int z) {
+        for (java.util.List<float[]> l : crossings.values())
+            for (float[] c : l) if (squareRole(c, x, z) > 0) return c;
+        return null;
+    }
+
+    /** One column of a squared crossing (see square): posts spaced evenly along the axis, 2 lanterns on a span under 6. */
+    private void squareBridge(int x, int z, int top, ChunkMask m, int i, float[] c, int wy) {
+        // one height across each row of the deck: the highest planned surface of the row's columns (each column's own
+        // height stair-stepped across the diagonal road: planks a block up beside the deck, critic 2026-11-18; never
+        // lower than a column's own, so the deck never sinks into the stream)
+        int al0 = c[3] == 0 ? x : z;
+        if (squareRole(c, x, z) == 3) {
+            squareLanding(x, z, m, i, c, wy, al0);
+            return;
+        }
+        double yv = squareDeck(m, c, al0);
+        if (yv > Double.NEGATIVE_INFINITY) top = (int) Math.floor(yv);
+        boolean half = yv - top >= 0.5;
+        if (wy != StreamsReflowing.NONE && wy > top) return;
+        int role = squareRole(c, x, z);
+        boolean rail = role == 2, deck = role == 1, xAxis = c[3] == 0;
+        int pair = streamPair(m, i);
+        Palette.BridgeWood main = Palette.bridgeWood(pair, false), trim = Palette.bridgeWood(pair, true);
+        Direction along = xAxis ? Direction.EAST : Direction.SOUTH;
+        int al = xAxis ? x : z, cr = xAxis ? z : x, n = (int) (c[5] - c[4]);
+        int side = cr > c[6] ? 1 : -1;
+        Direction out = xAxis ? (side > 0 ? Direction.SOUTH : Direction.NORTH) : (side > 0 ? Direction.EAST : Direction.WEST);
+        int bays = Math.max(1, Math.round(n / TIMBER_BAY));
+        float step = Math.max(1f, (float) n / bays), u = al - c[4];
+        int j = Math.round(u / step);
+        float off = u - j * step;
+        boolean bent = Math.abs(off) < 0.5f, end = bent && (j == 0 || j >= bays);
+        boolean lamp = end ? n + 1 >= 6 || (j == 0) == (side > 0) : Math.floorMod(j, 2) == 0;
+        boolean brace = !bent && Math.abs(off) < 1.5f;
+        boolean nearEnd = al == (int) c[4] || al == (int) c[5];
+        int ground = groundAt(x, z, top);
+        underDeck(x, z, top, ground, wy, deck);
+        timberColumn(x, z, top, half && deck, rail, deck, false, true, main, trim, along, out, top - 2, ground, bent, nearEnd, brace, off > 0, lamp, true);
+    }
+
+    /**
+     * A squared deck's surface at this place along its axis. One height for the whole deck (the highest planned surface
+     * of its columns: a step a block up mid-deck broke both rails, critic 2026-11-18) when its rows differ by a block at
+     * most; on a steeper crossing row by row (each row's highest), a half step before a row a block higher (one height
+     * there left the low end's landing two blocks over the road). Never lower than a column's own: the deck never sinks
+     * into the stream.
+     */
+    private double squareDeck(ChunkMask m, float[] c, int al) {
+        double hi = Double.NEGATIVE_INFINITY, lo = Double.POSITIVE_INFINITY;
+        for (int a = (int) c[4]; a <= (int) c[5]; a++) {
+            double r = squareRow(m, c, a);
+            if (r == Double.NEGATIVE_INFINITY) continue;
+            hi = Math.max(hi, r);
+            lo = Math.min(lo, r);
+        }
+        if (hi == Double.NEGATIVE_INFINITY || hi - lo <= 1.0) return hi;
+        double here = squareRow(m, c, al);
+        if (here == Double.NEGATIVE_INFINITY) return here;
+        int t = (int) Math.floor(here);
+        if (here - t < 0.5 && Math.floor(Math.max(squareRow(m, c, al - 1), squareRow(m, c, al + 1))) > t) here = t + 0.5;
+        return here;
+    }
+
+    /**
+     * Road past a squared deck's end: the landing on its axis, and the road's own columns there (they and the landing
+     * must read as one road onto the deck: grass between them parted road and bridge, critic 2026-11-18). At the deck's
+     * height next to it, then half a block down per block to the column's own; over the stream the deck's planks.
+     */
+    private void squareLanding(int x, int z, ChunkMask m, int i, float[] c, int wy, int al) {
+        double yv = squareDeck(m, c, al < c[4] ? (int) c[4] : (int) c[5]);
+        if (yv == Double.NEGATIVE_INFINITY) return;
+        int dist = al < c[4] ? (int) c[4] - al : al - (int) c[5];
+        double own = m.surface(i), ye = dist <= 1 ? yv : own > yv ? Math.min(own, yv + 0.5 * (dist - 1)) : Math.max(own, yv - 0.5 * (dist - 1));
+        int t = (int) Math.floor(ye);
+        if (wy != StreamsReflowing.NONE) {
+            if (wy >= t) return;
+            set(x, t, z, Palette.bridgeWood(streamPair(m, i), false).planks());
+            clear(x, t + 1, t + 3, z);
+            return;
+        }
+        int g = groundAt(x, z, t);
+        BlockState natural = get(x, g, z);
+        if (g > t) clear(x, t + 1, g + 2, z);
+        else fillBelow(x, z, g, t);
+        if (!PaintRules.solid(get(x, t - 1, z))) set(x, t - 1, z, Blocks.DIRT.defaultBlockState());
+        Palette.Surface lp = pal(x, t, z);
+        set(x, t, z, Palette.surface(lp, 1f, hash(x, z), natural, g == t));
+        clear(x, t + 1, t + 3, z);
+        if (ye - t >= 0.5) set(x, t + 1, z, lp.step().setValue(SlabBlock.TYPE, SlabType.BOTTOM));
+    }
+
+    /** A stream deck's surface at s: its own, raised to the lower of the highest planned heights before and after s. */
+    private static double deckLevel(EdgePlan p, float[] c, float s, double own) {
+        int n = p.length();
+        float a = Float.isInfinite(c[0]) ? s - 8 : c[0], b = Float.isInfinite(c[1]) ? s + 8 : c[1];
+        double pre = own, suf = own;
+        for (int k = Math.max(0, (int) Math.ceil(a)); k <= Math.min(n - 1, (int) Math.floor(b)); k++) {
+            if (k <= s) pre = Math.max(pre, p.y[k]);
+            if (k >= s) suf = Math.max(suf, p.y[k]);
+        }
+        return Math.max(own, Math.min(pre, suf));
+    }
+
+    /** The highest planned surface of a squared crossing's columns (deck and rails) at one place along its axis. */
+    private double squareRow(ChunkMask m, float[] c, int al) {
+        double yv = Double.NEGATIVE_INFINITY;
+        if (al < c[4] || al > c[5]) return yv;
+        for (int o = -(int) c[7] - 1; o <= (int) c[7] + 1; o++) {
+            int rx = c[3] == 0 ? al : (int) c[6] + o, rz = c[3] == 0 ? (int) c[6] + o : al;
+            if (!inChunk(rx, rz)) continue;
+            int j = ChunkMask.idx(rx & 15, rz & 15);
+            if (m.in[j] != Float.NEGATIVE_INFINITY) yv = Math.max(yv, m.surface(j));
+        }
+        return yv;
+    }
+
+    /** Under a stream bridge's deck (and stringer): a ford row's bed one lower, dry rows filled, air pockets over dry ground filled. */
+    private int underDeck(int x, int z, int top, int ground, int wy, boolean deck) {
+        if (wy == top && PaintRules.solid(get(x, top - 1, z)) && get(x, top - 1, z).getFluidState().isEmpty()
+            && (PaintRules.solid(get(x, top - 2, z)) || !get(x, top - 2, z).getFluidState().isEmpty())) {
+            // a ford row inside a crossing: the bed goes one down under the deck so the stream runs on under the planks
+            // (laid on the ford's water, the deck dammed it)
+            set(x, top - 1, z, Blocks.WATER.defaultBlockState());
+            wy = top - 1;
+        }
+        if (!deck) return wy;
+        if (wy == StreamsReflowing.NONE || wy >= top) fillBelow(x, z, ground, top);
+        else {
+            // over the stream: the water stays; air under the deck with no water below it is filled down to the bed
+            int low = top - 1;
+            while (low > wy && get(x, low, z).isAir()) low--;
+            if (low == wy && !get(x, wy, z).getFluidState().isEmpty()) low = top;
+            for (int y = top - 1; y > low; y--) set(x, y, z, Blocks.DIRT.defaultBlockState());
+        }
+        if (ground > top + 2) clear(x, top + 5, ground + 2, z);
+        return wy;
+    }
+
+    /** The stream crossing this column's row lies in, or null. */
+    private float[] crossing(ChunkMask m, int i) {
+        if (crossings.isEmpty() || m.plan[i] == null || m.kind[i] != EdgePlan.GROUND) return null;
+        java.util.List<float[]> l = crossings.get(m.plan[i]);
+        if (l == null) return null;
+        for (float[] c : l) if (m.s[i] >= c[0] && m.s[i] <= c[1]) return c;
+        return null;
+    }
+
+    /** Post row ids that survive a float (exact below 2^24). */
+    private static final int NO_BENT = -9_000_001, START_BENT = -9_000_002, END_BENT = -9_000_003;
+
+    /**
+     * The post row a stream bridge column stands in (NO_BENT if none) and its offset from the nearest post row, for
+     * the knee braces: {id, offset}. End posts (START/END) stand on a crossing's known ends; between them the posts
+     * stand every TIMBER_BAY samples counted from the plan's start, never within 3.5 blocks of an end, so chunks that
+     * share a crossing's rows (a road along a chunk border has one rail in each) agree whatever ends each knows (evenly
+     * spaced posts between local ends left the two rails' posts out of step). w: one block's width in samples on this
+     * row, per: samples per block.
+     */
+    private static float[] streamBent(float s, float[] c, float w, float per) {
+        if (Math.abs(s - c[0] - 0.5f) < w / 2) return new float[]{START_BENT, s - c[0] - 0.5f};
+        if (Math.abs(c[1] - s - 0.5f) < w / 2) return new float[]{END_BENT, s - c[1] + 0.5f};
+        int jb = Math.round(s / TIMBER_BAY);
+        float at = jb * TIMBER_BAY, off = s - at;
+        if (at - c[0] < STREAM_END_GAP * per || c[1] - at < STREAM_END_GAP * per) return new float[]{NO_BENT, Float.MAX_VALUE};
+        return new float[]{Math.abs(off) < w / 2 ? jb : NO_BENT, off};
+    }
+
+    /**
+     * The post row (as streamBent) whose place lies in (ps, s]: ps is the previous column of the same rail line. Every
+     * post row then lands on exactly one column of each rail, also where a diagonal rail's stair steps skip past it (the
+     * block-width test left one rail of a pair without its post: a lone lantern post, critic 2026-11-18).
+     */
+    private static int railBent(float ps, float s, float[] c, float per) {
+        if (c[0] > Float.NEGATIVE_INFINITY && c[0] + 0.5f > ps && c[0] + 0.5f <= s) return START_BENT;
+        if (c[1] < Float.POSITIVE_INFINITY && c[1] - 0.5f > ps && c[1] - 0.5f <= s) return END_BENT;
+        for (int jb = (int) Math.floor(ps / TIMBER_BAY) + 1; jb * TIMBER_BAY <= s; jb++) {
+            float at = jb * TIMBER_BAY;
+            if (at - c[0] < STREAM_END_GAP * per || c[1] - at < STREAM_END_GAP * per) continue;
+            return jb;
+        }
+        return NO_BENT;
+    }
+
+    /**
+     * One column of a stream crossing: road columns are the deck (open water kept under it, air pockets over dry ground
+     * filled, dry rows on solid fill), the rail line half a block out is the stringer with its fence, posts and lanterns,
+     * exactly as on the road's own timber bridges.
+     */
+    private void streamBridge(int x, int z, int top, boolean half, float d, ChunkMask m, int i, int ground, float[] c, int wy) {
+        // a deck never dips: where the road's planned height sags across the crossing the deck holds the height of the
+        // higher ground either side (a middle span a block lower read as a broken bridge, critic 2026-11-18)
+        double own = m.surface(i), yd = deckLevel(m.plan[i], c, m.s[i], own);
+        if (yd > own) {
+            int nt = (int) Math.floor(yd);
+            if (nt != top) ground = groundAt(x, z, nt);
+            top = nt;
+            half = yd - nt >= 0.5;
+            if (wy != StreamsReflowing.NONE && wy > top) return;
+        }
+        // the whole 4-connected rail band, also its columns just inside the road edge: on a diagonal those fill the
+        // line's stair steps (with only d >= 0 the rail had diagonal gaps, and a post row falling in one left its rail
+        // without a post)
+        float sl = m.slant[i] / 2;
+        boolean rail = d - 0.5f >= -sl && d - 0.5f < sl, deck = !rail;
+        int pair = streamPair(m, i);
+        Palette.BridgeWood main = Palette.bridgeWood(pair, false), trim = Palette.bridgeWood(pair, true);
+        Direction along = Direction.getApproximateNearest(m.tx[i], 0, m.tz[i]);
+        Direction out = Direction.getApproximateNearest(m.ox[i], 0, m.oz[i]);
+        if (out.getAxis() == along.getAxis() || out.getAxis() == Direction.Axis.Y) out = along.getClockWise();
+        float s = m.s[i], w = m.ds[i] * Math.max(Math.abs(m.tx[i]), Math.abs(m.tz[i]));
+        float per = Math.max(0.5f, m.ds[i]);
+        float[] b = streamBent(s, c, w, per);
+        int id = (int) b[0];
+        if (rail) {
+            float pu = prevU(d, m, i);
+            if (!Float.isNaN(pu)) id = railBent(s + (pu - m.runU[i]), s, c, per);
+        }
+        boolean bent = id != NO_BENT, end = id == START_BENT || id == END_BENT;
+        if (rail && bent && end && m.joint[i]) bent = false;
+        if (io.github.profetgit.countryroads.gen.GenContext.debug(x, z))
+            io.github.profetgit.countryroads.CountryRoads.LOG.info("CR-TRACE sbridge " + x + "," + z + " s=" + s + " d=" + d + " rail=" + rail + " id=" + id
+                + " pu=" + (rail ? prevU(d, m, i) : Float.NaN) + " runU=" + m.runU[i] + " c=" + c[0] + ".." + c[1] + " f=" + (int) c[2] + " slant=" + m.slant[i]);
+        underDeck(x, z, top, ground, wy, deck);
+        float off = b[1];
+        boolean brace = !bent && Math.abs(off) < 1.5f * w && Math.abs(off) >= w / 2;
+        boolean nearEnd = s - c[0] < 1.5f || c[1] - s < 1.5f;
+        // a deck running on to one of the road's planned bridges has no end post there (the bridge's own end posts stand
+        // there) and no post within STREAM_QUIET blocks of that bridge; told from the plan, so every chunk of the deck agrees
+        if (bent && (((int) c[2] & 1) != 0 && id == START_BENT || ((int) c[2] & 2) != 0 && id == END_BENT
+            || nearBridgeEnd(m.plan[i], s, STREAM_QUIET * per))) bent = false;
+        // lanterns on every other post row, never on one closer than STREAM_LAMP_GAP to a lit end post or a planned
+        // bridge's (two lit pairs a few blocks apart read as lanterns side by side, critic 2026-11-18)
+        boolean lamp = end ? (c[1] - c[0]) / per >= 6 || (id == START_BENT) == (m.side[i] > 0)
+            : id != NO_BENT && Math.floorMod(id, 2) == 0 && s - c[0] >= STREAM_LAMP_GAP * per && c[1] - s >= STREAM_LAMP_GAP * per
+                && !nearBridgeEnd(m.plan[i], s, STREAM_LAMP_GAP * per);
+        timberColumn(x, z, top, half, rail, deck, false, true, main, trim, along, out, top - 2, ground, bent, nearEnd, brace, off > 0, lamp, true);
+    }
+
+    /** Blocks from one of the road's planned bridges within which a stream deck running on to it has no post of its own. */
+    static final float STREAM_QUIET = 10f;
+
+    /** Samples from a stream crossing's end posts within which no post row stands (4 blocks between them at least). */
+    static final float STREAM_END_GAP = 4.5f;
+
+    /** Samples from a lit end post (or a planned bridge) within which a post row carries no lantern. */
+    static final float STREAM_LAMP_GAP = 7f;
+
+    /** One of the plan's planned bridge samples within reach of s, with only ground between. */
+    private static boolean nearBridgeEnd(EdgePlan p, float s, float reach) {
+        int n = p.length();
+        for (int dir = -1; dir <= 1; dir += 2)
+            for (int k = 0; k <= (int) Math.ceil(reach); k++) {
+                int q = dir > 0 ? (int) Math.ceil(s) + k : (int) Math.floor(s) - k;
+                if (q < 0 || q >= n || Math.abs(q - s) > reach) break;
+                if (p.kind[q] == EdgePlan.BRIDGE) return true;
+                if (p.kind[q] != EdgePlan.GROUND) break;
+            }
+        return false;
+    }
+
+    /**
+     * How far a column lies outside a stream deck's edge (negative on the deck): the deck has the width of the road's own
+     * timber bridges (Planner.BRIDGE_HW, 3 columns on a column-centred line), not the wider ground road's, so its rails
+     * run on in line with a planned bridge it meets and every stream bridge looks like the planned ones.
+     */
+    private static float deckD(ChunkMask m, int i) {
+        return -m.in[i] + Math.max(0f, (float) at(m.plan[i], m.s[i])[3] - DECK_HW);
+    }
+
+    /** Half width of a stream deck: Planner.BRIDGE_HW. */
+    static final float DECK_HW = 1.75f;
+
+    /**
+     * Where a player stands on a walkway crossing's dry row: on the walkway (lv + 0.5) next to its water, climbing half a
+     * block per row (in blocks from the nearest wet row) toward the road's own height, never over it.
+     */
+    private static double walkFeet(float[] c, int lv, float s, float per, double own) {
+        if (c.length < 12) return lv + 0.5;
+        float rows = Math.max(0f, Math.max(c[10] - s, s - c[11])) / per;
+        return Math.max(lv + 0.5, Math.min(own, lv + 0.5 + 0.5 * Math.ceil(rows)));
+    }
+
+    /** The height of a walkway crossing's pieces: a block over its highest water (else over this column's). */
+    private static int walkLevel(float[] c, int top, int wy) {
+        if (c.length > 9 && c[9] > Integer.MIN_VALUE / 2f) return (int) c[9];
+        return wy != StreamsReflowing.NONE && wy >= top ? top + 1 : top;
+    }
+
+    /**
+     * Beside a stream walkway: a block standing at the walkway's layer next to a piece, over the stream's water, goes
+     * (a lone dirt-path block at a walkway's end, outside the crossing's rows, read as a pillar; critic 2026-11-18).
+     */
+    private void walkLumps(ChunkMask m) {
+        for (int lz = 0; lz < 16; lz++)
+            for (int lx = 0; lx < 16; lx++) {
+                int i = ChunkMask.idx(lx, lz);
+                if (m.in[i] == Float.NEGATIVE_INFINITY || m.in[i] >= 0) continue;
+                int x = (m.cx << 4) + lx, z = (m.cz << 4) + lz, top = (int) Math.floor(m.surface(i));
+                for (int y = top - 1; y <= top + 1; y++) {
+                    BlockState here = get(x, y, z);
+                    if (!PaintRules.terrain(here) && !here.is(Blocks.DIRT_PATH) || !get(x, y + 1, z).isAir() && !get(x, y + 1, z).canBeReplaced()) continue;
+                    boolean piece = false;
+                    for (int dx = -1; dx <= 1 && !piece; dx++)
+                        for (int dz = -1; dz <= 1 && !piece; dz++)
+                            if ((dx != 0 || dz != 0) && inChunk(x + dx, z + dz) && walkwayPiece(get(x + dx, y, z + dz))) piece = true;
+                    if (!piece || wetAround(x, z, y - 1) < 1) continue;
+                    clear(x, y, y + 2, z);
+                    BlockState below = get(x, y - 1, z);
+                    if (PaintRules.solid(below) && below.getFluidState().isEmpty()) set(x, y - 1, z, PaintRules.surfaceOf(below));
+                    break;
+                }
+            }
+    }
+
+    /** In-chunk side neighbours with water at y (a lump standing in a stream has two or more). */
+    private int wetAround(int x, int z, int y) {
+        int n = 0;
+        int[][] dirs = {{1, 0}, {-1, 0}, {0, 1}, {0, -1}};
+        for (int[] dd : dirs)
+            if (inChunk(x + dd[0], z + dd[1]) && !get(x + dd[0], y, z + dd[1]).getFluidState().isEmpty()) n++;
+        return n;
+    }
+
+    /** A beside column a signpost or lamp must not stand on: stream water, or the rail line of a stream bridge. */
+    private boolean streamBlocked(ChunkMask m, int x, int z, int top) {
+        if (streamWater(x, z, top) != StreamsReflowing.NONE) return true;
+        if (!inChunk(x, z)) return false;
+        if (!crossings.isEmpty() && squareAt(x, z) != null) return true;
+        int i = ChunkMask.idx(x & 15, z & 15);
+        float[] c = crossing(m, i);
+        if (c == null || c[3] >= 0) return false;
+        float d = deckD(m, i);
+        return d - 0.5f >= -m.slant[i] / 2 && d - 0.5f < m.slant[i] / 2;
+    }
+
+    /** Blocks of deck past the last wet row, each side; dry stretches up to STREAM_GAP between wet rows are decked. */
+    static final float STREAM_LANDING = 1.5f, STREAM_GAP = 6f;
+
+    /** Blocks of road under a stream's water (ford rows only) up to which it stays a ford, the water on the road. */
+    static final float STREAM_FORD_MAX = 2f;
+
+    /** Crossings closer than this (blocks between their ends) are one bridge. */
+    static final float STREAM_JOIN = 4f;
 
     /** Target spans: stone arches between piers, timber bents. */
     static final float STONE_SPAN = 9f, TIMBER_BAY = 5f;
@@ -857,6 +1700,19 @@ public final class RoadPainter {
                 if (jp == j && Math.abs(uPrev - 0.5f - jp * step) < ds / 2) bent = false;
             }
         }
+        timberColumn(x, z, top, half, rail, deck, outer, planned, main, trim, along, out, level, ground, bent,
+            planned && (u < 1.5f || u > L - 1.5f), planned && !bent && Math.abs(off) < 1.5f * ds, off > 0, planned && (end || j % 2 == 0), false);
+    }
+
+    /**
+     * One column of a timber bridge once its place along the crossing is known: bent (a post row), nearEnd (earth under
+     * the deck), brace (a knee brace under the stringer, braceBack: the bent lies behind it), lampWanted (a lantern on
+     * this post). stream: the crossing is over another mod's stream at the road's own height, so a cross beam or end fill
+     * never goes into its water.
+     */
+    private void timberColumn(int x, int z, int top, boolean half, boolean rail, boolean deck, boolean outer, boolean planned,
+                              Palette.BridgeWood main, Palette.BridgeWood trim, Direction along, Direction out, int level, int ground,
+                              boolean bent, boolean nearEnd, boolean brace, boolean braceBack, boolean lampWanted, boolean stream) {
         if (!rail && !deck) {
             // ivy on the outer face of a post, up from the water
             if (outer && planned && bent && clump(x * 3 + 5, z * 3 + 9) > 480) {
@@ -870,14 +1726,14 @@ public final class RoadPainter {
         }
         Direction.Axis alongAxis = along.getAxis(), across = alongAxis == Direction.Axis.X ? Direction.Axis.Z : Direction.Axis.X;
         set(x, top, z, rail ? trim.stripped().setValue(RotatedPillarBlock.AXIS, alongAxis) : deck && rnd(x, top, z) < 70 ? trim.planks() : main.planks());
-        if (planned && (u < 1.5f || u > L - 1.5f) && top - 1 - ground <= 3) {
+        if (nearEnd && top - 1 - ground <= 3 && (!stream || dryBelow(x, z, ground, top))) {
             // the bank runs on under the bridge's ends
             for (int y = top - 1; y > ground; y--) set(x, y, z, Blocks.DIRT.defaultBlockState());
         } else if (rail) {
             // knee braces either side of each bent, under the stringer
-            if (planned && !bent && Math.abs(off) < 1.5f * ds && get(x, top - 1, z).isAir())
-                set(x, top - 1, z, stair(trim.stairs(), off > 0 ? along.getOpposite() : along, true));
-        } else if (bent) {
+            if (brace && get(x, top - 1, z).isAir())
+                set(x, top - 1, z, stair(trim.stairs(), braceBack ? along.getOpposite() : along, true));
+        } else if (bent && (!stream || get(x, top - 1, z).getFluidState().isEmpty())) {
             set(x, top - 1, z, trim.stripped().setValue(RotatedPillarBlock.AXIS, across));
         }
         if (deck) {
@@ -888,12 +1744,18 @@ public final class RoadPainter {
         if (bent) {
             // a post through the deck edge, from the bed to above the rail, footed in stone where it stands in water
             timberPost(x, z, top + 2, top, main.log(), main.stripped());
-            boolean lamp = planned && (end || j % 2 == 0) && lantern(x, top + 3, z);
+            boolean lamp = lampWanted && lantern(x, top + 3, z);
             clear(x, top + (lamp ? 4 : 3), top + 4, z);
         } else {
             set(x, top + 1, z, main.fence());
             clear(x, top + 2, top + 4, z);
         }
+    }
+
+    /** No water between the ground and the deck. */
+    private boolean dryBelow(int x, int z, int ground, int top) {
+        for (int y = ground + 1; y < top; y++) if (!get(x, y, z).getFluidState().isEmpty()) return false;
+        return true;
     }
 
     /**
@@ -980,6 +1842,71 @@ public final class RoadPainter {
             return;
         }
 
+        if (kind == EdgePlan.GROUND && StreamsReflowing.ON) {
+            // a stream another mod carved beside a ground road keeps its water: no bank, fence or verge over it; on a
+            // stream crossing's rows the rail line is the bridge's, and no fence runs beside it
+            int wy = streamWater(x, z, top);
+            float[] cr = crossing(m, i);
+            float[] sq = crossings.isEmpty() ? null : squareAt(x, z);
+            if (sq != null) {
+                if (wy == StreamsReflowing.NONE || wy <= top) squareBridge(x, z, top, m, i, sq, wy);
+                return;
+            }
+            float[] se = crossings.isEmpty() || wy != StreamsReflowing.NONE ? null : nearSquareEnd(x, z);
+            if (se != null) {
+                // natural shore standing at or over the deck beside a squared crossing's end posts goes down a block
+                // under the deck (a bare stone block against the end post read as debris, critic 2026-11-18)
+                double lv = Double.NEGATIVE_INFINITY;
+                for (int a = (int) se[4]; a <= (int) se[5]; a++) lv = Math.max(lv, squareRow(m, se, a));
+                int t = (int) Math.floor(lv);
+                if (lv > Double.NEGATIVE_INFINITY && ground >= t) {
+                    BlockState natural = PaintRules.surfaceOf(get(x, ground, z));
+                    clear(x, t - 1, ground + 2, z);
+                    set(x, t - 1, z, natural);
+                    return;
+                }
+            }
+            if (cr != null && cr[3] >= 0) {
+                if (wy != StreamsReflowing.NONE) return;
+                cr = null;
+            }
+            if (cr != null && ((int) cr[2] & 4) != 0) {
+                int lv = walkLevel(cr, top, wy);
+                if (wy != StreamsReflowing.NONE && wy < lv) {
+                    if (d < 4.5f) walkway(x, z, lv, d, m, i);
+                    return;
+                }
+                if (wy == StreamsReflowing.NONE && d < 2f && ground >= lv) {
+                    // natural ground beside the walkway standing at or over its layer goes down to the water (a grass
+                    // block a block over the walkway read as a lump, critic 2026-11-18)
+                    BlockState natural = PaintRules.surfaceOf(get(x, ground, z));
+                    clear(x, lv - 1, ground + 2, z);
+                    set(x, lv - 1, z, natural);
+                    return;
+                }
+                cr = null;
+            }
+            if (cr != null) {
+                float sl = m.slant[i] / 2, dd = deckD(m, i);
+                if (dd - 0.5f >= -sl && dd - 0.5f < sl) {
+                    if (wy == StreamsReflowing.NONE || wy <= top) streamBridge(x, z, top, false, dd, m, i, ground, cr, wy);
+                    return;
+                }
+                if (wy != StreamsReflowing.NONE) return;
+                if (ground > top && ground <= top + 2 && (dd < 2f || dd < 3f && wetAround(x, z, top) >= 2)) {
+                    // a lump of the old ground standing in the stream beside the deck goes down to the deck's level (a
+                    // lone dark block beside the rail read as debris)
+                    BlockState natural = PaintRules.surfaceOf(get(x, ground, z));
+                    clear(x, top + 1, ground + 2, z);
+                    set(x, top, z, natural);
+                    return;
+                }
+                shoulder(x, z, top, d, ground, PaintRules.surfaceOf(get(x, ground, z)), h, m.y[i]);
+                verge(x, z, top, d);
+                return;
+            }
+            if (wy != StreamsReflowing.NONE) return;
+        }
         BlockState natural = PaintRules.surfaceOf(get(x, ground, z));
         shoulder(x, z, top, d, ground, natural, h, m.y[i]);
         wallOrFence(x, z, top, d, m, i);

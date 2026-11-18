@@ -109,6 +109,9 @@ public final class DevCommands {
                 .then(Commands.argument("radius", IntegerArgumentType.integer(16, 4000)).executes(c -> RoadChecks.pregen(c.getSource(), IntegerArgumentType.getInteger(c, "radius")))))
             .then(Commands.literal("check")
                 .then(Commands.argument("radius", IntegerArgumentType.integer(16, 4000)).executes(c -> RoadChecks.check(c.getSource(), IntegerArgumentType.getInteger(c, "radius")))))
+            .then(Commands.literal("streams")
+                .then(Commands.argument("radius", IntegerArgumentType.integer(16, 4000)).executes(c -> StreamCheck.run(c.getSource(), IntegerArgumentType.getInteger(c, "radius"), 0))
+                    .then(Commands.argument("ticks", IntegerArgumentType.integer(0, 12000)).executes(c -> StreamCheck.run(c.getSource(), IntegerArgumentType.getInteger(c, "radius"), IntegerArgumentType.getInteger(c, "ticks"))))))
             .then(Commands.literal("structcheck")
                 .then(Commands.argument("radius", IntegerArgumentType.integer(16, 4000)).executes(c -> StructCheck.run(c.getSource(), IntegerArgumentType.getInteger(c, "radius")))))
             .then(Commands.literal("roads")
@@ -217,6 +220,43 @@ public final class DevCommands {
                             }
                         }
                         out.append(ins);
+                        // which plan owns each column (letter), and per plan its s range here and the kinds around it
+                        java.util.Map<io.github.profetgit.countryroads.plan.EdgePlan, float[]> plans = new java.util.LinkedHashMap<>();
+                        StringBuilder pl = new StringBuilder("\nCR-BOX plan(z rows) ");
+                        for (int zz = z - r; zz <= z + r; zz++) {
+                            pl.append(zz == z - r ? "" : "|");
+                            for (int xx = x - r; xx <= x + r; xx++) {
+                                var mm = n.mask(xx >> 4, zz >> 4);
+                                int ii = io.github.profetgit.countryroads.plan.ChunkMask.idx(xx & 15, zz & 15);
+                                var pp = mm.plan[ii];
+                                if (pp == null || !(mm.in[ii] > -1.5f)) {
+                                    pl.append('.');
+                                    continue;
+                                }
+                                float[] rr = plans.computeIfAbsent(pp, k -> new float[]{Float.MAX_VALUE, -Float.MAX_VALUE});
+                                rr[0] = Math.min(rr[0], mm.s[ii]);
+                                rr[1] = Math.max(rr[1], mm.s[ii]);
+                                int pi = new java.util.ArrayList<>(plans.keySet()).indexOf(pp);
+                                pl.append("ABCDEFGH".charAt(Math.min(7, pi)));
+                            }
+                        }
+                        out.append(pl);
+                        int pi = 0;
+                        for (var e : plans.entrySet()) {
+                            var pp = e.getKey();
+                            int s0 = Math.max(0, (int) e.getValue()[0] - 14), s1 = Math.min(pp.length() - 1, (int) e.getValue()[1] + 14);
+                            StringBuilder ks = new StringBuilder();
+                            for (int q = s0; q <= s1; q++) ks.append("GCBWT".charAt(pp.kind[q]));
+                            out.append("\nCR-BOX plan ").append("ABCDEFGH".charAt(Math.min(7, pi++))).append(' ')
+                                .append(pp.edge.a().pos().getX()).append(',').append(pp.edge.a().pos().getZ()).append("->")
+                                .append(pp.edge.b().pos().getX()).append(',').append(pp.edge.b().pos().getZ())
+                                .append(" n=").append(pp.length()).append(" s=").append(e.getValue()[0]).append("..").append(e.getValue()[1])
+                                .append(" kinds[").append(s0).append("..").append(s1).append("]=").append(ks);
+                            StringBuilder sm = new StringBuilder("\nCR-BOX samples");
+                            for (int q = s0; q <= s1; q++)
+                                sm.append(String.format(java.util.Locale.ROOT, " %d:%.1f,%.1f,%.1f,%.2f%c", q, pp.x[q], pp.z[q], pp.y[q], pp.hw[q], "GCBWT".charAt(pp.kind[q])));
+                            out.append(sm);
+                        }
                         CountryRoads.LOG.info(out.toString());
                         return 1;
                     })))))))
@@ -231,6 +271,7 @@ public final class DevCommands {
                         int top = (int) Math.floor(m.surface(i));
                         var biome = level.getBiome(new net.minecraft.core.BlockPos(x, top, z));
                         StringBuilder sb = new StringBuilder("CR-COLUMN " + x + "," + z + " in=" + m.in[i] + " y=" + m.y[i] + " kind=" + m.kind[i]
+                            + " s=" + m.s[i] + " ds=" + m.ds[i] + " slant=" + m.slant[i] + " t=" + m.tx[i] + "," + m.tz[i] + " o=" + m.ox[i] + "," + m.oz[i] + " runU=" + m.runU[i]
                             + " biome=" + biome.unwrapKey().map(k -> k.identifier().toString()).orElse("?") + " palette=" + io.github.profetgit.countryroads.paint.Palette.surface(biome).name() + " :");
                         for (int y = top + 4; y >= top - 8; y--)
                             sb.append(" ").append(y).append("=").append(level.getBlockState(new net.minecraft.core.BlockPos(x, y, z)).getBlock().getDescriptionId().replace("block.minecraft.", ""));

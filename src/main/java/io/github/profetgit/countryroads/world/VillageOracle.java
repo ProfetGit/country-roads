@@ -195,7 +195,7 @@ public final class VillageOracle {
      * names them "birch_curve", "dappled_village_path3". All of them run streets through a processor list named for
      * streets (minecraft:street_plains, kaisyn:village/street_romanian, nova_structures:street_birch).
      */
-    static boolean isStreet(PoolElementStructurePiece pe, String element) {
+    public static boolean isStreet(PoolElementStructurePiece pe, String element) {
         if (element.contains("/streets/")) return true;
         if (element.contains("/terminators/")) return false;
         if (!(pe.getElement() instanceof net.minecraft.world.level.levelgen.structure.pools.SinglePoolElement single)) return false;

@@ -43,6 +43,7 @@ public final class ForgeEntry {
     public ForgeEntry(FMLJavaModLoadingContext context) {
         RoadColumns.store = new MixinStore();
         CountryRoads.init("forge", FMLPaths.CONFIGDIR.get());
+        CountryRoads.modLoaded = net.minecraftforge.fml.ModList::isLoaded;
         RegisterEvent.getBus(context.getModBusGroup()).addListener(ForgeEntry::register);
         BuildCreativeModeTabContentsEvent.BUS.addListener(ForgeEntry::tabs);
         channel = ChannelBuilder.named(CountryRoads.ID + ":main").networkProtocolVersion(1).optional().simpleChannel();

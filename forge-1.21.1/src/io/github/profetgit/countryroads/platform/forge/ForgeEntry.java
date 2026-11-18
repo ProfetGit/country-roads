@@ -52,6 +52,7 @@ public final class ForgeEntry implements Platform {
         Platform.set(this);
         RoadColumns.store = new MixinStore();
         CountryRoads.init("forge", FMLPaths.CONFIGDIR.get());
+        CountryRoads.modLoaded = id -> net.minecraftforge.fml.ModList.get().isLoaded(id);
         IEventBus modBus = FMLJavaModLoadingContext.get().getModEventBus();
         modBus.addListener(ForgeEntry::register);
         modBus.addListener(ForgeEntry::tabs);

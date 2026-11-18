@@ -32,7 +32,7 @@ Open them in Mod Menu on Fabric and Quilt, or from the Mods list on NeoForge and
 
 ![Compatibility](https://raw.githubusercontent.com/ProfetGit/country-roads/main/docs/desc/title-compatibility.webp)
 
-Works with Terralith, Tectonic, Biomes O' Plenty, Geophilic, Dungeons and Taverns, Towns and Towers and Repurposed Structures: modded villages get roads too, and modded village streets are left as they are. On Fabric and Quilt it requires Fabric API; Mod Menu is optional there, for the settings screen.
+Works with Terralith, Tectonic, Biomes O' Plenty, Geophilic, Dungeons and Taverns, Towns and Towers, Repurposed Structures and Streams Reflowing: modded villages get roads too, modded village streets are left as they are, and roads cross Streams Reflowing's streams on their own timber bridges without damming them. On Fabric and Quilt it requires Fabric API; Mod Menu is optional there, for the settings screen.
 
 ![Installation](https://raw.githubusercontent.com/ProfetGit/country-roads/main/docs/desc/title-installation.webp)
 

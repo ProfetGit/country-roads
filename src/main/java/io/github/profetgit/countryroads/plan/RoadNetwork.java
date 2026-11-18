@@ -75,6 +75,7 @@ public final class RoadNetwork {
         this.structures = "false".equals(System.getProperty("countryroads.structures")) || io.github.profetgit.countryroads.Config.world().revision < 1 ? null
             : new io.github.profetgit.countryroads.world.StructureOracle(level, Set.of());
         this.planner.structures = structures;
+        this.planner.revision = io.github.profetgit.countryroads.Config.world().revision;
     }
 
     /** Piece boxes of predicted structures that reach into this chunk (3 blocks around it). */

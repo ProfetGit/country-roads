@@ -1,5 +1,7 @@
 package io.github.profetgit.countryroads.gen;
 
+import io.github.profetgit.countryroads.compat.StreamsReflowing;
+
 import io.github.profetgit.countryroads.plan.ChunkMask;
 import io.github.profetgit.countryroads.plan.EdgePlan;
 import io.github.profetgit.countryroads.plan.RoadNetwork;
@@ -144,7 +146,34 @@ public final class GenContext {
             if (in >= -0.6f) {
                 int top = (int) Math.floor(m.surface(i)), g = c.ground(region, x, z, top);
                 drop = pos.getY() >= Math.min(top, g + 1) && pos.getY() <= Math.max(top + 3, g + 2);
+                // Streams Reflowing carves its channels with features: what it writes at or under the road surface stays
+                // while the chunk is unpainted (the painter decks or fords the water); into a finished road only water
+                // under the road block gets in, so the stream runs on under it instead of ending at the road
+                if (drop && StreamsReflowing.ON && !tracked(state) && pos.getY() <= top) {
+                    if (RoadPainter.NO_PAINT || !painted(region, x >> 4, z >> 4)) drop = false;
+                    else if (pos.getY() < top && !state.getFluidState().isEmpty()) {
+                        drop = false;
+                        // water reaching right under a finished ground road: the road block over it becomes the painter's deck
+                        if (pos.getY() == top - 1 && in >= 0 && m.kind[i] == io.github.profetgit.countryroads.plan.EdgePlan.GROUND) {
+                            BlockPos up = pos.above();
+                            BlockState cur = region.getBlockState(up);
+                            if (!cur.isAir() && cur.getFluidState().isEmpty() && !cur.is(BlockTags.PLANKS) && !cur.is(BlockTags.LOGS)) {
+                                boolean was = c.bypass;
+                                c.bypass = true;
+                                try {
+                                    region.setBlock(up, RoadPainter.streamDeck(m, i), 2);
+                                } finally {
+                                    c.bypass = was;
+                                }
+                            }
+                        }
+                    }
+                }
             }
+            // Streams Reflowing's features for a neighbouring chunk run after this one is painted and clear the air over
+            // their water: they took the fences off a signpost and could take a bridge's rails and posts. Our roadside
+            // timber, posts and lanterns beside a finished road stay.
+            if (!drop && StreamsReflowing.ON && !tracked(state) && in > -4.5f && painted(region, x >> 4, z >> 4) && roadside(region.getBlockState(pos))) drop = true;
             if (!drop && c.track > 0 && in >= -RoadPainter.CUT_REACH && tracked(state) && painted(region, x >> 4, z >> 4)
                 && pos.getY() <= c.ground(region, x, z, (int) Math.floor(m.surface(i))) + BANK_LOG) {
                 drop = true;
@@ -158,6 +187,12 @@ public final class GenContext {
             else c.record(pos, region.getBlockState(pos));
         }
         return drop;
+    }
+
+    /** What the painter builds beside a road (bridge rails and posts, signposts, lamp posts). */
+    private static boolean roadside(BlockState s) {
+        return s.is(BlockTags.FENCES) || s.is(BlockTags.WALLS) || s.is(BlockTags.LOGS) || s.is(BlockTags.PLANKS) || s.is(BlockTags.WOODEN_STAIRS)
+            || s.is(BlockTags.WOODEN_SLABS) || s.is(net.minecraft.world.level.block.Blocks.LANTERN) || s.is(BlockTags.ALL_SIGNS);
     }
 
     /** Logs, roots and huge mushroom blocks: the parts of a tree that hold the rest up. */

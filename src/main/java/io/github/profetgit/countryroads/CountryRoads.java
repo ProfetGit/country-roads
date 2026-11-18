@@ -23,6 +23,8 @@ public final class CountryRoads {
     public static final Logger LOG = LoggerFactory.getLogger("Country Roads");
     public static String loader = "fabric";
     public static Path configDir = Path.of("config");
+    /** Whether another mod is installed (set by the loader glue right after {@link #init}; false until then). */
+    public static java.util.function.Predicate<String> modLoaded = id -> false;
 
     /** Puts one object into a registry while the loader has it open. */
     public interface Registrar {

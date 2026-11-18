@@ -63,6 +63,11 @@ tasks.processResources {
     )
     inputs.properties(props)
     filesMatching("META-INF/mods.toml") { expand(props) }
+    // 26.2: recipe_unlocked takes `recipe`, not `recipes` (src/legacy)
+    if (mc == "26.2") {
+        duplicatesStrategy = DuplicatesStrategy.INCLUDE
+        from(rootProject.file("src/legacy/26.2/resources"))
+    }
 }
 
 tasks.named<Jar>("jar") {

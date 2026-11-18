@@ -4,6 +4,7 @@ import io.github.profetgit.countryroads.CountryRoads;
 import io.github.profetgit.countryroads.plan.ChunkMask;
 import io.github.profetgit.countryroads.plan.RoadNetwork;
 import io.github.profetgit.countryroads.world.RoadColumns;
+import io.github.profetgit.countryroads.world.VillageOracle;
 import it.unimi.dsi.fastutil.longs.Long2IntOpenHashMap;
 import java.util.ArrayList;
 import java.util.List;
@@ -24,7 +25,9 @@ import net.minecraft.world.level.levelgen.structure.StructureStart;
 
 /**
  * Painted road columns inside structure piece boxes at the road's height (road y within the box, -1..+2): a road cut
- * through the structure. Village street/terminator pieces are counted apart (roads dock there on purpose).
+ * through the structure. Village street/terminator pieces (VillageOracle.isStreet: modded streets too) are counted apart
+ * (roads dock there on purpose), and so are a street-less village's door walks (its road docks at a door) and columns
+ * the road mask has no road on (street blocks swapped in place).
  */
 final class StructCheck {
     private StructCheck() {}
@@ -46,6 +49,9 @@ final class StructCheck {
         int[] next = {0};
         Long2IntOpenHashMap roadY = new Long2IntOpenHashMap();
         roadY.defaultReturnValue(Integer.MIN_VALUE);
+        // road columns the mask has no road on: village street blocks StreetPainter swapped at the same height (in a
+        // town centre's or house's box when a street template reaches into it), house paths; never a cut
+        it.unimi.dsi.fastutil.longs.LongOpenHashSet unmasked = new it.unimi.dsi.fastutil.longs.LongOpenHashSet();
         List<Object[]> starts = new ArrayList<>();
         var registry = level.registryAccess().lookupOrThrow(Registries.STRUCTURE);
         DevCommands.queue(() -> {
@@ -64,6 +70,7 @@ final class StructCheck {
                     if (!cols.road(lx, lz)) continue;
                     int y = m.any() ? (int) Math.floor(m.surface(ChunkMask.idx(lx, lz))) : Integer.MIN_VALUE;
                     roadY.put(BlockPos.asLong((cx << 4) + lx, 0, (cz << 4) + lz), y);
+                    if (m.any() && m.in[ChunkMask.idx(lx, lz)] == Float.NEGATIVE_INFINITY) unmasked.add(BlockPos.asLong((cx << 4) + lx, 0, (cz << 4) + lz));
                 }
             }
             if (next[0] < total) return false;
@@ -73,18 +80,28 @@ final class StructCheck {
             for (Object[] s : starts) {
                 String id = (String) s[0];
                 StructureStart st = (StructureStart) s[1];
-                int[] agg = per.computeIfAbsent(id, k -> new int[4]);
+                int[] agg = per.computeIfAbsent(id, k -> new int[6]);
                 agg[0]++;
-                int cols = 0, streetCols = 0;
+                int cols = 0, streetCols = 0, repaintCols = 0, doorCols = 0, inPred = 0, inPredOther = 0;
                 String firstPiece = null;
                 int[] firstAt = null;
+                // a village: the planner's prediction of it (a cut inside its predicted pieces means the mask let the road
+                // through; outside them, the prediction missed the real layout)
+                VillageOracle.Footprint pred = null;
+                String predAt = null;
+                int cx0 = st.getChunkPos().x(), cz0 = st.getChunkPos().z();
+                for (var v : n.oracle.find(cx0 - 1, cz0 - 1, cx0 + 1, cz0 + 1))
+                    if (v.structure().toString().equals(id)) {
+                        pred = n.oracle.footprint(v);
+                        predAt = v.chunk().x() + "," + v.chunk().z();
+                    }
                 for (StructurePiece p : st.getPieces()) {
                     BoundingBox b = p.getBoundingBox();
                     boolean street = false;
                     String name = p.getClass().getSimpleName();
                     if (p instanceof PoolElementStructurePiece pe) {
                         String el = pe.getElement().toString();
-                        street = el.contains("/streets/") || el.contains("/terminators/");
+                        street = VillageOracle.isStreet(pe, el) || el.contains("/terminators/");
                         int a = el.indexOf("Left["), bb = el.indexOf(']', a + 1);
                         name = a >= 0 && bb > a ? el.substring(a + 5, bb) : el;
                     }
@@ -93,8 +110,12 @@ final class StructCheck {
                             int y = roadY.get(BlockPos.asLong(x, 0, z));
                             if (y == Integer.MIN_VALUE || y < b.minY() - 1 || y > b.maxY() + 2) continue;
                             if (street) streetCols++;
+                            else if (unmasked.contains(BlockPos.asLong(x, 0, z))) repaintCols++;
+                            else if (pred != null && pred.onDoorWalk(x, z)) doorCols++;
                             else {
                                 cols++;
+                                if (pred != null && pred.contains(x, z, 0)) inPred++;
+                                if (pred != null && pred.inOther(x, z, 0)) inPredOther++;
                                 if (firstAt == null) {
                                     firstAt = new int[]{x, y, z};
                                     firstPiece = name;
@@ -103,18 +124,23 @@ final class StructCheck {
                         }
                 }
                 agg[3] += streetCols;
+                agg[4] += repaintCols;
+                agg[5] += doorCols;
                 if (cols > 0) {
                     agg[1]++;
                     agg[2] += cols;
                     hitCols += cols;
                     if (shown++ < 60)
                         report(src, "CR-STRUCT-HIT " + id + " start=" + st.getChunkPos().x() + "," + st.getChunkPos().z() + " cols=" + cols
-                            + " at " + firstAt[0] + " " + firstAt[1] + " " + firstAt[2] + " piece=" + firstPiece);
+                            + " at " + firstAt[0] + " " + firstAt[1] + " " + firstAt[2] + " piece=" + firstPiece
+                            + (pred == null ? "" : " predicted=" + predAt + " pieces=" + pred.pieces().size() + "/" + st.getPieces().size()
+                                + " inPredicted=" + inPred + " inPredictedHouses=" + inPredOther));
                 }
             }
             for (Map.Entry<String, int[]> e : per.entrySet()) {
                 int[] v = e.getValue();
-                report(src, "CR-STRUCT-TYPE " + e.getKey() + " starts=" + v[0] + " cut=" + v[1] + " cols=" + v[2] + (v[3] > 0 ? " streetCols=" + v[3] : ""));
+                report(src, "CR-STRUCT-TYPE " + e.getKey() + " starts=" + v[0] + " cut=" + v[1] + " cols=" + v[2] + (v[3] > 0 ? " streetCols=" + v[3] : "")
+                    + (v[4] > 0 ? " repaintCols=" + v[4] : "") + (v[5] > 0 ? " doorCols=" + v[5] : ""));
             }
             report(src, "CR-STRUCT " + (hitCols == 0 ? "PASS" : "FAIL") + " chunks=" + total + " roadCols=" + roadY.size() + " starts=" + starts.size() + " cutCols=" + hitCols);
             return true;

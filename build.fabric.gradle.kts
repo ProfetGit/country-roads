@@ -68,6 +68,11 @@ tasks.processResources {
     inputs.properties(props)
     exclude("META-INF/neoforge.mods.toml", "META-INF/mods.toml", "countryroads.chunkdata.mixins.json")
     filesMatching("fabric.mod.json") { expand(props) }
+    // 26.2: recipe_unlocked takes `recipe`, not `recipes` (src/legacy)
+    if (mc == "26.2") {
+        duplicatesStrategy = DuplicatesStrategy.INCLUDE
+        from(rootProject.file("src/legacy/26.2/resources"))
+    }
 }
 
 tasks.named<Jar>("jar") {

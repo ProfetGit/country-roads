@@ -148,6 +148,18 @@ public final class ChunkMask {
     /** Columns kept clear around another structure's piece boxes. */
     static final int STRUCT_MARGIN = 2;
 
+    /**
+     * A sign, lamp, orchard tree or prop the painter leaves out for a structure: beside one of its pieces and at its
+     * height (the band the road itself stops short in). Pieces far above or below, such as mineshaft corridors under
+     * the road, don't count: 1.0.0-beta.5 tested x/z only and lost the lamps and props over every mineshaft.
+     */
+    public static boolean blockedByStructure(EdgePlan.Decor d, List<net.minecraft.world.level.levelgen.structure.BoundingBox> structures) {
+        for (net.minecraft.world.level.levelgen.structure.BoundingBox b : structures)
+            if (d.x() >= b.minX() - STRUCT_MARGIN - 1 && d.x() <= b.maxX() + STRUCT_MARGIN + 1 && d.z() >= b.minZ() - STRUCT_MARGIN - 1 && d.z() <= b.maxZ() + STRUCT_MARGIN + 1
+                && d.y() >= b.minY() - 4 && d.y() <= b.maxY() + 3) return true;
+        return false;
+    }
+
     public static ChunkMask build(int cx, int cz, List<EdgePlan> plans, List<VillageOracle.Footprint> villages, List<EdgePlan> near,
                                  List<Field> fields, List<net.minecraft.world.level.levelgen.structure.BoundingBox> structures) {
         ChunkMask m = new ChunkMask(cx, cz);
@@ -253,12 +265,7 @@ public final class ChunkMask {
                         m.in[c] = Float.NEGATIVE_INFINITY;
                         m.nofield[c] = true;
                     }
-            if (!structures.isEmpty())
-                m.decor.removeIf(d -> {
-                    for (net.minecraft.world.level.levelgen.structure.BoundingBox b : structures)
-                        if (d.x() >= b.minX() - STRUCT_MARGIN - 1 && d.x() <= b.maxX() + STRUCT_MARGIN + 1 && d.z() >= b.minZ() - STRUCT_MARGIN - 1 && d.z() <= b.maxZ() + STRUCT_MARGIN + 1) return true;
-                    return false;
-                });
+            if (!structures.isEmpty()) m.decor.removeIf(d -> blockedByStructure(d, structures));
             for (VillageOracle.Footprint f : villages)
                 for (int lx = 0; lx < 16; lx++)
                     for (int lz = 0; lz < 16; lz++) {

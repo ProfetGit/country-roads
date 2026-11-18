@@ -1,5 +1,12 @@
 # Changelog
 
+## 1.0.0-beta.6
+
+- Works with Streams Reflowing: where a road meets one of its streams, the road crosses on the same timber bridge it builds over rivers (a three-wide plank deck, fence rails, log posts, lanterns on every other pair of posts) at its own height, with the stream running on underneath. On a diagonal road the bridge is laid straight, with a short piece of road leading onto each end. A stream crossing next to one of the road's swamp boardwalks, or a long shallow stretch of water over the road, gets the boardwalk's own slab-and-trapdoor walkway laid on the water instead, joining the boardwalk; a creek only a block or two across is forded. Bridges never dip in the middle, never step a full block, and run on in line with a bridge the road already builds. Roads and their banks no longer dam or fill its streams, and a signpost or lamp planned on the water, a bridge or a river it deepened stands on the bank instead. Worlds without Streams Reflowing generate exactly as before.
+- Lamp posts, signposts, roadside props and orchard trees are back on roads that pass over underground structures such as mineshafts. Beta.5 left them out wherever a structure lay anywhere below the road, not only where one stands beside it.
+- No more 1.5-block steps where a road joins another one at a narrow angle, or turns sharply right off the end of a bridge: the joining road meets the other road's height where the two already touch, and the ground beside the bridge end is raised to the deck. This applies to new worlds; worlds created before this version keep their roads exactly as planned.
+- Minecraft 26.2: the Surveyor's Stake recipe shows up in the recipe book again once you pick up paper or a stick (the unlock failed to load and logged an error at startup since beta.3; crafting it by hand always worked).
+
 ## 1.0.0-beta.5
 
 - Roads no longer cut through structures: pillager outposts, ruined portals, desert and jungle temples, witch huts, igloos, trail ruins and badlands mineshafts are seen when a road is planned. The road steers around them, and where it must pass close it stops short of the structure instead of carving into it. This applies to new worlds; worlds created before this version keep their roads exactly as planned, so no seams appear at old chunks.

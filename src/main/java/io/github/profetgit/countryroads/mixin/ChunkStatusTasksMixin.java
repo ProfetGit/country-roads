@@ -38,13 +38,24 @@ abstract class ChunkStatusTasksMixin {
             ChunkMask m = GenContext.mask(chunk.getPos());
             var network = io.github.profetgit.countryroads.plan.RoadNetwork.get(context.level());
             if (m != null) RoadPainter.paint(chunk, m, network == null ? java.util.List.of() : network.streets(chunk.getPos().x(), chunk.getPos().z()),
-                (x, z) -> countryroads$neighbourTop(chunks, x, z));
+                (x, z) -> countryroads$neighbourTop(chunks, x, z), (cx, cz) -> countryroads$painted(chunks, cx, cz));
             else if (network != null)
                 io.github.profetgit.countryroads.world.RoadColumns.store(chunk, io.github.profetgit.countryroads.world.RoadColumns.empty());
         } catch (Throwable t) {
             CountryRoads.LOG.error("Road painting failed for chunk {}", chunk.getPos(), t);
         } finally {
             GenContext.end();
+        }
+    }
+
+    // A neighbouring chunk once it is painted (its FEATURES step done), else null.
+    private static ChunkAccess countryroads$painted(StaticCache2D<GenerationChunkHolder> chunks, int cx, int cz) {
+        try {
+            if (!chunks.contains(cx, cz)) return null;
+            ChunkAccess nb = chunks.get(cx, cz).getChunkIfPresentUnchecked(net.minecraft.world.level.chunk.status.ChunkStatus.FEATURES);
+            return nb != null && io.github.profetgit.countryroads.world.RoadColumns.handled(nb) ? nb : null;
+        } catch (RuntimeException e) {
+            return null;
         }
     }
 
@@ -103,13 +114,24 @@ abstract class ChunkStatusTasksMixin {
             ChunkMask m = GenContext.mask(chunk.getPos());
             var network = io.github.profetgit.countryroads.plan.RoadNetwork.get(level.getLevel());
             if (m != null) RoadPainter.paint(chunk, m, network == null ? java.util.List.of() : network.streets(chunk.getPos().x(), chunk.getPos().z()),
-                (x, z) -> countryroads$neighbourTop((WorldGenRegion) level, x, z));
+                (x, z) -> countryroads$neighbourTop((WorldGenRegion) level, x, z), (cx, cz) -> countryroads$painted((WorldGenRegion) level, cx, cz));
             else if (network != null)
                 io.github.profetgit.countryroads.world.RoadColumns.store(chunk, io.github.profetgit.countryroads.world.RoadColumns.empty());
         } catch (Throwable t) {
             CountryRoads.LOG.error("Road painting failed for chunk {}", chunk.getPos(), t);
         } finally {
             GenContext.end();
+        }
+    }
+
+    // A neighbouring chunk once it is painted, else null.
+    private static ChunkAccess countryroads$painted(WorldGenRegion region, int cx, int cz) {
+        try {
+            if (!region.hasChunk(cx, cz)) return null;
+            ChunkAccess nb = region.getChunk(cx, cz);
+            return nb != null && io.github.profetgit.countryroads.world.RoadColumns.handled(nb) ? nb : null;
+        } catch (RuntimeException e) {
+            return null;
         }
     }
 

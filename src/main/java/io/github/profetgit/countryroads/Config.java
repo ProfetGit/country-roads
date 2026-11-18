@@ -15,7 +15,7 @@ import net.minecraft.world.level.storage.LevelResource;
  */
 public final class Config {
     /** The road generation revision new worlds get (see {@link Gen#revision}). */
-    public static final int REVISION = 1;
+    public static final int REVISION = 2;
 
     /** World generation (fixed per world). */
     public static final class Gen {
@@ -31,8 +31,10 @@ public final class Config {
         public int wheatFields = 100;
         /**
          * Road generation revision the world was made with; a world's file without it is 0 (made before 1.0.0-beta.5).
-         * 0: roads may run through outposts, ruined portals and other structures. 1: they go around them. An existing
-         * world keeps its revision: newer routing there would not meet the roads already generated.
+         * 0: roads may run through outposts, ruined portals and other structures. 1: they go around them. 2: a road
+         * joining another meets its height where the two already overlap, and a sharp bend at a bridge end is evened
+         * (1.5-block steps). An existing world keeps its revision: newer routing there would not meet the roads already
+         * generated.
          */
         public int revision = REVISION;
 

@@ -75,7 +75,7 @@ final class PropChecks {
                     for (EdgePlan p : plans)
                         if (p.decor.contains(d))
                             inVillage |= n.oracle.footprint(p.edge.a()).contains(d.x(), d.z(), 8) || n.oracle.footprint(p.edge.b()).contains(d.x(), d.z(), 8);
-                    if (!inVillage) todo.add(d);
+                    if (!inVillage && !ChunkMask.blockedByStructure(d, n.structureBoxes(d.x() >> 4, d.z() >> 4))) todo.add(d);
                 }
                 gathered[0] = true;
                 return false;
