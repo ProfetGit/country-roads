@@ -14,3 +14,4 @@ https://cdn.modrinth.com/data/9s6osm5g/versions/fg2uyxOW/cloth-config-fabric-26.
 streams/: https://cdn.modrinth.com/data/oLS8HdJ1/versions/NGBAwGh3/StreamsReflowing-26.3-fabric-2.17.5.jar
 streams/: https://cdn.modrinth.com/data/oLS8HdJ1/versions/rF5gb89d/StreamsReflowing-1.21.1-fabric-2.17.5.jar
 streams/: https://cdn.modrinth.com/data/oLS8HdJ1/versions/cthBa6p6/StreamsReflowing-26.3-neoforge-2.17.5.jar
+https://github.com/Pandaismyname1/ultraterraforged/releases/download/1.0.3%2B1.20.1/ultraterraforged-1.0.3%2B1.20.1-forge.jar

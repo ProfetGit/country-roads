@@ -48,6 +48,7 @@ def main() -> int:
     ap.add_argument("--mods", nargs="*", default=[])
     ap.add_argument("--jar", help="this Country Roads jar instead of the build's")
     ap.add_argument("--loader", default="fabric", choices=ms.ALL_LOADERS, help="server loader (Quilt runs the Fabric jar)")
+    ap.add_argument("--level-type", default="", help="server.properties level-type, e.g. ultraterraforged:ultraterraforged")
     ap.add_argument("--port", type=int, default=25591)
     ap.add_argument("--timeout", type=float, default=900)
     ap.add_argument("--xmx", default="4G")
@@ -71,7 +72,8 @@ def main() -> int:
     (work / "server.properties").write_text(
         f"online-mode=false\nserver-ip=127.0.0.1\nserver-port={a.port}\nlevel-seed={a.seed}\n"
         "generate-structures=true\nview-distance=4\nsimulation-distance=4\nspawn-protection=0\ndifficulty=peaceful\n"
-        "max-tick-time=-1\npause-when-empty-seconds=-1\nsync-chunk-writes=false\nenable-query=false\nenable-rcon=false\n")
+        "max-tick-time=-1\npause-when-empty-seconds=-1\nsync-chunk-writes=false\nenable-query=false\nenable-rcon=false\n"
+        + (f"level-type={a.level_type}\n" if a.level_type else ""))
     fapi = [ms.fabric_api(a.mc)] if a.loader in ("fabric", "quilt") else []
     for j in [*([] if a.no_mod else [Path(a.jar) if a.jar else mod_jar(a.loader, a.mc)]), *fapi, *map(Path, a.mods)]:
         shutil.copy(j, work / "mods")

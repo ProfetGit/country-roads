@@ -1,5 +1,10 @@
 # Changelog
 
+## 1.0.0-beta.7
+
+- Big modpacks no longer stall a world while it loads: a village standing over open ocean (an airship village, say) gets no road planned to it, instead of every nearby village spending seconds searching for a route that cannot exist. Roads in every world generate exactly as before.
+- Works with UltraTerraForged: creating or loading a world no longer sits at 0% while roads are planned. Country Roads now reads the mod's own heightmap, one lookup per column instead of a whole noise column (about ten times faster, within one block of the old numbers in 94% of columns), so road planning on a UltraTerraForged world is about six times faster. Worlds without it are unchanged.
+
 ## 1.0.0-beta.6
 
 - Works with Streams Reflowing: where a road meets one of its streams, the road crosses on the same timber bridge it builds over rivers (a three-wide plank deck, fence rails, log posts, lanterns on every other pair of posts) at its own height, with the stream running on underneath. On a diagonal road the bridge is laid straight, with a short piece of road leading onto each end. A stream crossing next to one of the road's swamp boardwalks, or a long shallow stretch of water over the road, gets the boardwalk's own slab-and-trapdoor walkway laid on the water instead, joining the boardwalk; a creek only a block or two across is forded. Bridges never dip in the middle, never step a full block, and run on in line with a bridge the road already builds. Roads and their banks no longer dam or fill its streams, and a signpost or lamp planned on the water, a bridge or a river it deepened stands on the bank instead. Worlds without Streams Reflowing generate exactly as before.

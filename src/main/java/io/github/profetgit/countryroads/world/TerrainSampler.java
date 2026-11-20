@@ -34,6 +34,8 @@ public final class TerrainSampler {
     private final RandomState randomState;
     private final ThreadLocal<GenCompat.Biomes> biomes;
     private final ConcurrentHashMap<Long, Sample> cache = new ConcurrentHashMap<>();
+    private volatile io.github.profetgit.countryroads.compat.UltraTerraForged utf;
+    private volatile boolean utfChecked;
 
     public TerrainSampler(ServerLevel level) {
         this.level = level;
@@ -68,7 +70,33 @@ public final class TerrainSampler {
         return biomes.get().at(QuartPos.fromBlock(x), QuartPos.fromBlock(y), QuartPos.fromBlock(z));
     }
 
+    /** UltraTerraForged's own heightmap when this world uses it (one lookup per column instead of a whole noise column). */
+    private io.github.profetgit.countryroads.compat.UltraTerraForged utf() {
+        var u = utf;
+        if (u == null && !utfChecked) {
+            u = io.github.profetgit.countryroads.compat.UltraTerraForged.of(randomState);
+            utf = u;
+            utfChecked = true;
+        }
+        return u;
+    }
+
+    /** The slow noise-column sample, also used to check the fast one. */
+    public Sample sampleColumn(int x, int z) {
+        return computeColumn(x, z);
+    }
+
     private Sample compute(int x, int z) {
+        var u = utf();
+        if (u != null) {
+            var c = u.at(x, z);
+            Holder<Biome> b = biome(x, Math.max(c.ground(), c.water()), z);
+            return new Sample(c.ground(), c.water(), b.is(BiomeTags.IS_OCEAN) || b.is(BiomeTags.IS_DEEP_OCEAN), b.is(BiomeTags.IS_RIVER));
+        }
+        return computeColumn(x, z);
+    }
+
+    private Sample computeColumn(int x, int z) {
         NoiseColumn col = generator.getBaseColumn(x, z, level, randomState);
         int min = level.getMinY();
         int water = Integer.MIN_VALUE;

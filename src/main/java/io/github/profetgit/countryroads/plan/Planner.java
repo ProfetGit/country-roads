@@ -153,6 +153,10 @@ public final class Planner {
             for (int i = 0; i < t.p.length(); i += 4)
                 trunkCells.add(Router.cellKey(Math.floorDiv((int) t.p.x[i], Router.CELL), Math.floorDiv((int) t.p.z[i], Router.CELL)));
         it.unimi.dsi.fastutil.longs.LongOpenHashSet avoid = avoidCells(ja, jb, ellipse(e.length()));
+        int gi = Math.floorDiv(jb[0], Router.CELL), gj = Math.floorDiv(jb[1], Router.CELL);
+        var goal = terrain.sample(gi * Router.CELL + Router.CELL / 2, gj * Router.CELL + Router.CELL / 2);
+        if (goal.ocean() && goal.wet() && (gi != Math.floorDiv(ja[0], Router.CELL) || gj != Math.floorDiv(ja[1], Router.CELL)))
+            return noPlan(e, "goal in open ocean " + jb[0] + "," + jb[1]);
         Router.Result r = router.route(ja[0], ja[1], jb[0], jb[1], ellipse(e.length()), trunkCells::contains, avoid::contains);
         if (r == null) return noPlan(e, "no route " + ja[0] + "," + ja[1] + " -> " + jb[0] + "," + jb[1]);
         double straight = Math.hypot(jb[0] - ja[0], jb[1] - ja[1]);

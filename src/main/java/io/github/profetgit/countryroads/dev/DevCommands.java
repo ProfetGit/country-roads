@@ -463,6 +463,8 @@ public final class DevCommands {
                 CountryRoads.LOG.info("CR-IDLE");
                 return 1;
             }))
+            .then(Commands.literal("utfcompare")
+                .then(Commands.argument("count", IntegerArgumentType.integer(1, 5000)).executes(DevCommands::utfCompare)))
             .then(Commands.literal("sample")
                 .then(Commands.argument("count", IntegerArgumentType.integer(1, 100000)).executes(DevCommands::sample))));
     }
@@ -527,6 +529,40 @@ public final class DevCommands {
             src.sendSuccess(() -> Component.literal(line), false);
             return true;
         });
+        return 1;
+    }
+
+    private static int utfCompare(CommandContext<CommandSourceStack> c) {
+        ServerLevel level = c.getSource().getLevel();
+        int n = IntegerArgumentType.getInteger(c, "count");
+        TerrainSampler sampler = new TerrainSampler(level);
+        RandomSource rnd = RandomSource.create(7);
+        long fastNs = 0, slowNs = 0;
+        int within1 = 0, within3 = 0, worst = 0, wetAgree = 0, waterAgree = 0;
+        long sumDiff = 0;
+        int shown = 0;
+        for (int i = 0; i < n; i++) {
+            int x = rnd.nextInt(8000) - 4000, z = rnd.nextInt(8000) - 4000;
+            long t0 = System.nanoTime();
+            var f = sampler.sample(x, z);
+            long t1 = System.nanoTime();
+            var s = sampler.sampleColumn(x, z);
+            long t2 = System.nanoTime();
+            fastNs += t1 - t0;
+            slowNs += t2 - t1;
+            int d = Math.abs(f.ground() - s.ground());
+            sumDiff += d;
+            worst = Math.max(worst, d);
+            if (d <= 1) within1++;
+            if (d <= 3) within3++;
+            if ((d > 1 || f.wet() != s.wet() || f.water() != s.water()) && shown++ < 25) CountryRoads.LOG.info("CR-UTFDIFF " + x + "," + z + " fast=" + f + " slow=" + s);
+            if (f.wet() == s.wet()) wetAgree++;
+            if (f.water() == s.water()) waterAgree++;
+        }
+        String line = String.format("CR-UTFCOMPARE n=%d fastUs=%.1f slowUs=%.1f groundDiffMean=%.2f max=%d within1=%d within3=%d wetAgree=%d waterEqual=%d",
+            n, fastNs / 1000.0 / n, slowNs / 1000.0 / n, sumDiff / (double) n, worst, within1, within3, wetAgree, waterAgree);
+        CountryRoads.LOG.info(line);
+        c.getSource().sendSuccess(() -> Component.literal(line), false);
         return 1;
     }
 
